@@ -24,4 +24,13 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
     app.include_router(stats_router, prefix="/stats", tags=["stats"])
     app.include_router(backtest_router, prefix="/backtest", tags=["backtest"])
     app.include_router(games_router, prefix="/games", tags=["games"])
+
+    import os
+    static_dir = os.path.join(os.path.dirname(__file__), "../../frontend/dist")
+    if os.path.exists(static_dir):
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
+
     return app
+
+app = create_app()
