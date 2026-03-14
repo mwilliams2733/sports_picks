@@ -1,5 +1,5 @@
 from backend.analysis.strategy import Strategy
-from backend.analysis.odds_utils import calculate_payout
+from backend.pipeline.grader import grade_pick
 from backend.data_types import GameData
 
 class Backtester:
@@ -15,10 +15,12 @@ class Backtester:
         for game, home_score, away_score in games_with_results:
             picks = self.strategy.predict(game)
             for pick in picks:
-                result = self._grade_pick(pick, home_score, away_score)
+                result, payout = grade_pick(
+                    pick.pick_type, pick.pick_value, home_score, away_score, pick.odds_at_pick
+                )
                 if result == "win":
                     wins += 1
-                    total_profit += calculate_payout(pick.odds_at_pick)
+                    total_profit += payout
                 elif result == "loss":
                     losses += 1
                     total_profit -= 1.0
@@ -36,11 +38,3 @@ class Backtester:
             "roi": round((total_profit / (total if total > 0 else 1)) * 100, 2),
             "total_profit": round(total_profit, 4), "picks": pick_details,
         }
-
-    def _grade_pick(self, pick, home_score: int, away_score: int) -> str:
-        if pick.pick_type == "moneyline":
-            if "HOME" in pick.pick_value:
-                return "win" if home_score > away_score else "loss"
-            else:
-                return "win" if away_score > home_score else "loss"
-        return "loss"

@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 
 const NAV_ITEMS = [
   { path: '/', label: "Today's Picks" },
+  { path: '/props', label: 'Player Props' },
   { path: '/backtesting', label: 'Backtesting' },
   { path: '/track-record', label: 'Track Record' },
 ];

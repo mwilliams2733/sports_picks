@@ -67,5 +67,58 @@ class OddsAPICollector:
                         result["over_under"] = o["point"]
         return result
 
+    async def fetch_events(self, sport: str) -> list[dict]:
+        """Fetch upcoming event IDs for a sport (needed for player props)."""
+        sport_key = SPORT_KEYS[sport]
+        url = f"{self.BASE_URL}/{sport_key}/events"
+        params = {"apiKey": self.api_key}
+        response = await self.client.get(url, params=params)
+        response.raise_for_status()
+        self.requests_remaining = int(response.headers.get("x-requests-remaining", 0))
+        return response.json()
+
+    async def fetch_player_props(self, sport: str, event_id: str, markets: list[str] | None = None) -> list[dict]:
+        """Fetch player prop odds for a specific event."""
+        sport_key = SPORT_KEYS[sport]
+        if markets is None:
+            markets = PROP_MARKETS.get(sport, ["player_points"])
+        url = f"{self.BASE_URL}/{sport_key}/events/{event_id}/odds"
+        params = {
+            "apiKey": self.api_key,
+            "regions": "us",
+            "markets": ",".join(markets),
+            "oddsFormat": "american",
+        }
+        response = await self.client.get(url, params=params)
+        response.raise_for_status()
+        self.requests_remaining = int(response.headers.get("x-requests-remaining", 0))
+        data = response.json()
+
+        props = []
+        for bk in data.get("bookmakers", []):
+            for market in bk.get("markets", []):
+                for outcome in market.get("outcomes", []):
+                    if "description" not in outcome:
+                        continue
+                    props.append({
+                        "event_id": event_id,
+                        "bookmaker": bk["key"],
+                        "market": market["key"],
+                        "player_name": outcome["description"],
+                        "outcome": outcome["name"],  # "Over" or "Under"
+                        "line": outcome.get("point"),
+                        "odds": outcome["price"],
+                    })
+        return props
+
     async def close(self):
         await self.client.aclose()
+
+
+# Key prop markets per sport (most popular, keeps API usage low)
+PROP_MARKETS = {
+    "nba": ["player_points", "player_rebounds", "player_assists", "player_threes"],
+    "nfl": ["player_pass_yds", "player_rush_yds", "player_reception_yds", "player_anytime_td"],
+    "ncaab": ["player_points", "player_rebounds", "player_assists"],
+    "ncaaf": ["player_pass_yds", "player_rush_yds", "player_anytime_td"],
+}

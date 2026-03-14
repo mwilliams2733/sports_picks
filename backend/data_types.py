@@ -38,6 +38,22 @@ class Pick:
     odds_at_pick: int
 
 @dataclass
+class PropAnalysis:
+    player_name: str
+    market: str
+    line: float
+    outcome: str          # "Over" or "Under"
+    season_avg: float | None
+    recent_avg: float | None
+    projection: float
+    edge_pct: float
+    confidence: int
+    source: str
+    is_stale: bool
+    game_id: int
+    odds: int
+
+@dataclass
 class GameData:
     game_id: int
     sport: str

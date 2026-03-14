@@ -1,8 +1,8 @@
 import type { StrategyData } from '../types';
 
-interface Props { strategies: StrategyData[]; onPromote: (id: number) => void; }
+interface Props { strategies: StrategyData[]; onPromote: (id: number) => void; onEdit?: (strategy: StrategyData) => void; }
 
-export default function StrategyList({ strategies, onPromote }: Props) {
+export default function StrategyList({ strategies, onPromote, onEdit }: Props) {
   return (
     <div>
       {strategies.map(s => (
@@ -12,13 +12,21 @@ export default function StrategyList({ strategies, onPromote }: Props) {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <strong>{s.name}</strong> {s.is_active && '(Active)'}
+            {s.sport && <span style={{ fontSize: '0.75rem', opacity: 0.5, marginLeft: '0.5rem' }}>{s.sport.toUpperCase()}</span>}
             <div style={{ fontSize: '0.8rem', opacity: 0.6 }}>{s.description}</div>
           </div>
-          {!s.is_active && (
-            <button onClick={() => onPromote(s.id)} style={{
-              background: '#1e40af', color: '#fff', border: 'none',
-              borderRadius: '4px', padding: '0.3rem 0.75rem', cursor: 'pointer' }}>Promote</button>
-          )}
+          <div style={{ display: 'flex', gap: '0.3rem' }}>
+            {onEdit && (
+              <button onClick={() => onEdit(s)} style={{
+                background: '#333', color: '#ccc', border: '1px solid #555',
+                borderRadius: '4px', padding: '0.3rem 0.75rem', cursor: 'pointer' }}>Edit</button>
+            )}
+            {!s.is_active && (
+              <button onClick={() => onPromote(s.id)} style={{
+                background: '#1e40af', color: '#fff', border: 'none',
+                borderRadius: '4px', padding: '0.3rem 0.75rem', cursor: 'pointer' }}>Promote</button>
+            )}
+          </div>
         </div>
       ))}
     </div>

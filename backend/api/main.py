@@ -19,11 +19,15 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
     from backend.api.stats import router as stats_router
     from backend.api.backtest import router as backtest_router
     from backend.api.games import router as games_router
+    from backend.api.props import router as props_router
+    from backend.api.pipeline_api import router as pipeline_router
 
     app.include_router(picks_router, prefix="/picks", tags=["picks"])
     app.include_router(stats_router, prefix="/stats", tags=["stats"])
     app.include_router(backtest_router, prefix="/backtest", tags=["backtest"])
     app.include_router(games_router, prefix="/games", tags=["games"])
+    app.include_router(props_router, prefix="/props", tags=["props"])
+    app.include_router(pipeline_router, prefix="/pipeline", tags=["pipeline"])
 
     import os
     static_dir = os.path.join(os.path.dirname(__file__), "../../frontend/dist")

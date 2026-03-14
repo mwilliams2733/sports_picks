@@ -18,7 +18,7 @@ def test_create_all_tables(db_engine):
         )).scalars().all()
     expected = [
         "api_usage", "backtest_picks", "backtest_runs", "elo_ratings",
-        "games", "odds", "pick_results", "picks", "strategies",
-        "team_stats", "teams"
+        "games", "odds", "pick_results", "picks", "player_props",
+        "player_stats", "strategies", "team_stats", "teams"
     ]
     assert sorted(tables) == sorted(expected)

@@ -67,6 +67,7 @@ class StrategyModel(Base):
     config_json = Column(Text, nullable=False)
     is_active = Column(Boolean, nullable=False, default=False)
     sport = Column(String, nullable=True)
+    strategy_type = Column(String, nullable=False, default="game")  # "game" or "prop"
 
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
@@ -108,6 +109,46 @@ class PickResult(Base):
     result = Column(String, nullable=False)
     payout = Column(Float, nullable=False, default=0.0)
     pick = relationship("PickModel")
+
+class PlayerProp(Base):
+    __tablename__ = "player_props"
+    id = Column(Integer, primary_key=True)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
+    bookmaker = Column(String, nullable=False)
+    market = Column(String, nullable=False)
+    player_name = Column(String, nullable=False)
+    outcome = Column(String, nullable=False)  # "Over" or "Under"
+    line = Column(Float, nullable=True)
+    odds = Column(Integer, nullable=False)
+    fetched_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
+    game = relationship("Game")
+
+
+class PlayerStat(Base):
+    __tablename__ = "player_stats"
+    id = Column(Integer, primary_key=True)
+    player_name = Column(String, nullable=False)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    sport = Column(String, nullable=False)
+    stat_type = Column(String, nullable=False)  # "season_avg" or "game_log"
+    game_date = Column(Date, nullable=True)      # null for season_avg
+    minutes = Column(Float, nullable=True)
+    points = Column(Float, nullable=True)
+    rebounds = Column(Float, nullable=True)
+    assists = Column(Float, nullable=True)
+    threes = Column(Float, nullable=True)
+    steals = Column(Float, nullable=True)
+    blocks = Column(Float, nullable=True)
+    turnovers = Column(Float, nullable=True)
+    pass_yards = Column(Float, nullable=True)
+    rush_yards = Column(Float, nullable=True)
+    rec_yards = Column(Float, nullable=True)
+    touchdowns = Column(Float, nullable=True)
+    source = Column(String, nullable=False)
+    fetched_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
+    is_stale = Column(Boolean, default=False)
+    team = relationship("Team")
+
 
 class ApiUsage(Base):
     __tablename__ = "api_usage"

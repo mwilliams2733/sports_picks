@@ -4,12 +4,22 @@ from sqlalchemy.orm import Session
 from backend.models import Game, PickModel, StrategyModel, Odds, TeamStat, EloRating
 from backend.data_types import GameData, TeamStats, OddsSnapshot
 from backend.analysis.variants.ensemble import EnsembleStrategy
+from backend.analysis.variants.recent_form import RecentFormStrategy
+from backend.analysis.variants.value_only import ValueOnlyStrategy
+from backend.analysis.variants.sport_specific import SportSpecificStrategy
+from backend.analysis.variants.prop_value import PropValueStrategy
 
-STRATEGY_MAP = {"ensemble": EnsembleStrategy}
+STRATEGY_MAP = {
+    "ensemble": EnsembleStrategy,
+    "recent_form": RecentFormStrategy,
+    "value_only": ValueOnlyStrategy,
+    "sport_specific": SportSpecificStrategy,
+    "prop_value": PropValueStrategy,
+}
 
 def generate_and_store_picks(session: Session, strategy_id: int, target_date: date | None = None) -> int:
     target_date = target_date or date.today()
-    strat_row = session.query(StrategyModel).get(strategy_id)
+    strat_row = session.get(StrategyModel, strategy_id)
     if not strat_row: return 0
     config = json.loads(strat_row.config_json)
     strategy_cls = STRATEGY_MAP.get(strat_row.name)

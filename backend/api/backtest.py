@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from backend.database import get_session
@@ -11,6 +12,7 @@ class StrategyCreate(BaseModel):
     description: str = ""
     config: dict
     sport: str | None = None
+    strategy_type: str = "game"
 
 class StrategyUpdate(BaseModel):
     description: str | None = None
@@ -22,7 +24,8 @@ def list_strategies(request: Request):
     try:
         rows = session.query(StrategyModel).all()
         return [{"id": s.id, "name": s.name, "description": s.description,
-            "config": json.loads(s.config_json), "is_active": s.is_active, "sport": s.sport} for s in rows]
+            "config": json.loads(s.config_json), "is_active": s.is_active, "sport": s.sport,
+            "strategy_type": s.strategy_type} for s in rows]
     finally:
         session.close()
 
@@ -31,7 +34,8 @@ def create_strategy(request: Request, body: StrategyCreate):
     session = get_session(request.app.state.engine)
     try:
         strat = StrategyModel(name=body.name, description=body.description,
-            config_json=json.dumps(body.config), is_active=False, sport=body.sport)
+            config_json=json.dumps(body.config), is_active=False, sport=body.sport,
+            strategy_type=body.strategy_type)
         session.add(strat)
         session.commit()
         session.refresh(strat)
@@ -44,7 +48,7 @@ def create_strategy(request: Request, body: StrategyCreate):
 def update_strategy(request: Request, strategy_id: int, body: StrategyUpdate):
     session = get_session(request.app.state.engine)
     try:
-        strat = session.query(StrategyModel).get(strategy_id)
+        strat = session.get(StrategyModel, strategy_id)
         if not strat: raise HTTPException(status_code=404)
         if body.description is not None: strat.description = body.description
         if body.config is not None: strat.config_json = json.dumps(body.config)
@@ -57,12 +61,60 @@ def update_strategy(request: Request, strategy_id: int, body: StrategyUpdate):
 def promote_strategy(request: Request, strategy_id: int):
     session = get_session(request.app.state.engine)
     try:
-        strat = session.query(StrategyModel).get(strategy_id)
+        strat = session.get(StrategyModel, strategy_id)
         if not strat: raise HTTPException(status_code=404)
         session.query(StrategyModel).filter(StrategyModel.sport == strat.sport).update({"is_active": False})
         strat.is_active = True
         session.commit()
         return {"id": strat.id, "name": strat.name, "is_active": True}
+    finally:
+        session.close()
+
+class BacktestRunRequest(BaseModel):
+    strategy_id: int
+    start_date: str
+    end_date: str
+
+@router.post("/run")
+def run_backtest(request: Request, body: BacktestRunRequest):
+    from datetime import date as date_type
+    session = get_session(request.app.state.engine)
+    try:
+        strat = session.get(StrategyModel, body.strategy_id)
+        if not strat:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+        start = date_type.fromisoformat(body.start_date)
+        end = date_type.fromisoformat(body.end_date)
+        if strat.strategy_type == "prop":
+            from backend.backtesting.prop_backtester import PropBacktester
+            config = json.loads(strat.config_json)
+            bt = PropBacktester(config)
+            sport = strat.sport or "nba"
+            result = bt.backtest(session, sport, start, end)
+        else:
+            from backend.backtesting.backtester import Backtester
+            from backend.pipeline.pick_generator import STRATEGY_MAP, _build_game_data
+            config = json.loads(strat.config_json)
+            strategy_cls = STRATEGY_MAP.get(strat.name)
+            if not strategy_cls:
+                raise HTTPException(status_code=400, detail="Unknown strategy")
+            strategy = strategy_cls(strat.name, config)
+            bt = Backtester(strategy)
+            from backend.models import Game
+            games = session.query(Game).filter(
+                Game.status == "final", Game.date >= start, Game.date <= end).all()
+            games_with_results = []
+            for g in games:
+                if g.home_score is not None and g.away_score is not None:
+                    game_data = _build_game_data(session, g)
+                    games_with_results.append((game_data, g.home_score, g.away_score))
+            result = bt.run(games_with_results)
+        run = BacktestRun(strategy_id=strat.id, status="completed",
+            started_at=datetime.now(tz=timezone.utc),
+            completed_at=datetime.now(tz=timezone.utc))
+        session.add(run)
+        session.commit()
+        return result
     finally:
         session.close()
 

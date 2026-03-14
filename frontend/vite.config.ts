@@ -9,7 +9,9 @@ export default defineConfig({
       '/stats': 'http://localhost:8000',
       '/backtest': 'http://localhost:8000',
       '/games': 'http://localhost:8000',
+      '/props': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
+      '/pipeline': 'http://localhost:8000',
     }
   }
 })

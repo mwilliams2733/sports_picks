@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from fastapi.testclient import TestClient
 from backend.api.main import create_app
 from backend.models import Base, Team, Game, PickModel, PickResult, StrategyModel
@@ -15,7 +15,7 @@ def _seed_db(client):
     s = StrategyModel(id=1, name="ensemble", config_json="{}", is_active=True)
     p = PickModel(id=1, game_id=1, strategy_id=1, pick_type="moneyline",
                   pick_value="BOS ML", confidence=4, edge_pct=8.2,
-                  odds_at_pick=-150, created_at=datetime.utcnow())
+                  odds_at_pick=-150, created_at=datetime.now(tz=timezone.utc))
     session.add_all([t1, t2, g, s, p])
     session.commit()
     session.close()

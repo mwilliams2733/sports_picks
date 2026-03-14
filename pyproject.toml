@@ -12,6 +12,7 @@ dependencies = [
     "numpy>=2.1.0",
     "apscheduler>=3.10.0",
     "pyyaml>=6.0",
+    "nba_api>=1.11.0",
 ]
 
 [project.optional-dependencies]

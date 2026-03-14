@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from fastapi.testclient import TestClient
 from backend.api.main import create_app
 from backend.models import Base, Team, Game, PickModel, PickResult, StrategyModel
@@ -14,8 +14,8 @@ def _seed(client):
         Game(id=1, sport="nba", season="2025-26", date=date(2026, 3, 10), home_team_id=1, away_team_id=2, status="final"),
         Game(id=2, sport="nba", season="2025-26", date=date(2026, 3, 11), home_team_id=1, away_team_id=2, status="final"),
         StrategyModel(id=1, name="test", config_json="{}", is_active=True),
-        PickModel(id=1, game_id=1, strategy_id=1, pick_type="moneyline", pick_value="BOS ML", confidence=4, edge_pct=8.0, odds_at_pick=-150, created_at=datetime.utcnow()),
-        PickModel(id=2, game_id=2, strategy_id=1, pick_type="moneyline", pick_value="BOS ML", confidence=3, edge_pct=6.0, odds_at_pick=-130, created_at=datetime.utcnow()),
+        PickModel(id=1, game_id=1, strategy_id=1, pick_type="moneyline", pick_value="BOS ML", confidence=4, edge_pct=8.0, odds_at_pick=-150, created_at=datetime.now(tz=timezone.utc)),
+        PickModel(id=2, game_id=2, strategy_id=1, pick_type="moneyline", pick_value="BOS ML", confidence=3, edge_pct=6.0, odds_at_pick=-130, created_at=datetime.now(tz=timezone.utc)),
         PickResult(id=1, pick_id=1, result="win", payout=0.667),
         PickResult(id=2, pick_id=2, result="loss", payout=-1.0),
     ])

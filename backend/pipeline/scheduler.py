@@ -9,6 +9,7 @@ from backend.collectors.espn import ESPNCollector
 from backend.collectors.odds_api import OddsAPICollector
 from backend.collectors.budget import ApiBudgetTracker
 from backend.pipeline.pick_generator import generate_and_store_picks
+from backend.pipeline.prop_pipeline import run_prop_pipeline
 from backend.pipeline.grader import grade_pick
 from backend.models import Base, Game, PickModel, PickResult, StrategyModel
 
@@ -42,6 +43,19 @@ def daily_job(config, engine):
         if active_strategy:
             count = generate_and_store_picks(session, active_strategy.id)
             logger.info(f"Generated {count} picks")
+        try:
+            prop_strategy = session.query(StrategyModel).filter(
+                StrategyModel.is_active == True,
+                StrategyModel.strategy_type == "prop"
+            ).first()
+            prop_count = asyncio.run(run_prop_pipeline(
+                session,
+                target_date=date.today(),
+                strategy_id=prop_strategy.id if prop_strategy else None
+            ))
+            logger.info(f"Prop pipeline generated {prop_count} prop picks")
+        except Exception as prop_e:
+            logger.error(f"Prop pipeline error: {prop_e}")
     except Exception as e:
         logger.error(f"Pipeline error: {e}")
     finally:
