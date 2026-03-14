@@ -1,8 +1,16 @@
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
 def get_engine(db_path: str):
-    engine = create_engine(f"sqlite:///{db_path}")
+    if db_path == ":memory:":
+        engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        engine = create_engine(f"sqlite:///{db_path}")
 
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, _):
