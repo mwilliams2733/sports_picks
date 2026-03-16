@@ -25,6 +25,12 @@ ESPN_SPORT_URLS: dict[str, dict[str, str]] = {
         "teams": "https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams",
         "base": "https://site.api.espn.com/apis/site/v2/sports/football/college-football",
     },
+    "mma": {
+        "base": "https://site.api.espn.com/apis/site/v2/sports/mma/ufc",
+    },
+    "boxing": {
+        "base": "https://site.api.espn.com/apis/site/v2/sports/boxing",
+    },
 }
 
 FOOTBALL_SPORTS = {"nfl", "ncaaf"}

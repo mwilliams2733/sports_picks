@@ -5,6 +5,8 @@ SPORT_KEYS = {
     "nfl": "americanfootball_nfl",
     "ncaab": "basketball_ncaab",
     "ncaaf": "americanfootball_ncaaf",
+    "boxing": "boxing_boxing",
+    "mma": "mma_mixed_martial_arts",
 }
 
 class OddsAPICollector:
@@ -16,12 +18,16 @@ class OddsAPICollector:
         self.requests_remaining: int | None = None
 
     async def fetch_odds(self, sport: str) -> list[dict]:
-        sport_key = SPORT_KEYS[sport]
+        sport_key = SPORT_KEYS.get(sport)
+        if not sport_key:
+            return []
         url = f"{self.BASE_URL}/{sport_key}/odds"
+        # Combat sports typically only have h2h (moneyline)
+        markets = "h2h" if sport in ("boxing", "mma") else "h2h,spreads,totals"
         params = {
             "apiKey": self.api_key,
             "regions": "us",
-            "markets": "h2h,spreads,totals",
+            "markets": markets,
             "oddsFormat": "american",
         }
         response = await self.client.get(url, params=params)
@@ -69,7 +75,9 @@ class OddsAPICollector:
 
     async def fetch_events(self, sport: str) -> list[dict]:
         """Fetch upcoming event IDs for a sport (needed for player props)."""
-        sport_key = SPORT_KEYS[sport]
+        sport_key = SPORT_KEYS.get(sport)
+        if not sport_key:
+            return []
         url = f"{self.BASE_URL}/{sport_key}/events"
         params = {"apiKey": self.api_key}
         response = await self.client.get(url, params=params)
@@ -79,9 +87,13 @@ class OddsAPICollector:
 
     async def fetch_player_props(self, sport: str, event_id: str, markets: list[str] | None = None) -> list[dict]:
         """Fetch player prop odds for a specific event."""
-        sport_key = SPORT_KEYS[sport]
+        sport_key = SPORT_KEYS.get(sport)
+        if not sport_key:
+            return []
         if markets is None:
-            markets = PROP_MARKETS.get(sport, ["player_points"])
+            markets = PROP_MARKETS.get(sport, [])
+        if not markets:
+            return []
         url = f"{self.BASE_URL}/{sport_key}/events/{event_id}/odds"
         params = {
             "apiKey": self.api_key,
@@ -121,4 +133,6 @@ PROP_MARKETS = {
     "nfl": ["player_pass_yds", "player_rush_yds", "player_reception_yds", "player_anytime_td"],
     "ncaab": ["player_points", "player_rebounds", "player_assists"],
     "ncaaf": ["player_pass_yds", "player_rush_yds", "player_anytime_td"],
+    "boxing": [],  # Limited prop markets available
+    "mma": [],     # Limited prop markets available
 }

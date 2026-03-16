@@ -1,14 +1,23 @@
+import logging
+
 from backend.analysis.strategy import Strategy
 from backend.analysis.confidence import calculate_confidence
 from backend.analysis.odds_utils import american_to_implied_prob
+from backend.analysis.calibrated_model import CalibratedModel
+from backend.analysis.kelly import fractional_kelly
 from backend.data_types import GameData, Pick
 
+logger = logging.getLogger(__name__)
+
 class EnsembleStrategy(Strategy):
+    _calibrated: CalibratedModel | None = None
+
     def predict(self, game: GameData) -> list[Pick]:
         if not game.odds: return []
         picks = []
         min_edge = self.config.get("min_edge", 5.0)
-        home_prob = self._model_probability(game)
+        kelly_fraction = self.config.get("kelly_fraction", 0.25)
+        home_prob = self._calibrated_probability(game)
         away_prob = 1.0 - home_prob
         avg_odds = self._average_odds(game)
         if avg_odds is None: return []
@@ -24,13 +33,15 @@ class EnsembleStrategy(Strategy):
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="HOME ML",
                     confidence=calculate_confidence(home_edge, models), edge_pct=round(home_edge, 1),
                     model_probability=round(home_prob, 4), implied_probability=round(implied_home, 4),
-                    odds_at_pick=avg_odds["moneyline_home"]))
+                    odds_at_pick=avg_odds["moneyline_home"],
+                    suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction)))
             elif away_edge >= min_edge:
                 models = self._count_agreeing_models(game, "away")
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
                     confidence=calculate_confidence(away_edge, models), edge_pct=round(away_edge, 1),
                     model_probability=round(away_prob, 4), implied_probability=round(implied_away, 4),
-                    odds_at_pick=avg_odds["moneyline_away"]))
+                    odds_at_pick=avg_odds["moneyline_away"],
+                    suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction)))
 
         # Spread picks
         if avg_odds.get("spread_home") is not None:
@@ -51,7 +62,8 @@ class EnsembleStrategy(Strategy):
                         edge_pct=round(spread_edge, 1),
                         model_probability=round(home_prob, 4),
                         implied_probability=0.5,
-                        odds_at_pick=-110))
+                        odds_at_pick=-110,
+                        suggested_unit_size=fractional_kelly(home_prob, -110, kelly_fraction)))
                 else:
                     # Model thinks away covers
                     spread_away = avg_odds["spread_away"]
@@ -62,7 +74,8 @@ class EnsembleStrategy(Strategy):
                         edge_pct=round(spread_edge, 1),
                         model_probability=round(away_prob, 4),
                         implied_probability=0.5,
-                        odds_at_pick=-110))
+                        odds_at_pick=-110,
+                        suggested_unit_size=fractional_kelly(away_prob, -110, kelly_fraction)))
 
         # Over/Under picks
         if avg_odds.get("over_under") is not None:
@@ -71,6 +84,9 @@ class EnsembleStrategy(Strategy):
             ou_edge = abs(predicted_total - ou_line)
             if ou_edge >= min_edge:
                 models = self._count_total_agreeing_models(game, predicted_total > ou_line)
+                # Estimate win probability from edge for Kelly sizing
+                # (model_probability stores predicted total, not a probability)
+                ou_win_prob = min(0.99, 0.5 + ou_edge / 200)
                 if predicted_total > ou_line:
                     pick_value = f"Over {ou_line:g}"
                     picks.append(Pick(game_id=game.game_id, pick_type="over_under",
@@ -79,7 +95,8 @@ class EnsembleStrategy(Strategy):
                         edge_pct=round(ou_edge, 1),
                         model_probability=round(predicted_total, 4),
                         implied_probability=round(ou_line, 4),
-                        odds_at_pick=-110))
+                        odds_at_pick=-110,
+                        suggested_unit_size=fractional_kelly(ou_win_prob, -110, kelly_fraction)))
                 else:
                     pick_value = f"Under {ou_line:g}"
                     picks.append(Pick(game_id=game.game_id, pick_type="over_under",
@@ -88,9 +105,43 @@ class EnsembleStrategy(Strategy):
                         edge_pct=round(ou_edge, 1),
                         model_probability=round(predicted_total, 4),
                         implied_probability=round(ou_line, 4),
-                        odds_at_pick=-110))
+                        odds_at_pick=-110,
+                        suggested_unit_size=fractional_kelly(ou_win_prob, -110, kelly_fraction)))
 
         return picks
+
+    def _calibrated_probability(self, game: GameData) -> float:
+        """Use calibrated logistic regression if available, else fall back."""
+        if EnsembleStrategy._calibrated is None:
+            EnsembleStrategy._calibrated = CalibratedModel()
+            # Attempt lazy training from the database
+            try:
+                from backend.database import get_engine, get_session
+                import os
+                db_path = os.environ.get("DB_PATH", "sports_picks.db")
+                engine = get_engine(db_path)
+                session = get_session(engine)
+                try:
+                    EnsembleStrategy._calibrated.train_from_db(session)
+                finally:
+                    session.close()
+            except Exception:
+                logger.warning("Could not train calibrated model; using fallback.", exc_info=True)
+
+        home_prob = EnsembleStrategy._calibrated.predict_home_win_prob(game)
+
+        # Schedule adjustments
+        if game.home_stats.is_schedule_fatigued:
+            home_prob -= 0.03 * game.home_stats.schedule_fatigue_score
+        if game.away_stats.is_schedule_fatigued:
+            home_prob += 0.03 * game.away_stats.schedule_fatigue_score
+        if game.home_stats.is_lookahead_spot:
+            home_prob -= 0.04
+        if game.away_stats.is_lookahead_spot:
+            home_prob += 0.04
+        home_prob = max(0.01, min(0.99, home_prob))
+
+        return home_prob
 
     def _model_probability(self, game: GameData) -> float:
         hs, aws = game.home_stats, game.away_stats

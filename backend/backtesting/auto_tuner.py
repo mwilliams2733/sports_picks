@@ -1,0 +1,183 @@
+"""Auto-tuner: grid-search strategy parameters and pick the best config."""
+import json
+import itertools
+import logging
+from datetime import date
+from sqlalchemy.orm import Session
+
+from backend.models import Game, StrategyModel
+from backend.pipeline.pick_generator import STRATEGY_MAP, _build_game_data
+from backend.backtesting.backtester import Backtester
+from backend.backtesting.prop_backtester import PropBacktester
+
+logger = logging.getLogger(__name__)
+
+# ── Parameter grids per strategy name ──────────────────────
+
+GAME_PARAM_GRIDS = {
+    "ensemble": {
+        "min_edge": [2.0, 3.0, 5.0, 7.0, 10.0],
+        "weights_preset": [
+            {"pd": 0.30, "elo": 0.35, "rating": 0.25, "hca": 0.10},
+            {"pd": 0.25, "elo": 0.40, "rating": 0.25, "hca": 0.10},
+            {"pd": 0.20, "elo": 0.30, "rating": 0.35, "hca": 0.15},
+            {"pd": 0.35, "elo": 0.25, "rating": 0.30, "hca": 0.10},
+        ],
+    },
+    "recent_form": {
+        "min_edge": [3.0, 5.0, 7.0, 10.0],
+        "lookback": [3, 5, 10],
+        "recent_weight": [0.4, 0.5, 0.6, 0.7],
+    },
+    "value_only": {
+        "min_edge": [5.0, 8.0, 10.0, 12.0, 15.0],
+    },
+    "sport_specific": {
+        "min_edge": [3.0, 5.0, 7.0, 10.0],
+    },
+}
+
+PROP_PARAM_GRID = {
+    "min_edge": [3.0, 5.0, 7.0, 10.0],
+    "recent_weight": [0.4, 0.5, 0.6, 0.7],
+    "lookback": [3, 5, 7, 10],
+    "min_minutes": [10, 15, 20],
+}
+
+
+def _expand_grid(grid: dict) -> list[dict]:
+    """Expand a parameter grid into a list of config dicts."""
+    keys = list(grid.keys())
+    values = list(grid.values())
+    configs = []
+    for combo in itertools.product(*values):
+        cfg = dict(zip(keys, combo))
+        # Handle ensemble weights_preset -> weights
+        if "weights_preset" in cfg:
+            cfg["weights"] = cfg.pop("weights_preset")
+        # Ensure recent_weight + pd_weight + venue_weight = 1.0 for recent_form
+        if "recent_weight" in cfg and "weights" not in cfg and "season_weight" not in cfg:
+            rw = cfg["recent_weight"]
+            remaining = 1.0 - rw
+            cfg["pd_weight"] = round(remaining * 0.5, 2)
+            cfg["venue_weight"] = round(remaining * 0.5, 2)
+        # For prop strategies, derive season_weight from recent_weight
+        if "recent_weight" in cfg and "season_weight" not in cfg and "pd_weight" not in cfg:
+            cfg["season_weight"] = round(1.0 - cfg["recent_weight"], 2)
+        configs.append(cfg)
+    return configs
+
+
+def tune_game_strategy(
+    session: Session,
+    strategy_name: str,
+    start_date: date,
+    end_date: date,
+    optimize_for: str = "roi",
+) -> dict:
+    """Grid-search game strategy parameters and return the best config + results."""
+    strategy_cls = STRATEGY_MAP.get(strategy_name)
+    if not strategy_cls:
+        return {"error": f"Unknown strategy: {strategy_name}"}
+
+    grid = GAME_PARAM_GRIDS.get(strategy_name, {"min_edge": [3.0, 5.0, 7.0, 10.0]})
+    configs = _expand_grid(grid)
+
+    # Pre-load games once (shared across all configs)
+    games = session.query(Game).filter(
+        Game.status == "final", Game.date >= start_date, Game.date <= end_date,
+    ).all()
+    games_with_results = []
+    for g in games:
+        if g.home_score is not None and g.away_score is not None:
+            game_data = _build_game_data(session, g)
+            games_with_results.append((game_data, g.home_score, g.away_score))
+
+    if not games_with_results:
+        return {"error": "No completed games found in date range"}
+
+    logger.info(f"Auto-tuning {strategy_name}: {len(configs)} configs x {len(games_with_results)} games")
+
+    best_result = None
+    best_config = None
+    all_results = []
+
+    for cfg in configs:
+        strategy = strategy_cls(strategy_name, cfg)
+        bt = Backtester(strategy)
+        result = bt.run(games_with_results)
+        result.pop("picks", None)  # Don't include full pick list in summary
+
+        entry = {"config": cfg, **result}
+        all_results.append(entry)
+
+        score = result.get(optimize_for, 0)
+        # Require a minimum number of picks to avoid trivial configs
+        min_picks = max(3, len(games_with_results) // 20)
+        if result["total"] < min_picks:
+            continue
+        if best_result is None or score > best_result.get(optimize_for, 0):
+            best_result = result
+            best_config = cfg
+
+    return {
+        "strategy_name": strategy_name,
+        "min_picks_required": min_picks,
+        "games_tested": len(games_with_results),
+        "configs_tested": len(configs),
+        "best_config": best_config,
+        "best_result": best_result,
+        "all_results": sorted(all_results, key=lambda r: r.get(optimize_for, 0), reverse=True),
+    }
+
+
+def tune_prop_strategy(
+    session: Session,
+    sport: str,
+    start_date: date,
+    end_date: date,
+    optimize_for: str = "roi",
+) -> dict:
+    """Grid-search prop backtester parameters and return the best config."""
+    configs = _expand_grid(PROP_PARAM_GRID)
+
+    logger.info(f"Auto-tuning prop strategy for {sport}: {len(configs)} configs")
+
+    best_result = None
+    best_config = None
+    all_results = []
+
+    for cfg in configs:
+        bt = PropBacktester(cfg)
+        result = bt.backtest(session, sport, start_date, end_date)
+        result.pop("picks", None)
+
+        entry = {"config": cfg, **result}
+        all_results.append(entry)
+
+        score = result.get(optimize_for, 0)
+        if result["total"] < 5:
+            continue
+        if best_result is None or score > best_result.get(optimize_for, 0):
+            best_result = result
+            best_config = cfg
+
+    return {
+        "sport": sport,
+        "configs_tested": len(configs),
+        "best_config": best_config,
+        "best_result": best_result,
+        "all_results": sorted(all_results, key=lambda r: r.get(optimize_for, 0), reverse=True),
+    }
+
+
+def apply_tuned_config(session: Session, strategy_id: int, config: dict) -> bool:
+    """Update a strategy's config_json with the tuned parameters."""
+    strat = session.get(StrategyModel, strategy_id)
+    if not strat:
+        return False
+    existing = json.loads(strat.config_json)
+    existing.update(config)
+    strat.config_json = json.dumps(existing)
+    session.commit()
+    return True

@@ -108,6 +108,7 @@ class PickResult(Base):
     pick_id = Column(Integer, ForeignKey("picks.id"), nullable=False)
     result = Column(String, nullable=False)
     payout = Column(Float, nullable=False, default=0.0)
+    odds_at_close = Column(Integer, nullable=True)
     pick = relationship("PickModel")
 
 class PlayerProp(Base):
@@ -157,3 +158,29 @@ class ApiUsage(Base):
     request_count = Column(Integer, nullable=False, default=0)
     month = Column(String, nullable=False)
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
+
+
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    starting_balance = Column(Float, nullable=False, default=1000000.0)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
+
+
+class PaperPick(Base):
+    __tablename__ = "paper_picks"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("user_profiles.id"), nullable=False)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
+    pick_type = Column(String, nullable=False)  # "moneyline", "spread", "over_under", "prop"
+    pick_value = Column(String, nullable=False)  # e.g. "HOME ML", "AWAY +3.5", "Over 220.5", "LeBron Over 25.5 Points"
+    odds = Column(Integer, nullable=False)
+    stake = Column(Float, nullable=False)  # dollar amount wagered
+    result = Column(String, nullable=True)  # "win", "loss", "push", null=pending
+    payout = Column(Float, nullable=True)  # net payout (positive for wins, negative for losses)
+    prop_market = Column(String, nullable=True)  # e.g. "player_points" — only for prop picks
+    prop_player = Column(String, nullable=True)  # player name — only for prop picks
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
+    user = relationship("UserProfile")
+    game = relationship("Game")

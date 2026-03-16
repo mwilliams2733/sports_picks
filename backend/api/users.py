@@ -1,0 +1,354 @@
+from datetime import datetime, timezone, date, timedelta
+from fastapi import APIRouter, Request, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import func
+from backend.database import get_session
+from backend.models import UserProfile, PaperPick, Game, PlayerStat
+from backend.pipeline.grader import grade_pick, grade_prop_pick
+from backend.analysis.odds_utils import calculate_payout
+
+router = APIRouter()
+
+
+class CreateUserRequest(BaseModel):
+    name: str
+
+
+class PlacePickRequest(BaseModel):
+    game_id: int
+    pick_type: str
+    pick_value: str
+    odds: int
+    stake: float
+    prop_market: str | None = None
+    prop_player: str | None = None
+
+
+@router.get("/")
+def list_users(request: Request):
+    """List all user profiles with current balance and record."""
+    session = get_session(request.app.state.engine)
+    try:
+        users = session.query(UserProfile).all()
+        result = []
+        for u in users:
+            picks = session.query(PaperPick).filter(PaperPick.user_id == u.id).all()
+            wins = sum(1 for p in picks if p.result == "win")
+            losses = sum(1 for p in picks if p.result == "loss")
+            pushes = sum(1 for p in picks if p.result == "push")
+            pending = sum(1 for p in picks if p.result is None)
+            total_wagered = sum(p.stake for p in picks)
+            total_payout = sum(p.payout or 0 for p in picks)
+            current_balance = u.starting_balance + total_payout
+            total_picks = wins + losses + pushes
+            result.append({
+                "id": u.id,
+                "name": u.name,
+                "starting_balance": u.starting_balance,
+                "current_balance": round(current_balance, 2),
+                "total_wagered": round(total_wagered, 2),
+                "profit": round(total_payout, 2),
+                "roi": round((total_payout / total_wagered * 100) if total_wagered > 0 else 0, 2),
+                "wins": wins,
+                "losses": losses,
+                "pushes": pushes,
+                "pending": pending,
+                "win_rate": round((wins / total_picks * 100) if total_picks > 0 else 0, 1),
+                "created_at": str(u.created_at),
+            })
+        # Sort by current_balance descending (leaderboard)
+        result.sort(key=lambda x: x["current_balance"], reverse=True)
+        return result
+    finally:
+        session.close()
+
+
+@router.post("/")
+def create_user(request: Request, body: CreateUserRequest):
+    """Create a new user profile."""
+    session = get_session(request.app.state.engine)
+    try:
+        existing = session.query(UserProfile).filter(UserProfile.name == body.name).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Username already taken")
+        user = UserProfile(name=body.name)
+        session.add(user)
+        session.commit()
+        return {"id": user.id, "name": user.name, "starting_balance": user.starting_balance}
+    finally:
+        session.close()
+
+
+@router.get("/{user_id}")
+def get_user(request: Request, user_id: int):
+    """Get a user profile with full stats."""
+    session = get_session(request.app.state.engine)
+    try:
+        user = session.get(UserProfile, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        picks = session.query(PaperPick).filter(PaperPick.user_id == user_id).all()
+        wins = sum(1 for p in picks if p.result == "win")
+        losses = sum(1 for p in picks if p.result == "loss")
+        pushes = sum(1 for p in picks if p.result == "push")
+        pending = sum(1 for p in picks if p.result is None)
+        total_wagered = sum(p.stake for p in picks)
+        total_payout = sum(p.payout or 0 for p in picks)
+        current_balance = user.starting_balance + total_payout
+        total_picks = wins + losses + pushes
+        return {
+            "id": user.id,
+            "name": user.name,
+            "starting_balance": user.starting_balance,
+            "current_balance": round(current_balance, 2),
+            "total_wagered": round(total_wagered, 2),
+            "profit": round(total_payout, 2),
+            "roi": round((total_payout / total_wagered * 100) if total_wagered > 0 else 0, 2),
+            "wins": wins,
+            "losses": losses,
+            "pushes": pushes,
+            "pending": pending,
+            "win_rate": round((wins / total_picks * 100) if total_picks > 0 else 0, 1),
+        }
+    finally:
+        session.close()
+
+
+@router.post("/{user_id}/picks")
+def place_pick(request: Request, user_id: int, body: PlacePickRequest):
+    """Place a paper pick for a user."""
+    session = get_session(request.app.state.engine)
+    try:
+        user = session.get(UserProfile, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Calculate current balance
+        picks = session.query(PaperPick).filter(PaperPick.user_id == user_id).all()
+        total_payout = sum(p.payout or 0 for p in picks)
+        current_balance = user.starting_balance + total_payout
+
+        if body.stake > current_balance:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
+        if body.stake <= 0:
+            raise HTTPException(status_code=400, detail="Stake must be positive")
+
+        # Check if the game exists
+        game = session.get(Game, body.game_id)
+        if not game:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+        # If game is already final, grade immediately
+        result = None
+        payout = None
+        if game.status == "final" and game.home_score is not None and game.away_score is not None:
+            if body.pick_type == "prop" and body.prop_player and body.prop_market:
+                # Grade prop pick using player stats
+                player_stat = (
+                    session.query(PlayerStat)
+                    .filter_by(player_name=body.prop_player, stat_type="game_log", game_date=game.date)
+                    .first()
+                )
+                prop_result = grade_prop_pick(body.pick_value, body.prop_market, player_stat)
+                if prop_result:
+                    result = prop_result[0]
+                    if result == "win":
+                        payout = body.stake * calculate_payout(body.odds)
+                    elif result == "push":
+                        payout = 0.0
+                    else:
+                        payout = -body.stake
+            else:
+                grade_result, grade_payout_ratio = grade_pick(
+                    body.pick_type, body.pick_value,
+                    game.home_score, game.away_score, body.odds
+                )
+                result = grade_result
+                if grade_result == "win":
+                    payout = body.stake * calculate_payout(body.odds)
+                elif grade_result == "push":
+                    payout = 0.0
+                else:
+                    payout = -body.stake
+
+        pick = PaperPick(
+            user_id=user_id,
+            game_id=body.game_id,
+            pick_type=body.pick_type,
+            pick_value=body.pick_value,
+            odds=body.odds,
+            stake=body.stake,
+            result=result,
+            payout=payout,
+            prop_market=body.prop_market,
+            prop_player=body.prop_player,
+        )
+        session.add(pick)
+        session.commit()
+        return {
+            "id": pick.id,
+            "result": result,
+            "payout": payout,
+            "new_balance": round(current_balance + (payout or 0), 2),
+        }
+    finally:
+        session.close()
+
+
+@router.get("/{user_id}/picks")
+def get_user_picks(request: Request, user_id: int):
+    """Get all picks for a user."""
+    session = get_session(request.app.state.engine)
+    try:
+        user = session.get(UserProfile, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        picks = (
+            session.query(PaperPick, Game)
+            .join(Game, PaperPick.game_id == Game.id)
+            .filter(PaperPick.user_id == user_id)
+            .order_by(PaperPick.created_at.desc())
+            .all()
+        )
+
+        result = []
+        for p, g in picks:
+            entry = {
+                "id": p.id,
+                "game_id": p.game_id,
+                "sport": g.sport,
+                "date": str(g.date),
+                "status": g.status,
+                "pick_type": p.pick_type,
+                "pick_value": p.pick_value,
+                "odds": p.odds,
+                "stake": p.stake,
+                "result": p.result,
+                "payout": p.payout,
+                "created_at": str(p.created_at),
+            }
+            if p.prop_market:
+                entry["prop_market"] = p.prop_market
+            if p.prop_player:
+                entry["prop_player"] = p.prop_player
+            result.append(entry)
+        return result
+    finally:
+        session.close()
+
+
+@router.post("/grade")
+def grade_paper_picks(request: Request):
+    """Grade all pending paper picks for games that are final."""
+    session = get_session(request.app.state.engine)
+    try:
+        pending = (
+            session.query(PaperPick, Game)
+            .join(Game, PaperPick.game_id == Game.id)
+            .filter(PaperPick.result.is_(None))
+            .filter(Game.status == "final")
+            .all()
+        )
+        graded = 0
+        for pick, game in pending:
+            if game.home_score is None or game.away_score is None:
+                continue
+
+            if pick.pick_type == "prop" and pick.prop_player and pick.prop_market:
+                # Grade prop pick using player stats
+                player_stat = (
+                    session.query(PlayerStat)
+                    .filter_by(player_name=pick.prop_player, stat_type="game_log", game_date=game.date)
+                    .first()
+                )
+                prop_result = grade_prop_pick(pick.pick_value, pick.prop_market, player_stat)
+                if not prop_result:
+                    continue  # No stats available yet, skip
+                pick.result = prop_result[0]
+                if pick.result == "win":
+                    pick.payout = pick.stake * calculate_payout(pick.odds)
+                elif pick.result == "push":
+                    pick.payout = 0.0
+                else:
+                    pick.payout = -pick.stake
+            else:
+                grade_result, grade_payout_ratio = grade_pick(
+                    pick.pick_type, pick.pick_value,
+                    game.home_score, game.away_score, pick.odds
+                )
+                pick.result = grade_result
+                if grade_result == "win":
+                    pick.payout = pick.stake * calculate_payout(pick.odds)
+                elif grade_result == "push":
+                    pick.payout = 0.0
+                else:
+                    pick.payout = -pick.stake
+            graded += 1
+        session.commit()
+        return {"graded": graded}
+    finally:
+        session.close()
+
+
+def _compute_period_stats(picks: list) -> dict:
+    """Compute win/loss/profit stats from a list of (PaperPick, Game) tuples."""
+    wins = sum(1 for p, _ in picks if p.result == "win")
+    losses = sum(1 for p, _ in picks if p.result == "loss")
+    pushes = sum(1 for p, _ in picks if p.result == "push")
+    total = wins + losses + pushes
+    profit = sum(p.payout or 0 for p, _ in picks)
+    wagered = sum(p.stake for p, _ in picks if p.result is not None)
+    return {
+        "wins": wins,
+        "losses": losses,
+        "pushes": pushes,
+        "total": total,
+        "win_rate": round((wins / total * 100) if total > 0 else 0, 1),
+        "profit": round(profit, 2),
+        "roi": round((profit / wagered * 100) if wagered > 0 else 0, 2),
+    }
+
+
+@router.get("/{user_id}/stats")
+def get_user_stats(request: Request, user_id: int):
+    """Get daily, weekly, monthly, and all-time stats for a user."""
+    session = get_session(request.app.state.engine)
+    try:
+        user = session.get(UserProfile, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        all_picks = (
+            session.query(PaperPick, Game)
+            .join(Game, PaperPick.game_id == Game.id)
+            .filter(PaperPick.user_id == user_id)
+            .all()
+        )
+
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())  # Monday
+        month_start = today.replace(day=1)
+
+        daily = [(p, g) for p, g in all_picks if g.date == today]
+        weekly = [(p, g) for p, g in all_picks if g.date >= week_start]
+        monthly = [(p, g) for p, g in all_picks if g.date >= month_start]
+
+        # Daily breakdown for chart (last 30 days)
+        daily_breakdown = []
+        for i in range(30):
+            d = today - timedelta(days=29 - i)
+            day_picks = [(p, g) for p, g in all_picks if g.date == d and p.result is not None]
+            if day_picks:
+                stats = _compute_period_stats(day_picks)
+                daily_breakdown.append({"date": str(d), **stats})
+
+        return {
+            "today": _compute_period_stats(daily),
+            "this_week": _compute_period_stats(weekly),
+            "this_month": _compute_period_stats(monthly),
+            "all_time": _compute_period_stats(all_picks),
+            "daily_breakdown": daily_breakdown,
+        }
+    finally:
+        session.close()

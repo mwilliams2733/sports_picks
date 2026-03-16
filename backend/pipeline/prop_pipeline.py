@@ -1,7 +1,7 @@
 import logging
 from datetime import date, datetime, timezone
 from sqlalchemy.orm import Session
-from backend.models import Game, Team, PlayerProp, PlayerStat, PickModel, StrategyModel
+from backend.models import Game, Team, PlayerProp, PlayerStat, PickModel, StrategyModel, TeamStat
 from backend.collectors.player_stats.collector import PlayerStatsCollector
 from backend.collectors.player_stats.nba_api_source import NbaApiSource
 from backend.collectors.player_stats.espn_stats_source import EspnStatsSource
@@ -17,6 +17,8 @@ def build_default_collector() -> PlayerStatsCollector:
         "nfl": [EspnStatsSource()],
         "ncaab": [EspnStatsSource()],
         "ncaaf": [EspnStatsSource()],
+        "boxing": [EspnStatsSource()],
+        "mma": [EspnStatsSource()],
     })
 
 async def run_prop_pipeline(session: Session, target_date: date | None = None,
@@ -54,6 +56,20 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id)
 
     props = session.query(PlayerProp).join(Game).filter(Game.date == target_date).all()
 
+    # Build game -> teams map and opponent defensive ratings cache
+    game_teams = {}
+    for g in games:
+        game_teams[g.id] = (g.home_team_id, g.away_team_id)
+
+    team_def_ratings = {}
+    for tid in team_ids:
+        def_stat = session.query(TeamStat).filter(
+            TeamStat.team_id == tid,
+            TeamStat.stat_type == "defensive_rating"
+        ).order_by(TeamStat.id.desc()).first()
+        if def_stat:
+            team_def_ratings[tid] = def_stat.value
+
     # Build analyzer from strategy config if available
     analyzer_kwargs = {}
     if strategy_id:
@@ -67,6 +83,37 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id)
                 "min_edge": cfg.get("min_edge", 5.0),
             }
     analyzer = PropAnalyzer(**analyzer_kwargs)
+
+    # Generate game predictions for game script correlation
+    from backend.pipeline.pick_generator import STRATEGY_MAP, _build_game_data
+    import json as _json
+
+    game_scripts = {}  # game_id -> {predicted_diff, ...}
+    game_strategy = session.query(StrategyModel).filter(
+        StrategyModel.is_active == True,
+        StrategyModel.strategy_type == "game",
+    ).first()
+
+    if game_strategy:
+        strategy_cls = STRATEGY_MAP.get(game_strategy.name)
+        if strategy_cls:
+            cfg = _json.loads(game_strategy.config_json)
+            strat_instance = strategy_cls(game_strategy.name, cfg)
+            for g in games:
+                try:
+                    game_data = _build_game_data(session, g)
+                    # Get predicted point diff from the strategy
+                    if hasattr(strat_instance, '_predicted_point_diff'):
+                        diff = strat_instance._predicted_point_diff(game_data)
+                        game_scripts[g.id] = {"predicted_diff": diff}
+                    else:
+                        # For strategies without _predicted_point_diff, use team stats
+                        hs, aws = game_data.home_stats, game_data.away_stats
+                        diff = hs.point_diff - aws.point_diff
+                        game_scripts[g.id] = {"predicted_diff": diff}
+                except Exception:
+                    pass
+
     picks_generated = 0
     props_analyzed = 0
 
@@ -76,7 +123,32 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id)
         recent = (session.query(PlayerStat)
             .filter_by(player_name=prop.player_name, stat_type="game_log")
             .order_by(PlayerStat.game_date.desc()).limit(5).all())
-        analysis = analyzer.analyze(prop, season_avg, recent)
+        # Determine opponent defensive rating
+        opponent_def = None
+        player_team_id = None
+        if season_avg:
+            player_team_id = season_avg.team_id
+        elif recent:
+            player_team_id = recent[0].team_id
+        if player_team_id and prop.game_id in game_teams:
+            home_id, away_id = game_teams[prop.game_id]
+            opp_id = away_id if player_team_id == home_id else home_id
+            opponent_def = team_def_ratings.get(opp_id)
+
+        # Determine game script for this prop
+        game_script = None
+        if prop.game_id in game_scripts:
+            script = game_scripts[prop.game_id]
+            if player_team_id and prop.game_id in game_teams:
+                home_id_gs, away_id_gs = game_teams[prop.game_id]
+                game_script = {
+                    "predicted_diff": script["predicted_diff"],
+                    "player_is_home": player_team_id == home_id_gs,
+                }
+
+        analysis = analyzer.analyze(prop, season_avg, recent,
+                                    opponent_def_rating=opponent_def,
+                                    game_script=game_script)
         props_analyzed += 1
         if analysis and analysis.confidence >= 1 and strategy_id:
             pick = PickModel(

@@ -1,3 +1,4 @@
+import math
 from datetime import date
 from sqlalchemy.orm import Session
 
@@ -5,12 +6,45 @@ from backend.models import PlayerStat
 from backend.analysis.prop_confidence import calculate_prop_confidence
 from backend.analysis.odds_utils import calculate_payout
 
+try:
+    from scipy.stats import norm, poisson
+
+    _HAS_SCIPY = True
+except ImportError:
+    _HAS_SCIPY = False
+
 PROP_MARKETS = ["player_points", "player_rebounds", "player_assists"]
 MARKET_TO_FIELD = {
     "player_points": "points",
     "player_rebounds": "rebounds",
     "player_assists": "assists",
 }
+
+# Count-based markets where Poisson is appropriate for low means
+_COUNT_BASED_MARKETS = {"player_rebounds", "player_assists"}
+
+# Minimum data points needed for variance-based analysis
+_MIN_VARIANCE_SAMPLES = 3
+
+
+def _compute_exceedance_prob(
+    mean: float, variance: float, line: float, market: str
+) -> float:
+    """Compute P(X > line) using an appropriate distribution."""
+    if not _HAS_SCIPY:
+        return 1.0 if mean > line else 0.0
+
+    std = variance**0.5
+
+    # Use Poisson for count-based stats with low mean
+    if market in _COUNT_BASED_MARKETS and mean < 10 and mean > 0:
+        return float(1.0 - poisson.cdf(math.floor(line), mu=mean))
+
+    # Normal distribution
+    if std < 1e-9:
+        return 1.0 if mean > line else 0.0
+
+    return float(1.0 - norm.cdf(line, loc=mean, scale=std))
 
 
 class PropBacktester:
@@ -70,7 +104,7 @@ class PropBacktester:
                 if len(prior_logs) < self.lookback:
                     continue
 
-                recent_logs = prior_logs[-self.lookback:]
+                recent_logs = prior_logs[-self.lookback :]
 
                 for market in PROP_MARKETS:
                     field = MARKET_TO_FIELD[market]
@@ -95,15 +129,45 @@ class PropBacktester:
                     if synthetic_line == 0:
                         continue
 
-                    edge = abs(projection - synthetic_line) / synthetic_line * 100
-                    if edge < self.min_edge:
-                        continue
+                    # --- Distribution-based edge computation ---
+                    use_distribution = _HAS_SCIPY and len(all_vals) >= _MIN_VARIANCE_SAMPLES
 
-                    # Determine predicted direction
-                    if projection > synthetic_line:
-                        predicted = "over"
+                    if use_distribution:
+                        # Compute variance from all prior game values
+                        mean_val = sum(all_vals) / len(all_vals)
+                        variance = sum((v - mean_val) ** 2 for v in all_vals) / len(all_vals)
+
+                        # Exceedance probability P(X > line) using projection as center
+                        exceedance_prob = _compute_exceedance_prob(
+                            mean=projection,
+                            variance=variance,
+                            line=synthetic_line,
+                            market=market,
+                        )
+
+                        # Determine predicted direction and directional probability
+                        if projection > synthetic_line:
+                            predicted = "over"
+                            directional_prob = exceedance_prob
+                        else:
+                            predicted = "under"
+                            directional_prob = 1.0 - exceedance_prob
+
+                        # Convert to edge percentage
+                        edge = (directional_prob - 0.5) * 200
+
+                        if edge < self.min_edge:
+                            continue
                     else:
-                        predicted = "under"
+                        # Fallback: simple average-based comparison
+                        edge = abs(projection - synthetic_line) / synthetic_line * 100
+                        if edge < self.min_edge:
+                            continue
+
+                        if projection > synthetic_line:
+                            predicted = "over"
+                        else:
+                            predicted = "under"
 
                     # Grade: did the actual stat match the predicted direction?
                     actual_val = getattr(game_log, field)

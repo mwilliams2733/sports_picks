@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from backend.models import Game, PickModel, StrategyModel, Odds, TeamStat, EloRating
 from backend.data_types import GameData, TeamStats, OddsSnapshot
@@ -41,6 +41,62 @@ def generate_and_store_picks(session: Session, strategy_id: int, target_date: da
     session.commit()
     return count
 
+def _check_schedule_fatigue(session: Session, team_id: int, game_date: date, sport: str) -> tuple[bool, float]:
+    """Check if team is playing 3rd game in 4 nights."""
+    if sport not in ("nba", "ncaab"):
+        return False, 0.0
+
+    four_days_ago = game_date - timedelta(days=3)
+    recent_games = session.query(Game).filter(
+        Game.date >= four_days_ago,
+        Game.date < game_date,
+        ((Game.home_team_id == team_id) | (Game.away_team_id == team_id))
+    ).count()
+
+    if recent_games >= 2:  # 2 games in last 3 days + today = 3 in 4
+        severity = min(recent_games / 3, 1.0)  # Scale severity
+        return True, severity
+    return False, 0.0
+
+
+def _check_lookahead_spot(session: Session, team_id: int, opponent_team_id: int,
+                          game_date: date, sport: str,
+                          team_elo: float, opponent_elo: float) -> bool:
+    """Check if this is a lookahead spot - easy game before a tough one."""
+    # Only relevant for weekly sports (NFL, NCAAF) or when games are spaced out
+    if sport in ("nfl", "ncaaf"):
+        look_ahead_window = timedelta(days=10)
+    else:
+        look_ahead_window = timedelta(days=4)
+
+    # Current game is a mismatch (team is heavily favored)
+    elo_diff = team_elo - opponent_elo
+    if elo_diff < 100:  # Not a big favorite, no lookahead risk
+        return False
+
+    # Check if next game is against a strong opponent
+    next_game = session.query(Game).filter(
+        Game.date > game_date,
+        Game.date <= game_date + look_ahead_window,
+        ((Game.home_team_id == team_id) | (Game.away_team_id == team_id))
+    ).order_by(Game.date).first()
+
+    if not next_game:
+        return False
+
+    # Get next opponent's ELO
+    next_opp_id = next_game.away_team_id if next_game.home_team_id == team_id else next_game.home_team_id
+    next_opp_elo = session.query(EloRating).filter(
+        EloRating.team_id == next_opp_id
+    ).first()
+
+    if next_opp_elo and next_opp_elo.rating > team_elo - 50:
+        # Next opponent is roughly equal or better
+        return True
+
+    return False
+
+
 def _build_game_data(session: Session, game) -> GameData:
     home_stats = _get_team_stats(session, game.home_team_id, game.sport)
     away_stats = _get_team_stats(session, game.away_team_id, game.sport)
@@ -48,6 +104,24 @@ def _build_game_data(session: Session, game) -> GameData:
     odds = [OddsSnapshot(bookmaker=o.bookmaker, moneyline_home=o.moneyline_home or 0,
         moneyline_away=o.moneyline_away or 0, spread_home=o.spread_home or 0.0,
         spread_away=o.spread_away or 0.0, over_under=o.over_under or 0.0) for o in odds_rows]
+
+    # Schedule context
+    h_fatigued, h_fatigue_score = _check_schedule_fatigue(session, game.home_team_id, game.date, game.sport)
+    a_fatigued, a_fatigue_score = _check_schedule_fatigue(session, game.away_team_id, game.date, game.sport)
+    home_stats.is_schedule_fatigued = h_fatigued
+    home_stats.schedule_fatigue_score = h_fatigue_score
+    away_stats.is_schedule_fatigued = a_fatigued
+    away_stats.schedule_fatigue_score = a_fatigue_score
+
+    h_lookahead = _check_lookahead_spot(session, game.home_team_id, game.away_team_id,
+                                         game.date, game.sport,
+                                         home_stats.elo_rating, away_stats.elo_rating)
+    a_lookahead = _check_lookahead_spot(session, game.away_team_id, game.home_team_id,
+                                         game.date, game.sport,
+                                         away_stats.elo_rating, home_stats.elo_rating)
+    home_stats.is_lookahead_spot = h_lookahead
+    away_stats.is_lookahead_spot = a_lookahead
+
     return GameData(game_id=game.id, sport=game.sport, date=game.date,
         home_team_id=game.home_team_id, away_team_id=game.away_team_id,
         home_stats=home_stats, away_stats=away_stats, odds=odds, week=game.week)

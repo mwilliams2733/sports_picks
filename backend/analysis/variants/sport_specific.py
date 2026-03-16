@@ -87,6 +87,19 @@ class SportSpecificStrategy(Strategy):
             venue_score = self._venue_score(hs, aws)
             prob += weights.get("conference", 0.15) * conf_score + weights.get("venue", 0.15) * venue_score
 
+        # Schedule adjustments
+        # Fatigue: penalize fatigued teams
+        if hs.is_schedule_fatigued:
+            prob -= 0.03 * hs.schedule_fatigue_score  # Up to 3% penalty for home
+        if aws.is_schedule_fatigued:
+            prob += 0.03 * aws.schedule_fatigue_score  # Boost if away is fatigued
+
+        # Lookahead: penalize favored team looking ahead
+        if hs.is_lookahead_spot:
+            prob -= 0.04  # Home team may be unfocused (4% penalty)
+        if aws.is_lookahead_spot:
+            prob += 0.04  # Away team may be unfocused (benefits home)
+
         return max(0.01, min(0.99, prob))
 
     def _rest_advantage(self, home_rest: int, away_rest: int) -> float:

@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Request
 from sqlalchemy.orm import aliased
 from backend.database import get_session
-from backend.models import PlayerProp, Game, Team, PlayerStat
+from backend.models import PlayerProp, Game, Team, PlayerStat, TeamStat
 from backend.analysis.prop_analyzer import PropAnalyzer
 
 router = APIRouter()
@@ -26,6 +26,10 @@ MARKET_LABELS = {
     "player_pass_tds": "Pass TDs",
     "player_anytime_td": "Anytime TD",
     "player_receptions": "Receptions",
+    "player_pass_yds": "Pass Yards",
+    "player_rush_yds": "Rush Yards",
+    "player_reception_yds": "Rec Yards",
+    "player_anytime_td": "Anytime TD",
 }
 
 
@@ -54,14 +58,42 @@ def get_today_props(request: Request, sport: str | None = None, market: str | No
         query = query.order_by(PlayerProp.market, PlayerProp.player_name, PlayerProp.outcome)
 
         analyzer = PropAnalyzer()
+
+        # Cache opponent defensive ratings for teams playing today
+        all_results = query.all()
+        today_team_ids = set()
+        for prop, game, home_team, away_team in all_results:
+            today_team_ids.add(game.home_team_id)
+            today_team_ids.add(game.away_team_id)
+
+        team_def_cache = {}
+        for tid in today_team_ids:
+            def_stat = session.query(TeamStat).filter(
+                TeamStat.team_id == tid,
+                TeamStat.stat_type == "defensive_rating"
+            ).order_by(TeamStat.id.desc()).first()
+            if def_stat:
+                team_def_cache[tid] = def_stat.value
+
         results = []
-        for prop, game, home_team, away_team in query.all():
+        for prop, game, home_team, away_team in all_results:
             season_avg = session.query(PlayerStat).filter_by(
                 player_name=prop.player_name, stat_type="season_avg").first()
             recent = (session.query(PlayerStat)
                 .filter_by(player_name=prop.player_name, stat_type="game_log")
                 .order_by(PlayerStat.game_date.desc()).limit(5).all())
-            analysis = analyzer.analyze(prop, season_avg, recent)
+            # Determine opponent defensive rating
+            opponent_def = None
+            player_team_id = None
+            if season_avg:
+                player_team_id = season_avg.team_id
+            elif recent:
+                player_team_id = recent[0].team_id
+            if player_team_id:
+                opp_id = game.away_team_id if player_team_id == game.home_team_id else game.home_team_id
+                opponent_def = team_def_cache.get(opp_id)
+
+            analysis = analyzer.analyze(prop, season_avg, recent, opponent_def_rating=opponent_def)
             results.append({
                 "id": prop.id,
                 "game_id": game.id,

@@ -5,13 +5,11 @@ from datetime import date
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.config import load_config, is_sport_in_season
 from backend.database import get_engine, get_session
-from backend.collectors.espn import ESPNCollector
-from backend.collectors.odds_api import OddsAPICollector
-from backend.collectors.budget import ApiBudgetTracker
+from backend.pipeline.full_pipeline import fetch_and_store_games, fetch_and_store_odds, fetch_and_store_props, ALL_SPORTS
 from backend.pipeline.pick_generator import generate_and_store_picks
 from backend.pipeline.prop_pipeline import run_prop_pipeline
 from backend.pipeline.grader import grade_pick
-from backend.models import Base, Game, PickModel, PickResult, StrategyModel
+from backend.models import Base, Game, Odds, PickModel, PickResult, StrategyModel
 
 logger = logging.getLogger(__name__)
 
@@ -34,52 +32,45 @@ def daily_job(config, engine):
     try:
         logger.info("Starting daily pipeline run")
         grade_pending_picks(session)
-        sports = ["nba", "nfl", "ncaab", "ncaaf"]
-        active_sports = [s for s in sports if is_sport_in_season(s, config["seasons"])]
+
+        active_sports = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]
         logger.info(f"Active sports: {active_sports}")
-        for sport in active_sports:
-            asyncio.run(fetch_sport_data(session, config, sport))
-        active_strategy = session.query(StrategyModel).filter(StrategyModel.is_active == True).first()
+
+        # Fetch and store games, odds, props
+        asyncio.run(fetch_and_store_games(session, active_sports, date.today()))
+
+        api_key = config.get("odds_api_key")
+        if api_key:
+            asyncio.run(fetch_and_store_odds(session, active_sports, api_key))
+            asyncio.run(fetch_and_store_props(session, active_sports, api_key))
+
+        # Generate game picks
+        active_strategy = session.query(StrategyModel).filter(
+            StrategyModel.is_active == True,
+            StrategyModel.strategy_type == "game",
+        ).first()
         if active_strategy:
             count = generate_and_store_picks(session, active_strategy.id)
-            logger.info(f"Generated {count} picks")
+            logger.info(f"Generated {count} game picks")
+
+        # Run prop pipeline
         try:
             prop_strategy = session.query(StrategyModel).filter(
                 StrategyModel.is_active == True,
                 StrategyModel.strategy_type == "prop"
             ).first()
-            prop_count = asyncio.run(run_prop_pipeline(
+            prop_result = asyncio.run(run_prop_pipeline(
                 session,
                 target_date=date.today(),
                 strategy_id=prop_strategy.id if prop_strategy else None
             ))
-            logger.info(f"Prop pipeline generated {prop_count} prop picks")
+            logger.info(f"Prop pipeline: {prop_result}")
         except Exception as prop_e:
             logger.error(f"Prop pipeline error: {prop_e}")
     except Exception as e:
         logger.error(f"Pipeline error: {e}")
     finally:
         session.close()
-
-async def fetch_sport_data(session, config, sport):
-    espn = ESPNCollector()
-    try:
-        today_str = date.today().strftime("%Y%m%d")
-        games = await espn.fetch_scoreboard(sport, today_str)
-        logger.info(f"Fetched {len(games)} {sport} games from ESPN")
-    finally:
-        await espn.close()
-    budget = ApiBudgetTracker(session,
-        monthly_limit=config["odds_budget"]["monthly_limit"],
-        pause_at=config["odds_budget"]["pause_at"])
-    if budget.can_make_request("odds_api"):
-        odds_collector = OddsAPICollector(config["odds_api_key"])
-        try:
-            odds = await odds_collector.fetch_odds(sport)
-            budget.record_request("odds_api")
-            logger.info(f"Fetched odds for {len(odds)} {sport} games")
-        finally:
-            await odds_collector.close()
 
 def grade_pending_picks(session):
     ungraded = (
@@ -93,7 +84,35 @@ def grade_pending_picks(session):
         if game.home_score is not None and game.away_score is not None:
             result, payout = grade_pick(pick.pick_type, pick.pick_value,
                 game.home_score, game.away_score, pick.odds_at_pick or -110)
-            session.add(PickResult(pick_id=pick.id, result=result, payout=payout))
+
+            # Get closing odds (most recent odds snapshot for this game)
+            closing_odds_val = None
+            closing_odds_row = (
+                session.query(Odds)
+                .filter(Odds.game_id == game.id)
+                .order_by(Odds.timestamp.desc())
+                .first()
+            )
+            if closing_odds_row:
+                if pick.pick_type == "moneyline":
+                    if "HOME" in pick.pick_value:
+                        closing_odds_val = closing_odds_row.moneyline_home
+                    else:
+                        closing_odds_val = closing_odds_row.moneyline_away
+                elif pick.pick_type == "spread":
+                    if "HOME" in pick.pick_value:
+                        closing_odds_val = -110  # spreads are typically -110
+                    else:
+                        closing_odds_val = -110
+                elif pick.pick_type == "over_under":
+                    closing_odds_val = -110
+                elif pick.pick_type == "prop":
+                    closing_odds_val = closing_odds_row.moneyline_home  # fallback
+
+            session.add(PickResult(
+                pick_id=pick.id, result=result, payout=payout,
+                odds_at_close=closing_odds_val
+            ))
     session.commit()
     logger.info(f"Graded {len(ungraded)} picks")
 

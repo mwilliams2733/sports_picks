@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 from backend.database import get_session
 from backend.models import PickModel, PickResult, Game
+from backend.analysis.odds_utils import american_to_implied_prob
 
 router = APIRouter()
 
@@ -44,5 +45,40 @@ def get_daily(request: Request, sport: str | None = None):
             else: daily[key]["pushes"] += 1
             daily[key]["profit"] = round(daily[key]["profit"] + payout, 4)
         return list(daily.values())
+    finally:
+        session.close()
+
+@router.get("/clv")
+def get_clv_stats(request: Request):
+    """Calculate Closing Line Value metrics."""
+    session = get_session(request.app.state.engine)
+    try:
+        results = (
+            session.query(PickResult, PickModel)
+            .join(PickModel, PickResult.pick_id == PickModel.id)
+            .filter(PickResult.odds_at_close.isnot(None))
+            .all()
+        )
+
+        if not results:
+            return {"total_picks": 0, "clv_positive": 0, "avg_clv": 0}
+
+        clv_values = []
+        for pr, pm in results:
+            # CLV = implied prob at close - implied prob at pick
+            # If we got better odds than closing, CLV is positive
+            pick_implied = american_to_implied_prob(pm.odds_at_pick or -110)
+            close_implied = american_to_implied_prob(pr.odds_at_close)
+            # CLV: if we bet at lower implied prob and it closed higher, we got value
+            clv = (close_implied - pick_implied) * 100
+            clv_values.append(clv)
+
+        positive_clv = sum(1 for c in clv_values if c > 0)
+        return {
+            "total_picks": len(clv_values),
+            "clv_positive": positive_clv,
+            "clv_positive_pct": round(positive_clv / len(clv_values) * 100, 1),
+            "avg_clv": round(sum(clv_values) / len(clv_values), 2),
+        }
     finally:
         session.close()

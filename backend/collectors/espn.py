@@ -5,7 +5,9 @@ SPORT_URLS = {
     "nfl": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
     "ncaab": "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard",
     "ncaaf": "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
+    "mma": "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard",
 }
+# Boxing has no ESPN scoreboard API — games come from Odds API only
 
 STATUS_MAP = {
     "STATUS_SCHEDULED": "scheduled",
@@ -20,7 +22,9 @@ class ESPNCollector:
         self.client = httpx.AsyncClient(timeout=30.0)
 
     async def fetch_scoreboard(self, sport: str, date_str: str) -> list[dict]:
-        url = SPORT_URLS[sport]
+        url = SPORT_URLS.get(sport)
+        if not url:
+            return []
         response = await self.client.get(url, params={"dates": date_str})
         response.raise_for_status()
         data = response.json()

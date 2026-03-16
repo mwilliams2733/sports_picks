@@ -65,7 +65,7 @@ class NbaApiSource(PlayerStatsSource):
             logger.warning(f"Unknown NBA team abbreviation: {team_abbr}")
             return []
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         try:
             def _get_roster():
@@ -132,7 +132,7 @@ class NbaApiSource(PlayerStatsSource):
             logger.warning("nba_api package not installed")
             return []
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         # Try cache first, then search
         player_id = self._player_id_cache.get(player_name.lower())

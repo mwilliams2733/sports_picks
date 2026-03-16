@@ -4,6 +4,10 @@ __pycache__/
 node_modules/
 dist/
 *.db
+*.db-shm
+*.db-wal
 .env
 config.yaml
 .superpowers/
+.claude/settings.local.json
+uvicorn.log

@@ -29,6 +29,9 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
     app.include_router(props_router, prefix="/props", tags=["props"])
     app.include_router(pipeline_router, prefix="/pipeline", tags=["pipeline"])
 
+    from backend.api.users import router as users_router
+    app.include_router(users_router, prefix="/users", tags=["users"])
+
     import os
     static_dir = os.path.join(os.path.dirname(__file__), "../../frontend/dist")
     if os.path.exists(static_dir):
