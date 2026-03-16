@@ -17,22 +17,48 @@ logger = logging.getLogger(__name__)
 
 MIN_TRAINING_GAMES = 30
 
+# Canonical feature order — FEATURE_ORDER is the single source of truth.
+# extract_features() must return a dict with exactly these keys.
+FEATURE_ORDER = [
+    "elo_diff", "point_diff", "net_rating_diff",
+    "home_rest_days", "away_rest_days", "pace_diff",
+    "home_flag",
+    "offensive_rating_home", "offensive_rating_away",
+    "defensive_rating_home", "defensive_rating_away",
+    "back_to_back_home", "back_to_back_away",
+]
 
-def extract_features(game: GameData) -> list[float]:
-    """Extract model features from a GameData instance.
 
-    Returns [elo_diff, point_diff, net_rating_diff, rest_days_diff, pace_diff]
-    where all diffs are home - away.
+def extract_features(game: GameData) -> dict:
+    """Extract expanded feature set from a GameData instance.
+
+    Returns a dict of feature_name -> value for use with LightGBM or logistic regression.
     """
     hs, aws = game.home_stats, game.away_stats
-    elo_diff = hs.elo_rating - aws.elo_rating
-    point_diff = hs.point_diff - aws.point_diff
-    net_home = hs.offensive_rating - hs.defensive_rating
-    net_away = aws.offensive_rating - aws.defensive_rating
-    net_rating_diff = net_home - net_away
-    rest_days_diff = float(hs.rest_days - aws.rest_days)
-    pace_diff = hs.pace - aws.pace
-    return [elo_diff, point_diff, net_rating_diff, rest_days_diff, pace_diff]
+    return {
+        "elo_diff": hs.elo_rating - aws.elo_rating,
+        "point_diff": hs.point_diff - aws.point_diff,
+        "net_rating_diff": (hs.offensive_rating - hs.defensive_rating)
+                          - (aws.offensive_rating - aws.defensive_rating),
+        "home_rest_days": float(hs.rest_days),
+        "away_rest_days": float(aws.rest_days),
+        "pace_diff": hs.pace - aws.pace,
+        "home_flag": 1,
+        "offensive_rating_home": hs.offensive_rating,
+        "offensive_rating_away": aws.offensive_rating,
+        "defensive_rating_home": hs.defensive_rating,
+        "defensive_rating_away": aws.defensive_rating,
+        "back_to_back_home": 1 if hs.rest_days <= 1 else 0,
+        "back_to_back_away": 1 if aws.rest_days <= 1 else 0,
+    }
+
+
+def features_to_array(features: dict) -> list[float]:
+    """Convert feature dict to ordered array for model input.
+
+    FEATURE_ORDER is the single source of truth for feature ordering.
+    """
+    return [features.get(k, 0.0) for k in FEATURE_ORDER]
 
 
 def _fallback_probability(game: GameData) -> float:
@@ -147,6 +173,7 @@ class CalibratedModel:
             away_pace = _stat_value(away_stats, "pace") or 100.0
             pace_diff = home_pace - away_pace
 
+            # Legacy 5-feature format for logistic regression
             features = [elo_diff, point_diff, net_rating_diff, rest_days_diff, pace_diff]
             label = 1 if game.home_score > game.away_score else 0
 
@@ -175,8 +202,17 @@ class CalibratedModel:
         if not self.trained or self.model is None:
             return _fallback_probability(game)
 
-        features = np.array([extract_features(game)], dtype=np.float64)
-        proba = self.model.predict_proba(features)
+        feature_dict = extract_features(game)
+        # CalibratedModel trains on legacy 5-feature format
+        legacy_features = [
+            feature_dict["elo_diff"],
+            feature_dict["point_diff"],
+            feature_dict["net_rating_diff"],
+            feature_dict["home_rest_days"] - feature_dict["away_rest_days"],  # rest_days_diff
+            feature_dict["pace_diff"],
+        ]
+        feature_arr = np.array([legacy_features], dtype=np.float64)
+        proba = self.model.predict_proba(feature_arr)
         # predict_proba returns [[P(class0), P(class1)]]
         # class 1 = home win
         return float(proba[0][1])
