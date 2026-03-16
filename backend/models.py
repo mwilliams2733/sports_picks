@@ -166,6 +166,9 @@ class UserProfile(Base):
     name = Column(String, nullable=False, unique=True)
     starting_balance = Column(Float, nullable=False, default=1000000.0)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
+    current_streak = Column(Integer, default=0)
+    best_streak = Column(Integer, default=0)
+    streak_type = Column(String, default="none")
 
 
 class PaperPick(Base):
@@ -182,5 +185,33 @@ class PaperPick(Base):
     prop_market = Column(String, nullable=True)  # e.g. "player_points" — only for prop picks
     prop_player = Column(String, nullable=True)  # player name — only for prop picks
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
+    graded_at = Column(DateTime, nullable=True)
     user = relationship("UserProfile")
     game = relationship("Game")
+
+
+class CalibrationHistory(Base):
+    __tablename__ = "calibration_history"
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False)
+    sport = Column(String, nullable=False)
+    confidence_tier = Column(Integer, nullable=False)
+    predicted_win_rate = Column(Float)
+    actual_win_rate = Column(Float)
+    sample_size = Column(Integer)
+    old_threshold = Column(Float)
+    new_threshold = Column(Float)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ModelMetrics(Base):
+    __tablename__ = "model_metrics"
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False)
+    sport = Column(String, nullable=False)
+    model_version = Column(String, nullable=False)
+    accuracy = Column(Float)
+    log_loss = Column(Float)
+    feature_importances = Column(String)  # JSON
+    training_games = Column(Integer)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
