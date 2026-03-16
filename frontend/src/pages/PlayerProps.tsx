@@ -1,20 +1,12 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api/client';
 import type { PropData } from '../types';
+import ConfidenceStars from '../components/ConfidenceStars';
 
-const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf'] as const;
+const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'boxing', 'mma'] as const;
 
 function formatOdds(odds: number): string {
   return odds > 0 ? `+${odds}` : `${odds}`;
-}
-
-function oddsColor(odds: number): string {
-  return odds > 0 ? '#4ade80' : '#e2e8f0';
-}
-
-function stars(n: number | null | undefined): string {
-  if (n == null) return '-';
-  return '★'.repeat(n) + '☆'.repeat(5 - n);
 }
 
 export default function PlayerProps() {
@@ -27,8 +19,12 @@ export default function PlayerProps() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.props.markets().then(setMarkets).catch(() => {});
-  }, []);
+    const sportParam = sport === 'all' ? undefined : sport;
+    api.backtest.sportMarkets(sportParam).then(m => {
+      setMarkets(m);
+      setMarket(prev => m.some(x => x.key === prev) ? prev : '');
+    }).catch(() => {});
+  }, [sport]);
 
   useEffect(() => {
     setLoading(true);
@@ -41,12 +37,10 @@ export default function PlayerProps() {
       .finally(() => setLoading(false));
   }, [sport, market]);
 
-  // Filter and sort props before grouping
   const filtered = props
     .filter(p => p.confidence === null || p.confidence >= minConfidence)
     .sort((a, b) => (b.edge_pct ?? 0) - (a.edge_pct ?? 0));
 
-  // Group props by game, then by player
   const grouped = filtered.reduce<Record<string, Record<string, PropData[]>>>((acc, p) => {
     const key = p.matchup;
     if (!acc[key]) acc[key] = {};
@@ -55,34 +49,28 @@ export default function PlayerProps() {
     return acc;
   }, {});
 
-  if (error) return <p style={{ color: '#f87171' }}>Error: {error}</p>;
+  if (error) return <div className="empty-state"><div className="empty-state-title text-red">Error: {error}</div></div>;
 
   return (
     <div>
-      <h2 style={{ marginBottom: '1rem' }}>Player Props</h2>
+      <div className="page-header">
+        <h2 className="page-title">Player Props</h2>
+      </div>
 
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-        {SPORTS.map(s => (
-          <button key={s} onClick={() => setSport(s)} style={{
-            background: sport === s ? '#1e40af' : 'transparent',
-            color: sport === s ? '#fff' : '#94a3b8',
-            border: '1px solid #334155', borderRadius: '6px',
-            padding: '0.5rem 1rem', cursor: 'pointer',
-          }}>{s.toUpperCase()}</button>
-        ))}
-
-        <select value={market} onChange={e => setMarket(e.target.value)} style={{
-          background: '#1e1e1e', color: '#e0e0e0', border: '1px solid #334155',
-          borderRadius: '6px', padding: '0.5rem', marginLeft: 'auto',
-        }}>
+      <div className="toolbar">
+        <div className="tab-group">
+          {SPORTS.map(s => (
+            <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => setSport(s)}>
+              {s.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <div className="toolbar-spacer" />
+        <select className="select" value={market} onChange={e => setMarket(e.target.value)}>
           <option value="">All Markets</option>
           {markets.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
         </select>
-
-        <select value={minConfidence} onChange={e => setMinConfidence(Number(e.target.value))} style={{
-          background: '#1e1e1e', color: '#e0e0e0', border: '1px solid #334155',
-          borderRadius: '6px', padding: '0.5rem',
-        }}>
+        <select className="select" value={minConfidence} onChange={e => setMinConfidence(Number(e.target.value))}>
           <option value={0}>All Confidence</option>
           <option value={1}>1+ Stars</option>
           <option value={2}>2+ Stars</option>
@@ -92,86 +80,78 @@ export default function PlayerProps() {
         </select>
       </div>
 
-      {loading ? <p>Loading props...</p> : filtered.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '3rem', opacity: 0.5 }}>
-          <p>No player props available.</p>
-          <p style={{ fontSize: '0.85rem' }}>Props are fetched daily from The Odds API. Run the pipeline to load today's props.</p>
+      {loading ? (
+        <div className="loading"><div className="spinner" /> Loading props...</div>
+      ) : filtered.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-title">No player props available</div>
+          <div className="empty-state-sub">Props are fetched daily from The Odds API. Run the pipeline to load today's props.</div>
         </div>
       ) : (
         Object.entries(grouped).map(([matchup, players]) => (
-          <div key={matchup} style={{ marginBottom: '1.5rem' }}>
-            <h3 style={{ fontSize: '1rem', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.3rem', marginBottom: '0.5rem' }}>
-              {matchup}
-            </h3>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.15)', textAlign: 'left' }}>
-                  <th style={{ padding: '0.4rem 0.5rem', width: '25%' }}>Player</th>
-                  <th style={{ padding: '0.4rem 0.5rem' }}>Market</th>
-                  <th style={{ padding: '0.4rem 0.5rem' }}>Line</th>
-                  <th style={{ padding: '0.4rem 0.5rem' }}>Over</th>
-                  <th style={{ padding: '0.4rem 0.5rem' }}>Under</th>
-                  <th style={{ padding: '0.4rem 0.5rem' }}>Book</th>
-                  <th style={{ padding: '0.4rem 0.5rem' }}>Proj</th>
-                  <th style={{ padding: '0.4rem 0.5rem' }}>Edge%</th>
-                  <th style={{ padding: '0.4rem 0.5rem' }}>Conf</th>
-                  <th style={{ padding: '0.4rem 0.5rem' }}>Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(players).map(([player, playerProps]) => {
-                  // Group by market for this player
-                  const byMarket: Record<string, PropData[]> = {};
-                  playerProps.forEach(p => {
-                    if (!byMarket[p.market]) byMarket[p.market] = [];
-                    byMarket[p.market].push(p);
-                  });
+          <div key={matchup} style={{ marginBottom: '1.25rem' }}>
+            <div className="table-wrap">
+              <div className="matchup-header">{matchup}</div>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '22%' }}>Player</th>
+                    <th>Market</th>
+                    <th>Line</th>
+                    <th>Over</th>
+                    <th>Under</th>
+                    <th>Book</th>
+                    <th>Proj</th>
+                    <th>Edge</th>
+                    <th>Conf</th>
+                    <th>Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(players).map(([player, playerProps]) => {
+                    const byMarket: Record<string, PropData[]> = {};
+                    playerProps.forEach(p => {
+                      if (!byMarket[p.market]) byMarket[p.market] = [];
+                      byMarket[p.market].push(p);
+                    });
 
-                  return Object.entries(byMarket).map(([mkt, mktProps]) => {
-                    const over = mktProps.find(p => p.outcome === 'Over');
-                    const under = mktProps.find(p => p.outcome === 'Under');
-                    const line = over?.line ?? under?.line;
-                    const label = mktProps[0]?.market_label ?? mkt;
+                    return Object.entries(byMarket).map(([mkt, mktProps]) => {
+                      const over = mktProps.find(p => p.outcome === 'Over');
+                      const under = mktProps.find(p => p.outcome === 'Under');
+                      const line = over?.line ?? under?.line;
+                      const label = mktProps[0]?.market_label ?? mkt;
+                      const edgePct = over?.edge_pct ?? under?.edge_pct;
 
-                    return (
-                      <tr key={`${player}-${mkt}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                        <td style={{ padding: '0.4rem 0.5rem', fontWeight: 500 }}>{player}</td>
-                        <td style={{ padding: '0.4rem 0.5rem' }}>
-                          <span style={{ background: 'rgba(255,255,255,0.08)', padding: '0.1rem 0.4rem', borderRadius: '3px', fontSize: '0.8rem' }}>
-                            {label}
-                          </span>
-                        </td>
-                        <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'monospace' }}>
-                          {line != null ? line : '-'}
-                        </td>
-                        <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'monospace', color: over ? oddsColor(over.odds) : '#666' }}>
-                          {over ? formatOdds(over.odds) : '-'}
-                        </td>
-                        <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'monospace', color: under ? oddsColor(under.odds) : '#666' }}>
-                          {under ? formatOdds(under.odds) : '-'}
-                        </td>
-                        <td style={{ padding: '0.4rem 0.5rem', fontSize: '0.75rem', opacity: 0.5 }}>
-                          {mktProps[0]?.bookmaker}
-                        </td>
-                        <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'monospace' }}>
-                          {over?.projection ?? under?.projection ?? '-'}
-                        </td>
-                        <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'monospace', color: (over?.edge_pct ?? under?.edge_pct ?? 0) > 0 ? '#4ade80' : '#e2e8f0' }}>
-                          {(over?.edge_pct ?? under?.edge_pct) != null ? `${(over?.edge_pct ?? under?.edge_pct)?.toFixed(1)}%` : '-'}
-                        </td>
-                        <td style={{ padding: '0.4rem 0.5rem' }}>
-                          {stars(over?.confidence ?? under?.confidence)}
-                        </td>
-                        <td style={{ padding: '0.4rem 0.5rem', fontSize: '0.75rem', opacity: 0.5 }}>
-                          {over?.source ?? under?.source ?? '-'}
-                          {(over?.is_stale || under?.is_stale) && <span style={{ color: '#fbbf24', marginLeft: '0.3rem' }}>stale</span>}
-                        </td>
-                      </tr>
-                    );
-                  });
-                })}
-              </tbody>
-            </table>
+                      return (
+                        <tr key={`${player}-${mkt}`}>
+                          <td className="font-medium text-primary">{player}</td>
+                          <td><span className="badge badge-default">{label}</span></td>
+                          <td className="mono">{line != null ? line : '-'}</td>
+                          <td className="mono" style={{ color: over && over.odds > 0 ? 'var(--green)' : undefined }}>
+                            {over ? formatOdds(over.odds) : '-'}
+                          </td>
+                          <td className="mono" style={{ color: under && under.odds > 0 ? 'var(--green)' : undefined }}>
+                            {under ? formatOdds(under.odds) : '-'}
+                          </td>
+                          <td className="text-muted" style={{ fontSize: '0.75rem' }}>{mktProps[0]?.bookmaker}</td>
+                          <td className="mono">{over?.projection ?? under?.projection ?? '-'}</td>
+                          <td className="mono" style={{ color: edgePct && edgePct > 0 ? 'var(--green)' : undefined }}>
+                            {edgePct != null ? `${edgePct.toFixed(1)}%` : '-'}
+                          </td>
+                          <td><ConfidenceStars rating={over?.confidence ?? under?.confidence ?? 0} /></td>
+                          <td className="text-muted" style={{ fontSize: '0.75rem' }}>
+                            {over?.source ?? under?.source ?? '-'}
+                            {(over?.is_stale || under?.is_stale) && (
+                              <span className="badge badge-yellow" style={{ marginLeft: '0.35rem' }}>stale</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         ))
       )}

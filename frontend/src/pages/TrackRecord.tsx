@@ -16,55 +16,69 @@ export default function TrackRecord() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <p>Loading...</p>;
+  if (loading) return <div className="loading"><div className="spinner" /> Loading...</div>;
 
   return (
     <div>
-      <h2 style={{ marginBottom: '1rem' }}>Track Record</h2>
+      <div className="page-header">
+        <h2 className="page-title">Track Record</h2>
+      </div>
+
       {record && (
-        <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem' }}>
-          <Stat label="Overall Win Rate" value={`${record.win_rate}%`} color="#4ade80" />
-          <Stat label="Total ROI" value={`${record.roi > 0 ? '+' : ''}${record.roi}%`} color="#4ade80" />
-          <Stat label="Record" value={`${record.wins}-${record.losses}`} color="#e2e8f0" />
+        <div className="card-grid">
+          <div className="stat-card">
+            <div className="stat-label">Win Rate</div>
+            <div className="stat-value" style={{ color: 'var(--green)' }}>{record.win_rate}%</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Total ROI</div>
+            <div className="stat-value" style={{ color: record.roi > 0 ? 'var(--green)' : 'var(--red)' }}>
+              {record.roi > 0 ? '+' : ''}{record.roi}%
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Record</div>
+            <div className="stat-value">{record.wins}-{record.losses}</div>
+          </div>
         </div>
       )}
-      <h3 style={{ marginBottom: '0.5rem' }}>Daily Results</h3>
-      <CalendarHeatmap data={daily} />
-      <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Pick History</h3>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-        <thead>
-          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.2)', textAlign: 'left' }}>
-            <th style={{ padding: '0.4rem' }}>Date</th>
-            <th style={{ padding: '0.4rem' }}>Sport</th>
-            <th style={{ padding: '0.4rem' }}>Pick</th>
-            <th style={{ padding: '0.4rem' }}>Result</th>
-            <th style={{ padding: '0.4rem' }}>Confidence</th>
-          </tr>
-        </thead>
-        <tbody>
-          {history.map(p => (
-            <tr key={p.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-              <td style={{ padding: '0.4rem' }}>{p.date}</td>
-              <td style={{ padding: '0.4rem' }}>{p.sport.toUpperCase()}</td>
-              <td style={{ padding: '0.4rem' }}>{p.pick_value}</td>
-              <td style={{ padding: '0.4rem', color: p.result === 'win' ? '#4ade80' : p.result === 'loss' ? '#f87171' : '#94a3b8' }}>
-                {p.result ? (p.result === 'win' ? 'Won' : p.result === 'loss' ? 'Lost' : 'Push') : 'Pending'}
-              </td>
-              <td style={{ padding: '0.4rem' }}><ConfidenceStars rating={p.confidence} /></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
 
-function Stat({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div style={{ flex: 1, background: 'rgba(255,255,255,0.05)', borderRadius: '8px',
-      padding: '1rem', border: '1px solid rgba(255,255,255,0.1)', textAlign: 'center' }}>
-      <div style={{ fontSize: '2rem', fontWeight: 'bold', color }}>{value}</div>
-      <div style={{ opacity: 0.6 }}>{label}</div>
+      <div className="section-header">Daily Results <span className="section-divider" /></div>
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <CalendarHeatmap data={daily} />
+      </div>
+
+      <div className="section-header">Pick History <span className="section-divider" /></div>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Sport</th>
+              <th>Pick</th>
+              <th>Result</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.map(p => (
+              <tr key={p.id}>
+                <td className="mono">{p.date}</td>
+                <td><span className="badge badge-default">{p.sport.toUpperCase()}</span></td>
+                <td className="font-medium text-primary">{p.pick_value}</td>
+                <td>
+                  {p.result ? (
+                    <span className={`badge ${p.result === 'win' ? 'badge-green' : p.result === 'loss' ? 'badge-red' : 'badge-yellow'}`}>
+                      {p.result === 'win' ? 'Won' : p.result === 'loss' ? 'Lost' : 'Push'}
+                    </span>
+                  ) : <span className="text-muted">Pending</span>}
+                </td>
+                <td><ConfidenceStars rating={p.confidence} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

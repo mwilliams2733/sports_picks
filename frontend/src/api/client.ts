@@ -1,4 +1,4 @@
-import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult } from '../types';
+import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult } from '../types';
 
 const BASE = '';
 
@@ -53,6 +53,15 @@ export const api = {
     compare: () => get<CompareData[]>('/backtest/compare'),
     run: (data: { strategy_id: number; start_date: string; end_date: string }) =>
       post<BacktestResult>('/backtest/run', data),
+    autoTune: (data: { strategy_id: number; start_date: string; end_date: string; optimize_for?: string; apply_best?: boolean }) =>
+      post<AutoTuneResult>('/backtest/auto-tune', data),
+    runAll: (data: { sport: string; start_date: string; end_date: string }) =>
+      post<RunAllResult>('/backtest/run-all', data),
+    sportMarkets: (sport?: string) =>
+      get<{ key: string; label: string }[]>(`/backtest/sport-markets${sport ? `?sport=${sport}` : ''}`),
+  },
+  games: {
+    today: (sport?: string) => get<GameOddsData[]>(`/games/today${sport ? `?sport=${sport}` : ''}`),
   },
   props: {
     today: (sport?: string, market?: string) => {
@@ -64,8 +73,19 @@ export const api = {
     },
     markets: () => get<{ key: string; label: string }[]>('/props/markets'),
   },
+  users: {
+    list: () => get<UserProfile[]>('/users/'),
+    create: (name: string) => post<{ id: number; name: string }>('/users/', { name }),
+    get: (id: number) => get<UserProfile>(`/users/${id}`),
+    picks: (id: number) => get<PaperPickData[]>(`/users/${id}/picks`),
+    placePick: (userId: number, data: { game_id: number; pick_type: string; pick_value: string; odds: number; stake: number; prop_market?: string; prop_player?: string }) =>
+      post<{ id: number; result: string | null; payout: number | null; new_balance: number }>(`/users/${userId}/picks`, data),
+    grade: () => post<{ graded: number }>('/users/grade', {}),
+    stats: (id: number) => get<UserStats>(`/users/${id}/stats`),
+  },
   pipeline: {
-    run: () => post<{ status: string; games: number; stats_fetched: number;
-      props_analyzed: number; picks_generated: number }>('/pipeline/run', {}),
+    run: () => post<{ status: string; active_sports: string[];
+      games_stored: number; odds_stored: number; props_stored: number;
+      picks_generated: number }>('/pipeline/run', {}),
   },
 };

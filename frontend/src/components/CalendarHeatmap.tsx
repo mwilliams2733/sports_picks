@@ -8,14 +8,19 @@ export default function CalendarHeatmap({ data }: Props) {
       {data.map(d => {
         const total = d.wins + d.losses;
         const winRate = total > 0 ? d.wins / total : 0.5;
-        const color = total === 0 ? '#1e293b'
-          : winRate >= 0.7 ? '#22c55e'
+        const color = total === 0 ? 'var(--bg-elevated)'
+          : winRate >= 0.7 ? 'var(--green)'
           : winRate >= 0.5 ? '#86efac'
           : winRate >= 0.3 ? '#fca5a5'
-          : '#ef4444';
+          : 'var(--red)';
         return (
           <div key={d.date} title={`${d.date}: ${d.wins}W ${d.losses}L`} style={{
-            width: '14px', height: '14px', borderRadius: '2px', background: color }} />
+            width: '14px', height: '14px', borderRadius: '3px', background: color,
+            transition: 'transform 150ms ease',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.4)')}
+          onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+          />
         );
       })}
     </div>

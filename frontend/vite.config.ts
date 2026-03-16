@@ -12,6 +12,7 @@ export default defineConfig({
       '/props': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
       '/pipeline': 'http://localhost:8000',
+      '/users': 'http://localhost:8000',
     }
   }
 })

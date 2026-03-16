@@ -1,126 +1,352 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api/client';
-import type { StrategyData, DailyData, BacktestResult } from '../types';
-import StrategyList from '../components/StrategyList';
+import type { DailyData, RunAllResult, VariantResult } from '../types';
 import PerformanceChart from '../components/PerformanceChart';
-import StrategyForm from '../components/StrategyForm';
+import { useToast } from '../components/Toast';
+
+const SPORTS = ['nba', 'nfl', 'ncaab', 'ncaaf'] as const;
+
+const VARIANT_LABELS: Record<string, string> = {
+  ensemble: 'Ensemble',
+  recent_form: 'Recent Form',
+  value_only: 'Value Only',
+  sport_specific: 'Sport Specific',
+  prop_value: 'Player Props',
+};
+
+const VARIANT_DESCRIPTIONS: Record<string, string> = {
+  ensemble: 'Blends ELO, point diff, net rating, and home court with calibrated logistic regression',
+  recent_form: 'Weights recent games heavily using EWMA momentum scoring',
+  value_only: 'Conservative picks only when edge is very high (10%+)',
+  sport_specific: 'Per-sport weight profiles with rest, venue, and conference adjustments',
+  prop_value: 'Player prop predictions using season + recent averages with distribution analysis',
+};
+
+const ALL_VARIANTS = ['ensemble', 'recent_form', 'value_only', 'sport_specific', 'prop_value'];
 
 export default function Backtesting() {
-  const [strategies, setStrategies] = useState<StrategyData[]>([]);
   const [daily, setDaily] = useState<DailyData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState<StrategyData | null>(null);
+  const [running, setRunning] = useState(false);
   const [pipelineRunning, setPipelineRunning] = useState(false);
-  const [backtestRunning, setBacktestRunning] = useState(false);
-  const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
+  const { toast } = useToast();
 
-  const load = () => {
-    setLoading(true);
-    Promise.all([api.backtest.strategies(), api.stats.daily()])
-      .then(([s, d]) => { setStrategies(s); setDaily(d); })
-      .finally(() => setLoading(false));
-  };
-  useEffect(load, []);
+  // Filters
+  const [sport, setSport] = useState<string>('nba');
+  const [selectedVariant, setSelectedVariant] = useState<string>('ensemble');
+  const [marketFilter, setMarketFilter] = useState<string>('');
 
-  const handlePromote = async (id: number) => { await api.backtest.promote(id); load(); };
+  // Date range
+  const [startDate, setStartDate] = useState('2026-02-01');
+  const [endDate, setEndDate] = useState('2026-03-14');
 
-  const handleSave = async (data: { name: string; description: string; config: Record<string, unknown>; sport?: string | null }) => {
-    if (editing) {
-      await api.backtest.update(editing.id, { description: data.description, config: data.config });
-    } else {
-      await api.backtest.create({ name: data.name, description: data.description, config: data.config });
+  // Results
+  const [results, setResults] = useState<RunAllResult | null>(null);
+
+  useEffect(() => {
+    api.stats.daily().then(setDaily).finally(() => setLoading(false));
+  }, []);
+
+  const handleRunAll = async () => {
+    setRunning(true);
+    setResults(null);
+    try {
+      const res = await api.backtest.runAll({ sport, start_date: startDate, end_date: endDate });
+      setResults(res);
+      const variantCount = Object.keys(res.variants).length;
+      toast(`Backtest complete: ${variantCount} variants tested across ${res.games_count} games`, 'success');
+    } catch (e: any) {
+      toast(`Backtest error: ${e.message}`, 'error');
+    } finally {
+      setRunning(false);
     }
-    setShowForm(false);
-    setEditing(null);
-    load();
-  };
-
-  const handleEdit = (strategy: StrategyData) => {
-    setEditing(strategy);
-    setShowForm(true);
   };
 
   const handleRunPipeline = async () => {
     setPipelineRunning(true);
     try {
       const result = await api.pipeline.run();
-      alert(`Pipeline complete: ${result.stats_fetched} stats, ${result.picks_generated} picks generated`);
-      load();
-    } catch (e: any) { alert(`Error: ${e.message}`); }
-    finally { setPipelineRunning(false); }
+      toast(`Pipeline: ${result.games_stored} games, ${result.odds_stored} odds, ${result.props_stored} props`, 'success');
+    } catch (e: any) {
+      toast(`Pipeline error: ${e.message}`, 'error');
+    } finally {
+      setPipelineRunning(false);
+    }
   };
 
-  const handleRunBacktest = async () => {
-    const propStrategy = strategies.find(s => s.strategy_type === 'prop');
-    if (!propStrategy) { alert('Create a prop_value strategy first'); return; }
-    setBacktestRunning(true);
-    try {
-      const result = await api.backtest.run({
-        strategy_id: propStrategy.id,
-        start_date: '2026-02-01',
-        end_date: '2026-03-14',
+  // Get current variant result
+  const currentResult: VariantResult | null = results?.variants?.[selectedVariant] ?? null;
+  const isProp = selectedVariant === 'prop_value';
+  const sportMarkets = results?.sport_markets ?? [];
+
+  // Filter prop results by market
+  const getFilteredMarketResults = () => {
+    if (!currentResult?.by_market) return {};
+    if (!marketFilter) return currentResult.by_market;
+    return Object.fromEntries(
+      Object.entries(currentResult.by_market).filter(([k]) => k === marketFilter)
+    );
+  };
+
+  // Summary row for all variants comparison
+  const getVariantSummaries = () => {
+    if (!results) return [];
+    return ALL_VARIANTS
+      .filter(v => results.variants[v])
+      .map(v => {
+        const r = results.variants[v];
+        return {
+          name: v,
+          label: VARIANT_LABELS[v],
+          wins: r.wins,
+          losses: r.losses,
+          total: r.total,
+          winRate: r.win_rate ?? r.hit_rate ?? 0,
+          roi: r.roi,
+          profit: r.total_profit,
+        };
       });
-      setBacktestResult(result);
-    } catch (e: any) { alert(`Error: ${e.message}`); }
-    finally { setBacktestRunning(false); }
   };
 
-  if (loading) return <p>Loading...</p>;
+  if (loading) return <div className="loading"><div className="spinner" /> Loading...</div>;
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h2 style={{ margin: 0 }}>Backtesting</h2>
+      <div className="page-header">
+        <h2 className="page-title">Backtesting</h2>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button onClick={handleRunPipeline} disabled={pipelineRunning}
-            style={{ padding: '0.4rem 1rem', background: '#059669', border: 'none',
-                     borderRadius: '4px', color: '#fff', cursor: 'pointer', opacity: pipelineRunning ? 0.5 : 1 }}>
-            {pipelineRunning ? 'Running...' : 'Run Pipeline'}
+          <button className="btn btn-success" onClick={handleRunPipeline} disabled={pipelineRunning}>
+            {pipelineRunning ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Running...</> : 'Run Pipeline'}
           </button>
-          <button onClick={handleRunBacktest} disabled={backtestRunning}
-            style={{ padding: '0.4rem 1rem', background: '#7c3aed', border: 'none',
-                     borderRadius: '4px', color: '#fff', cursor: 'pointer', opacity: backtestRunning ? 0.5 : 1 }}>
-            {backtestRunning ? 'Running...' : 'Run Backtest'}
+          <button className="btn btn-primary" onClick={handleRunAll} disabled={running}>
+            {running ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2, borderTopColor: '#fff' }} /> Running All...</> : 'Run All Variants'}
           </button>
-          {!showForm && (
-            <button onClick={() => { setEditing(null); setShowForm(true); }}
-              style={{ padding: '0.4rem 1rem', background: '#2563eb', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer' }}>
-              + New Strategy
-            </button>
-          )}
-        </div>
-      </div>
-      {showForm && (
-        <div style={{ marginBottom: '1rem' }}>
-          <StrategyForm editing={editing} onSave={handleSave} onCancel={() => { setShowForm(false); setEditing(null); }} />
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: '1.5rem' }}>
-        <div style={{ flex: 1 }}>
-          <h3 style={{ marginBottom: '0.5rem' }}>Strategy Variants</h3>
-          <StrategyList strategies={strategies} onPromote={handlePromote} onEdit={handleEdit} />
-        </div>
-        <div style={{ flex: 2 }}>
-          <h3 style={{ marginBottom: '0.5rem' }}>Performance Over Time</h3>
-          <PerformanceChart data={daily} />
         </div>
       </div>
 
-      {backtestResult && (
-        <div style={{ marginTop: '1rem', padding: '1rem', background: '#1e293b', borderRadius: '8px' }}>
-          <h4 style={{ margin: '0 0 0.5rem' }}>Prop Backtest Results</h4>
-          <p>Record: {backtestResult.wins}-{backtestResult.losses} ({backtestResult.hit_rate}%)</p>
-          <p>ROI: {backtestResult.roi}%</p>
-          {backtestResult.by_market && (
-            <div>
-              <h5 style={{ margin: '0.5rem 0 0.3rem' }}>By Market</h5>
-              {Object.entries(backtestResult.by_market).map(([mkt, r]) => (
-                <p key={mkt} style={{ margin: '0.2rem 0', fontSize: '0.85rem' }}>
-                  {mkt}: {r.wins}-{r.losses} ({r.hit_rate}%)
-                </p>
-              ))}
-            </div>
+      {/* Controls Bar */}
+      <div className="card" style={{ marginBottom: '1.25rem', display: 'flex', gap: '0.75rem', alignItems: 'end', flexWrap: 'wrap' }}>
+        <div>
+          <div className="input-label">Sport</div>
+          <select className="input" value={sport} onChange={e => { setSport(e.target.value); setMarketFilter(''); }}>
+            {SPORTS.map(s => <option key={s} value={s}>{s.toUpperCase()}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="input-label">Start Date</div>
+          <input className="input" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+        </div>
+        <div>
+          <div className="input-label">End Date</div>
+          <input className="input" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+        </div>
+        {results && isProp && sportMarkets.length > 0 && (
+          <div>
+            <div className="input-label">Market</div>
+            <select className="input" value={marketFilter} onChange={e => setMarketFilter(e.target.value)}>
+              <option value="">All Markets</option>
+              {sportMarkets.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* Performance Chart */}
+      <div className="section-header">Performance Over Time <span className="section-divider" /></div>
+      <div className="card" style={{ marginBottom: '1.25rem' }}>
+        <PerformanceChart data={daily} />
+      </div>
+
+      {/* Results Section */}
+      {results && (
+        <>
+          {/* Variant Comparison Table */}
+          <div className="section-header">
+            All Variants — {sport.toUpperCase()}
+            <span className="badge badge-default" style={{ marginLeft: '0.5rem' }}>{results.games_count} games</span>
+            <span className="section-divider" />
+          </div>
+          <div className="table-wrap" style={{ marginBottom: '1.25rem' }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Variant</th>
+                  <th>Record</th>
+                  <th>Total</th>
+                  <th>Win %</th>
+                  <th>ROI</th>
+                  <th>Profit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {getVariantSummaries().map(v => (
+                  <tr
+                    key={v.name}
+                    onClick={() => setSelectedVariant(v.name)}
+                    style={{
+                      cursor: 'pointer',
+                      background: selectedVariant === v.name ? 'var(--card-hover)' : undefined,
+                    }}
+                  >
+                    <td className="font-medium">
+                      {v.label}
+                      {selectedVariant === v.name && <span className="badge badge-blue" style={{ marginLeft: '0.5rem' }}>Selected</span>}
+                    </td>
+                    <td className="mono">{v.wins}-{v.losses}</td>
+                    <td className="mono text-muted">{v.total}</td>
+                    <td className="mono" style={{ color: v.winRate >= 55 ? 'var(--green)' : v.winRate > 0 ? undefined : 'var(--text-muted)' }}>
+                      {v.total > 0 ? `${v.winRate}%` : '\u2014'}
+                    </td>
+                    <td className="mono" style={{ color: v.roi > 0 ? 'var(--green)' : v.roi < 0 ? 'var(--red)' : undefined }}>
+                      {v.total > 0 ? `${v.roi > 0 ? '+' : ''}${v.roi}%` : '\u2014'}
+                    </td>
+                    <td className="mono" style={{ color: v.profit > 0 ? 'var(--green)' : v.profit < 0 ? 'var(--red)' : undefined }}>
+                      {v.total > 0 ? `${v.profit > 0 ? '+' : ''}${v.profit.toFixed(2)}u` : '\u2014'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Selected Variant Detail */}
+          {currentResult && (
+            <>
+              <div className="section-header">
+                {VARIANT_LABELS[selectedVariant]} Detail
+                <span className="section-divider" />
+              </div>
+
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                {VARIANT_DESCRIPTIONS[selectedVariant]}
+              </div>
+
+              {/* Stat Cards */}
+              <div className="results-grid" style={{ marginBottom: '1rem' }}>
+                <div className="stat-card" style={{ padding: '0.75rem' }}>
+                  <div className="stat-label">Record</div>
+                  <div className="stat-value" style={{ fontSize: '1.25rem' }}>
+                    {currentResult.wins}-{currentResult.losses}
+                    {(currentResult.pushes ?? 0) > 0 && `-${currentResult.pushes}`}
+                  </div>
+                </div>
+                <div className="stat-card" style={{ padding: '0.75rem' }}>
+                  <div className="stat-label">{isProp ? 'Hit Rate' : 'Win Rate'}</div>
+                  <div className="stat-value" style={{
+                    fontSize: '1.25rem',
+                    color: (currentResult.win_rate ?? currentResult.hit_rate ?? 0) >= 55 ? 'var(--green)' : undefined
+                  }}>
+                    {currentResult.win_rate ?? currentResult.hit_rate ?? 0}%
+                  </div>
+                </div>
+                <div className="stat-card" style={{ padding: '0.75rem' }}>
+                  <div className="stat-label">ROI</div>
+                  <div className="stat-value" style={{
+                    fontSize: '1.25rem',
+                    color: currentResult.roi > 0 ? 'var(--green)' : currentResult.roi < 0 ? 'var(--red)' : undefined
+                  }}>
+                    {currentResult.roi > 0 ? '+' : ''}{currentResult.roi}%
+                  </div>
+                </div>
+                <div className="stat-card" style={{ padding: '0.75rem' }}>
+                  <div className="stat-label">Profit</div>
+                  <div className="stat-value" style={{
+                    fontSize: '1.25rem',
+                    color: currentResult.total_profit > 0 ? 'var(--green)' : currentResult.total_profit < 0 ? 'var(--red)' : undefined
+                  }}>
+                    {currentResult.total_profit > 0 ? '+' : ''}{currentResult.total_profit.toFixed(2)}u
+                  </div>
+                </div>
+              </div>
+
+              {/* Prop Market Breakdown */}
+              {isProp && currentResult.by_market && (
+                <div style={{ marginBottom: '1rem' }}>
+                  <div className="input-label" style={{ marginBottom: '0.5rem' }}>By Market</div>
+                  <div className="table-wrap">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Market</th>
+                          <th>Record</th>
+                          <th>Total</th>
+                          <th>Hit Rate</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(getFilteredMarketResults()).map(([mkt, r]) => {
+                          const total = r.wins + r.losses;
+                          const rate = total > 0 ? ((r.wins / total) * 100).toFixed(1) : '0';
+                          const label = sportMarkets.find(m => m.key === mkt)?.label ?? mkt;
+                          return (
+                            <tr key={mkt}>
+                              <td className="font-medium">{label}</td>
+                              <td className="mono">{r.wins}-{r.losses}</td>
+                              <td className="mono text-muted">{total}</td>
+                              <td className="mono" style={{ color: Number(rate) >= 55 ? 'var(--green)' : undefined }}>
+                                {total > 0 ? `${rate}%` : '\u2014'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {Object.keys(getFilteredMarketResults()).length === 0 && (
+                          <tr><td colSpan={4} className="text-muted" style={{ textAlign: 'center' }}>No data for this market</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Prop Confidence Breakdown */}
+              {isProp && currentResult.by_confidence && (
+                <div>
+                  <div className="input-label" style={{ marginBottom: '0.5rem' }}>By Confidence</div>
+                  <div className="table-wrap">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Confidence</th>
+                          <th>Record</th>
+                          <th>Total</th>
+                          <th>Hit Rate</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(currentResult.by_confidence)
+                          .filter(([, r]) => r.wins + r.losses > 0)
+                          .sort(([a], [b]) => Number(b) - Number(a))
+                          .map(([conf, r]) => {
+                            const total = r.wins + r.losses;
+                            const rate = total > 0 ? ((r.wins / total) * 100).toFixed(1) : '0';
+                            return (
+                              <tr key={conf}>
+                                <td className="font-medium">{'*'.repeat(Number(conf))} ({conf} star{Number(conf) !== 1 ? 's' : ''})</td>
+                                <td className="mono">{r.wins}-{r.losses}</td>
+                                <td className="mono text-muted">{total}</td>
+                                <td className="mono" style={{ color: Number(rate) >= 55 ? 'var(--green)' : undefined }}>
+                                  {total > 0 ? `${rate}%` : '\u2014'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
           )}
+        </>
+      )}
+
+      {/* Empty state */}
+      {!results && !running && (
+        <div className="empty-state">
+          <div className="empty-state-title">Select a sport and date range, then click "Run All Variants"</div>
+          <div className="empty-state-sub">
+            This will backtest all 5 strategy variants (Ensemble, Recent Form, Value Only, Sport Specific, Player Props) against historical data.
+          </div>
         </div>
       )}
     </div>

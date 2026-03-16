@@ -1,19 +1,26 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api/client';
-import type { PickData, RecordData, PropData } from '../types';
+import type { PickData, RecordData, PropData, GameOddsData } from '../types';
 import SummaryCards from '../components/SummaryCards';
 import PicksTable from '../components/PicksTable';
+import ConfidenceStars from '../components/ConfidenceStars';
 
-const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf'] as const;
+const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'boxing', 'mma'] as const;
 
-function stars(n: number | null | undefined): string {
-  if (n == null) return '-';
-  return '★'.repeat(n) + '☆'.repeat(5 - n);
+function formatOdds(odds: number | null): string {
+  if (odds == null) return '-';
+  return odds > 0 ? `+${odds}` : `${odds}`;
+}
+
+function formatSpread(spread: number | null): string {
+  if (spread == null) return '-';
+  return spread > 0 ? `+${spread}` : `${spread}`;
 }
 
 export default function TodaysPicks() {
   const [picks, setPicks] = useState<PickData[]>([]);
   const [record, setRecord] = useState<RecordData | null>(null);
+  const [games, setGames] = useState<GameOddsData[]>([]);
   const [topProps, setTopProps] = useState<PropData[]>([]);
   const [sport, setSport] = useState<string>('all');
   const [loading, setLoading] = useState(true);
@@ -22,8 +29,12 @@ export default function TodaysPicks() {
   useEffect(() => {
     setLoading(true);
     const sportParam = sport === 'all' ? undefined : sport;
-    Promise.all([api.picks.today(sportParam), api.stats.record(sportParam)])
-      .then(([p, r]) => { setPicks(p); setRecord(r); })
+    Promise.all([
+      api.picks.today(sportParam),
+      api.stats.record(sportParam),
+      api.games.today(sportParam),
+    ])
+      .then(([p, r, g]) => { setPicks(p); setRecord(r); setGames(g); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
 
@@ -34,60 +45,118 @@ export default function TodaysPicks() {
     }).catch(() => {});
   }, [sport]);
 
-  if (error) return <p style={{ color: '#f87171' }}>Error: {error}</p>;
-  if (loading) return <p>Loading picks...</p>;
+  if (error) return <div className="empty-state"><div className="empty-state-title text-red">Error: {error}</div></div>;
+  if (loading) return <div className="loading"><div className="spinner" /> Loading picks...</div>;
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem' }}>
-        {SPORTS.map(s => (
-          <button key={s} onClick={() => setSport(s)} style={{
-            background: sport === s ? '#1e40af' : 'transparent',
-            color: sport === s ? '#fff' : '#94a3b8',
-            border: '1px solid #334155', borderRadius: '6px',
-            padding: '0.5rem 1rem', cursor: 'pointer' }}>
-            {s.toUpperCase()}
-          </button>
-        ))}
+      <div className="toolbar">
+        <div className="tab-group">
+          {SPORTS.map(s => (
+            <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => setSport(s)}>
+              {s.toUpperCase()}
+            </button>
+          ))}
+        </div>
       </div>
+
       <SummaryCards record={record} pickCount={picks.length} strategyName="Ensemble" />
-      <PicksTable picks={picks} />
+
+      {picks.length > 0 && <PicksTable picks={picks} />}
+
+      {games.length > 0 && (
+        <div style={{ marginTop: '1.25rem' }}>
+          <div className="section-header">
+            Today's Games & Odds <span className="section-divider" />
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Sport</th>
+                  <th>Matchup</th>
+                  <th>Status</th>
+                  <th>Spread</th>
+                  <th>ML Home</th>
+                  <th>ML Away</th>
+                  <th>O/U</th>
+                  <th>Book</th>
+                </tr>
+              </thead>
+              <tbody>
+                {games.map(g => (
+                  <tr key={g.id}>
+                    <td><span className="badge badge-default">{g.sport.toUpperCase()}</span></td>
+                    <td className="font-medium">
+                      {g.away_team} <span className="text-muted">@</span> {g.home_team}
+                      {g.status === 'final' && (
+                        <span className="text-muted mono" style={{ marginLeft: '0.5rem' }}>
+                          ({g.away_score} - {g.home_score})
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`badge ${g.status === 'final' ? 'badge-green' : g.status === 'in_progress' ? 'badge-yellow' : 'badge-default'}`}>
+                        {g.status}
+                      </span>
+                    </td>
+                    <td className="mono">{formatSpread(g.spread_home)}</td>
+                    <td className="mono" style={{ color: g.moneyline_home && g.moneyline_home > 0 ? 'var(--green)' : undefined }}>
+                      {formatOdds(g.moneyline_home)}
+                    </td>
+                    <td className="mono" style={{ color: g.moneyline_away && g.moneyline_away > 0 ? 'var(--green)' : undefined }}>
+                      {formatOdds(g.moneyline_away)}
+                    </td>
+                    <td className="mono">{g.over_under ?? '-'}</td>
+                    <td className="text-muted" style={{ fontSize: '0.75rem' }}>{g.bookmaker ?? '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {topProps.length > 0 && (
-        <div style={{ marginTop: '2rem' }}>
-          <h3 style={{ marginBottom: '0.5rem' }}>Top Props</h3>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.15)', textAlign: 'left' }}>
-                <th style={{ padding: '0.4rem 0.5rem' }}>Player</th>
-                <th style={{ padding: '0.4rem 0.5rem' }}>Market</th>
-                <th style={{ padding: '0.4rem 0.5rem' }}>Pick</th>
-                <th style={{ padding: '0.4rem 0.5rem' }}>Line</th>
-                <th style={{ padding: '0.4rem 0.5rem' }}>Projection</th>
-                <th style={{ padding: '0.4rem 0.5rem' }}>Edge%</th>
-                <th style={{ padding: '0.4rem 0.5rem' }}>Confidence</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topProps.map(p => (
-                <tr key={p.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <td style={{ padding: '0.4rem 0.5rem', fontWeight: 500 }}>{p.player_name}</td>
-                  <td style={{ padding: '0.4rem 0.5rem' }}>
-                    <span style={{ background: 'rgba(255,255,255,0.08)', padding: '0.1rem 0.4rem', borderRadius: '3px', fontSize: '0.8rem' }}>
-                      {p.market_label}
-                    </span>
-                  </td>
-                  <td style={{ padding: '0.4rem 0.5rem', color: '#4ade80', fontWeight: 'bold' }}>{p.outcome}</td>
-                  <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'monospace' }}>{p.line}</td>
-                  <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'monospace' }}>{p.projection}</td>
-                  <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'monospace', color: '#4ade80' }}>
-                    {p.edge_pct?.toFixed(1)}%
-                  </td>
-                  <td style={{ padding: '0.4rem 0.5rem' }}>{stars(p.confidence)}</td>
+        <div style={{ marginTop: '1.5rem' }}>
+          <div className="section-header">
+            Top Props <span className="section-divider" />
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th>Market</th>
+                  <th>Pick</th>
+                  <th>Line</th>
+                  <th>Projection</th>
+                  <th>Edge</th>
+                  <th>Confidence</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {topProps.map(p => (
+                  <tr key={p.id}>
+                    <td className="font-medium text-primary">{p.player_name}</td>
+                    <td><span className="badge badge-default">{p.market_label}</span></td>
+                    <td className="text-green font-bold">{p.outcome}</td>
+                    <td className="mono">{p.line}</td>
+                    <td className="mono">{p.projection}</td>
+                    <td className="mono text-green">{p.edge_pct?.toFixed(1)}%</td>
+                    <td><ConfidenceStars rating={p.confidence ?? 0} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {games.length === 0 && picks.length === 0 && (
+        <div className="empty-state">
+          <div className="empty-state-title">No games or picks today</div>
+          <div className="empty-state-sub">Run the pipeline to fetch today's games and odds.</div>
         </div>
       )}
     </div>
