@@ -1,13 +1,15 @@
 import logging
 
+import numpy as np
 from scipy.stats import norm
 
 from backend.analysis.strategy import Strategy
 from backend.analysis.confidence import calculate_confidence
 from backend.analysis.odds_utils import american_to_implied_prob, remove_vig
-from backend.analysis.calibrated_model import CalibratedModel
+from backend.analysis.calibrated_model import CalibratedModel, extract_features, features_to_array, _stat_value
+from backend.analysis.ml_model import LightGBMModel, MIN_ML_GAMES
 from backend.analysis.kelly import fractional_kelly
-from backend.data_types import GameData, Pick
+from backend.data_types import GameData, TeamStats, Pick
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,10 @@ TOTAL_POINTS_STD = 15.0  # game-to-game total std dev
 
 class EnsembleStrategy(Strategy):
     _calibrated: CalibratedModel | None = None
+
+    def __init__(self, name: str, config: dict):
+        super().__init__(name, config)
+        self._lgbm_model: LightGBMModel | None = None
 
     def predict(self, game: GameData) -> list[Pick]:
         if not game.odds: return []
@@ -120,10 +126,30 @@ class EnsembleStrategy(Strategy):
         return picks
 
     def _calibrated_probability(self, game: GameData) -> float:
-        """Use calibrated logistic regression if available, else fall back."""
+        """Get calibrated P(home win), preferring LightGBM for NBA."""
+        # Use LightGBM regression model for NBA if trained
+        if game.sport == "nba" and self._lgbm_model and self._lgbm_model.trained:
+            feature_dict = extract_features(game)
+            feature_array = features_to_array(feature_dict)
+            home_prob = self._lgbm_model.home_win_prob(np.array([feature_array]))
+        else:
+            home_prob = self._legacy_calibrated_probability(game)
+
+        # Schedule adjustments
+        if game.home_stats.is_schedule_fatigued:
+            home_prob -= 0.03 * game.home_stats.schedule_fatigue_score
+        if game.away_stats.is_schedule_fatigued:
+            home_prob += 0.03 * game.away_stats.schedule_fatigue_score
+        if game.home_stats.is_lookahead_spot:
+            home_prob -= 0.04
+        if game.away_stats.is_lookahead_spot:
+            home_prob += 0.04
+        return max(0.01, min(0.99, home_prob))
+
+    def _legacy_calibrated_probability(self, game: GameData) -> float:
+        """Fallback: logistic regression or heuristic sigmoid."""
         if EnsembleStrategy._calibrated is None:
             EnsembleStrategy._calibrated = CalibratedModel()
-            # Attempt lazy training from the database
             try:
                 from backend.database import get_engine, get_session
                 import os
@@ -136,21 +162,84 @@ class EnsembleStrategy(Strategy):
                     session.close()
             except Exception:
                 logger.warning("Could not train calibrated model; using fallback.", exc_info=True)
+        return EnsembleStrategy._calibrated.predict_home_win_prob(game)
 
-        home_prob = EnsembleStrategy._calibrated.predict_home_win_prob(game)
+    def _predicted_point_diff_ml(self, game: GameData) -> tuple[float, float]:
+        """Get predicted margin and residual std from LightGBM.
 
-        # Schedule adjustments
-        if game.home_stats.is_schedule_fatigued:
-            home_prob -= 0.03 * game.home_stats.schedule_fatigue_score
-        if game.away_stats.is_schedule_fatigued:
-            home_prob += 0.03 * game.away_stats.schedule_fatigue_score
-        if game.home_stats.is_lookahead_spot:
-            home_prob -= 0.04
-        if game.away_stats.is_lookahead_spot:
-            home_prob += 0.04
-        home_prob = max(0.01, min(0.99, home_prob))
+        Returns (predicted_margin, residual_std).
+        Falls back to heuristic if ML not available.
+        """
+        if game.sport == "nba" and self._lgbm_model and self._lgbm_model.trained:
+            feature_dict = extract_features(game)
+            feature_array = features_to_array(feature_dict)
+            margin = self._lgbm_model.predict(np.array([feature_array]))
+            std = self._lgbm_model.residual_std or POINT_DIFF_STD
+            return margin, std
+        return self._predicted_point_diff(game), POINT_DIFF_STD
 
-        return home_prob
+    def train_lgbm_from_db(self, session) -> None:
+        """Train LightGBM on all completed games from the database."""
+        from backend.models import Game, TeamStat, EloRating
+
+        games = session.query(Game).filter(
+            Game.status == "final",
+            Game.home_score.isnot(None),
+        ).all()
+
+        if len(games) < MIN_ML_GAMES:
+            logger.info("Only %d games, need %d for ML", len(games), MIN_ML_GAMES)
+            return
+
+        X_list, y_list, dates_list = [], [], []
+        elo_map = {e.team_id: e.rating for e in session.query(EloRating).all()}
+
+        for game in games:
+            home_stats = session.query(TeamStat).filter(
+                TeamStat.game_id == game.id, TeamStat.team_id == game.home_team_id,
+            ).all()
+            away_stats = session.query(TeamStat).filter(
+                TeamStat.game_id == game.id, TeamStat.team_id == game.away_team_id,
+            ).all()
+
+            home_ts = TeamStats(
+                point_diff=_stat_value(home_stats, "point_diff") or 0.0,
+                home_record=(0, 0), away_record=(0, 0), last_n_record=(0, 0),
+                offensive_rating=_stat_value(home_stats, "offensive_rating") or 100.0,
+                defensive_rating=_stat_value(home_stats, "defensive_rating") or 100.0,
+                pace=_stat_value(home_stats, "pace") or 100.0,
+                strength_of_schedule=0.0,
+                elo_rating=elo_map.get(game.home_team_id, 1500.0),
+                rest_days=int(_stat_value(home_stats, "rest_days") or 1),
+            )
+            away_ts = TeamStats(
+                point_diff=_stat_value(away_stats, "point_diff") or 0.0,
+                home_record=(0, 0), away_record=(0, 0), last_n_record=(0, 0),
+                offensive_rating=_stat_value(away_stats, "offensive_rating") or 100.0,
+                defensive_rating=_stat_value(away_stats, "defensive_rating") or 100.0,
+                pace=_stat_value(away_stats, "pace") or 100.0,
+                strength_of_schedule=0.0,
+                elo_rating=elo_map.get(game.away_team_id, 1500.0),
+                rest_days=int(_stat_value(away_stats, "rest_days") or 1),
+            )
+            gd = GameData(
+                game_id=game.id, sport=game.sport, date=game.date,
+                home_team_id=game.home_team_id, away_team_id=game.away_team_id,
+                home_stats=home_ts, away_stats=away_ts,
+            )
+            features = extract_features(gd)
+            X_list.append(features_to_array(features))
+            y_list.append(game.home_score - game.away_score)
+            dates_list.append(game.date)
+
+        self._lgbm_model = LightGBMModel()
+        X = np.array(X_list)
+        y = np.array(y_list, dtype=float)
+        self._lgbm_model.train(X, y, dates_list)
+
+        if self._lgbm_model.trained:
+            metrics = self._lgbm_model.walk_forward_validate(X, y, dates_list)
+            logger.info("LightGBM walk-forward: %s", metrics)
 
     def _model_probability(self, game: GameData) -> float:
         hs, aws = game.home_stats, game.away_stats
