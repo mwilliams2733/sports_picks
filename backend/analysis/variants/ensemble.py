@@ -1,13 +1,19 @@
 import logging
 
+from scipy.stats import norm
+
 from backend.analysis.strategy import Strategy
 from backend.analysis.confidence import calculate_confidence
-from backend.analysis.odds_utils import american_to_implied_prob
+from backend.analysis.odds_utils import american_to_implied_prob, remove_vig
 from backend.analysis.calibrated_model import CalibratedModel
 from backend.analysis.kelly import fractional_kelly
 from backend.data_types import GameData, Pick
 
 logger = logging.getLogger(__name__)
+
+# NBA empirical standard deviations for CDF-based edge calculations
+POINT_DIFF_STD = 12.0   # game-to-game margin std dev
+TOTAL_POINTS_STD = 15.0  # game-to-game total std dev
 
 class EnsembleStrategy(Strategy):
     _calibrated: CalibratedModel | None = None
@@ -22,10 +28,11 @@ class EnsembleStrategy(Strategy):
         avg_odds = self._average_odds(game)
         if avg_odds is None: return []
 
-        # Moneyline picks
+        # Moneyline picks — use vig-adjusted implied probabilities
         if avg_odds["moneyline_home"] is not None:
-            implied_home = american_to_implied_prob(avg_odds["moneyline_home"])
-            implied_away = american_to_implied_prob(avg_odds["moneyline_away"])
+            raw_home = american_to_implied_prob(avg_odds["moneyline_home"])
+            raw_away = american_to_implied_prob(avg_odds["moneyline_away"])
+            implied_home, implied_away = remove_vig(raw_home, raw_away)
             home_edge = (home_prob - implied_home) * 100
             away_edge = (away_prob - implied_away) * 100
             if home_edge >= min_edge:
@@ -43,70 +50,72 @@ class EnsembleStrategy(Strategy):
                     odds_at_pick=avg_odds["moneyline_away"],
                     suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction)))
 
-        # Spread picks
+        # Spread picks — distribution-based: P(cover) via normal CDF
         if avg_odds.get("spread_home") is not None:
             predicted_diff = self._predicted_point_diff(game)
-            spread_line = avg_odds["spread_home"]
-            # Model says home wins by predicted_diff; spread says home must cover spread_line
-            # spread_line is negative for favorites (e.g., -3.5)
-            # Edge: how much model disagrees with the line
-            spread_edge = abs(predicted_diff - (-spread_line))
-            if spread_edge >= min_edge:
-                models = self._count_agreeing_models(game, "home" if predicted_diff > -spread_line else "away")
-                if predicted_diff > -spread_line:
-                    # Model thinks home covers
-                    pick_value = f"HOME {spread_line:+g}"
-                    picks.append(Pick(game_id=game.game_id, pick_type="spread",
-                        pick_value=pick_value,
-                        confidence=calculate_confidence(spread_edge, models),
-                        edge_pct=round(spread_edge, 1),
-                        model_probability=round(home_prob, 4),
-                        implied_probability=0.5,
-                        odds_at_pick=-110,
-                        suggested_unit_size=fractional_kelly(home_prob, -110, kelly_fraction)))
-                else:
-                    # Model thinks away covers
-                    spread_away = avg_odds["spread_away"]
-                    pick_value = f"AWAY +{spread_away:g}" if spread_away >= 0 else f"AWAY {spread_away:g}"
-                    picks.append(Pick(game_id=game.game_id, pick_type="spread",
-                        pick_value=pick_value,
-                        confidence=calculate_confidence(spread_edge, models),
-                        edge_pct=round(spread_edge, 1),
-                        model_probability=round(away_prob, 4),
-                        implied_probability=0.5,
-                        odds_at_pick=-110,
-                        suggested_unit_size=fractional_kelly(away_prob, -110, kelly_fraction)))
+            spread_home = avg_odds["spread_home"]  # e.g., -3.5 for home favorite
+            # Home covers when margin > abs(spread) for favorites
+            cover_threshold = -spread_home  # -(-3.5) = 3.5: home must win by >3.5
+            home_cover_prob = self._spread_cover_prob(predicted_diff, cover_threshold)
+            away_cover_prob = 1.0 - home_cover_prob
+            spread_fair = 0.5  # spread markets are ~50/50 after vig by design
+            home_spread_edge = (home_cover_prob - spread_fair) * 100
+            away_spread_edge = (away_cover_prob - spread_fair) * 100
+            if home_spread_edge >= min_edge:
+                models = self._count_agreeing_models(game, "home")
+                pick_value = f"HOME {spread_home:+g}"
+                picks.append(Pick(game_id=game.game_id, pick_type="spread",
+                    pick_value=pick_value,
+                    confidence=calculate_confidence(home_spread_edge, models),
+                    edge_pct=round(home_spread_edge, 1),
+                    model_probability=round(home_cover_prob, 4),
+                    implied_probability=spread_fair,
+                    odds_at_pick=-110,
+                    suggested_unit_size=fractional_kelly(home_cover_prob, -110, kelly_fraction)))
+            elif away_spread_edge >= min_edge:
+                models = self._count_agreeing_models(game, "away")
+                spread_away = avg_odds["spread_away"]
+                pick_value = f"AWAY +{spread_away:g}" if spread_away >= 0 else f"AWAY {spread_away:g}"
+                picks.append(Pick(game_id=game.game_id, pick_type="spread",
+                    pick_value=pick_value,
+                    confidence=calculate_confidence(away_spread_edge, models),
+                    edge_pct=round(away_spread_edge, 1),
+                    model_probability=round(away_cover_prob, 4),
+                    implied_probability=spread_fair,
+                    odds_at_pick=-110,
+                    suggested_unit_size=fractional_kelly(away_cover_prob, -110, kelly_fraction)))
 
-        # Over/Under picks
+        # Over/Under picks — distribution-based: P(over) via normal CDF
         if avg_odds.get("over_under") is not None:
             predicted_total = self._predicted_total(game)
             ou_line = avg_odds["over_under"]
-            ou_edge = abs(predicted_total - ou_line)
-            if ou_edge >= min_edge:
-                models = self._count_total_agreeing_models(game, predicted_total > ou_line)
-                # Estimate win probability from edge for Kelly sizing
-                # (model_probability stores predicted total, not a probability)
-                ou_win_prob = min(0.99, 0.5 + ou_edge / 200)
-                if predicted_total > ou_line:
-                    pick_value = f"Over {ou_line:g}"
-                    picks.append(Pick(game_id=game.game_id, pick_type="over_under",
-                        pick_value=pick_value,
-                        confidence=calculate_confidence(ou_edge, models),
-                        edge_pct=round(ou_edge, 1),
-                        model_probability=round(predicted_total, 4),
-                        implied_probability=round(ou_line, 4),
-                        odds_at_pick=-110,
-                        suggested_unit_size=fractional_kelly(ou_win_prob, -110, kelly_fraction)))
-                else:
-                    pick_value = f"Under {ou_line:g}"
-                    picks.append(Pick(game_id=game.game_id, pick_type="over_under",
-                        pick_value=pick_value,
-                        confidence=calculate_confidence(ou_edge, models),
-                        edge_pct=round(ou_edge, 1),
-                        model_probability=round(predicted_total, 4),
-                        implied_probability=round(ou_line, 4),
-                        odds_at_pick=-110,
-                        suggested_unit_size=fractional_kelly(ou_win_prob, -110, kelly_fraction)))
+            over_prob = self._over_probability(predicted_total, ou_line)
+            under_prob = 1.0 - over_prob
+            ou_fair = 0.5  # O/U markets are ~50/50 after vig by design
+            over_edge = (over_prob - ou_fair) * 100
+            under_edge = (under_prob - ou_fair) * 100
+            if over_edge >= min_edge:
+                models = self._count_total_agreeing_models(game, True)
+                pick_value = f"Over {ou_line:g}"
+                picks.append(Pick(game_id=game.game_id, pick_type="over_under",
+                    pick_value=pick_value,
+                    confidence=calculate_confidence(over_edge, models),
+                    edge_pct=round(over_edge, 1),
+                    model_probability=round(over_prob, 4),
+                    implied_probability=ou_fair,
+                    odds_at_pick=-110,
+                    suggested_unit_size=fractional_kelly(over_prob, -110, kelly_fraction)))
+            elif under_edge >= min_edge:
+                models = self._count_total_agreeing_models(game, False)
+                pick_value = f"Under {ou_line:g}"
+                picks.append(Pick(game_id=game.game_id, pick_type="over_under",
+                    pick_value=pick_value,
+                    confidence=calculate_confidence(under_edge, models),
+                    edge_pct=round(under_edge, 1),
+                    model_probability=round(under_prob, 4),
+                    implied_probability=ou_fair,
+                    odds_at_pick=-110,
+                    suggested_unit_size=fractional_kelly(under_prob, -110, kelly_fraction)))
 
         return picks
 
@@ -193,6 +202,21 @@ class EnsembleStrategy(Strategy):
         avg_pace = (hs.pace + aws.pace) / 2
         total_off = hs.offensive_rating + aws.offensive_rating
         return avg_pace * total_off / 200
+
+    def _spread_cover_prob(self, predicted_diff: float, cover_threshold: float, std: float = POINT_DIFF_STD) -> float:
+        """Probability that home margin exceeds the cover threshold.
+
+        Args:
+            predicted_diff: Model's predicted home margin (positive = home favored)
+            cover_threshold: Points the home team needs to win by to cover.
+                For home -3.5 spread: cover_threshold = 3.5 (must win by >3.5)
+            std: Standard deviation of prediction residuals
+        """
+        return float(norm.sf(cover_threshold, loc=predicted_diff, scale=std))
+
+    def _over_probability(self, predicted_total: float, ou_line: float, std: float = TOTAL_POINTS_STD) -> float:
+        """Probability that total points exceeds the O/U line."""
+        return float(norm.sf(ou_line, loc=predicted_total, scale=std))
 
     def _count_total_agreeing_models(self, game: GameData, is_over: bool) -> int:
         """Count models that agree with over/under prediction."""

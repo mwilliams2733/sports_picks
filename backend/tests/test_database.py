@@ -17,8 +17,9 @@ def test_create_all_tables(db_engine):
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         )).scalars().all()
     expected = [
-        "api_usage", "backtest_picks", "backtest_runs", "elo_ratings",
-        "games", "odds", "pick_results", "picks", "player_props",
-        "player_stats", "strategies", "team_stats", "teams"
+        "api_usage", "backtest_picks", "backtest_runs", "calibration_history",
+        "elo_ratings", "games", "model_metrics", "odds", "paper_picks",
+        "pick_results", "picks", "player_props", "player_stats",
+        "strategies", "team_stats", "teams", "user_profiles"
     ]
     assert sorted(tables) == sorted(expected)
