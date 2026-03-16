@@ -19,8 +19,14 @@ def run_pipeline(config_path: str = "config.yaml"):
     Base.metadata.create_all(engine)
     scheduler = BackgroundScheduler()
     scheduler.add_job(lambda: daily_job(config, engine), 'cron', hour=6, minute=0, id='daily_pipeline')
+    from backend.pipeline.recalibration_job import run_recalibration
+    scheduler.add_job(
+        lambda: run_recalibration(config["database_path"]),
+        'cron', hour=3, minute=0, id='recalibration',
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Pipeline scheduler started. Press Ctrl+C to exit.")
+    logger.info("Pipeline scheduler started (daily at 6 AM, recalibration at 3 AM).")
     try:
         while True:
             time.sleep(60)
