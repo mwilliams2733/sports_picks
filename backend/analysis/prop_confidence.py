@@ -1,8 +1,30 @@
-def calculate_prop_confidence(edge_pct: float) -> int:
-    """Prop-specific confidence tiers (no model agreement concept)."""
-    if edge_pct >= 20.0: return 5
-    if edge_pct >= 15.0: return 4
-    if edge_pct >= 10.0: return 3
-    if edge_pct >= 7.0: return 2
-    if edge_pct >= 5.0: return 1
+DEFAULT_PROP_THRESHOLDS = {5: 20.0, 4: 15.0, 3: 10.0, 2: 7.0, 1: 5.0}
+
+
+def get_prop_thresholds(session=None, sport: str = "nba") -> dict:
+    """Load latest prop confidence thresholds from DB, or return defaults."""
+    if session is None:
+        return DEFAULT_PROP_THRESHOLDS
+    from backend.models import CalibrationHistory
+    rows = (
+        session.query(CalibrationHistory)
+        .filter(
+            CalibrationHistory.sport == sport,
+            CalibrationHistory.confidence_tier >= 100,
+        )
+        .order_by(CalibrationHistory.date.desc())
+        .limit(5)
+        .all()
+    )
+    if not rows:
+        return DEFAULT_PROP_THRESHOLDS
+    return {row.confidence_tier - 100: row.new_threshold for row in rows}
+
+
+def calculate_prop_confidence(edge_pct: float, thresholds: dict | None = None) -> int:
+    if thresholds is None:
+        thresholds = DEFAULT_PROP_THRESHOLDS
+    for tier in (5, 4, 3, 2, 1):
+        if edge_pct >= thresholds.get(tier, 999):
+            return tier
     return 0

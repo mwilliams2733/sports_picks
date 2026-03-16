@@ -1,7 +1,31 @@
-def calculate_confidence(edge_pct: float, models_agreeing: int) -> int:
-    if edge_pct >= 12.0 and models_agreeing >= 3: return 5
-    if edge_pct >= 8.0 and models_agreeing >= 2: return 4
-    if edge_pct >= 5.0 and models_agreeing >= 2: return 3
-    if edge_pct >= 5.0 and models_agreeing >= 1: return 2
-    if edge_pct >= 3.0: return 1
+DEFAULT_THRESHOLDS = {5: 12.0, 4: 8.0, 3: 5.0, 2: 5.0, 1: 3.0}
+DEFAULT_MIN_MODELS = {5: 3, 4: 2, 3: 2, 2: 1, 1: 0}
+
+
+def get_thresholds(session=None, sport: str = "nba") -> dict:
+    """Load latest confidence thresholds from DB, or return defaults."""
+    if session is None:
+        return DEFAULT_THRESHOLDS
+    from backend.models import CalibrationHistory
+    rows = (
+        session.query(CalibrationHistory)
+        .filter(CalibrationHistory.sport == sport)
+        .order_by(CalibrationHistory.date.desc())
+        .limit(5)
+        .all()
+    )
+    if not rows:
+        return DEFAULT_THRESHOLDS
+    return {row.confidence_tier: row.new_threshold for row in rows}
+
+
+def calculate_confidence(
+    edge_pct: float, models_agreeing: int, thresholds: dict | None = None,
+) -> int:
+    if thresholds is None:
+        thresholds = DEFAULT_THRESHOLDS
+    min_models = DEFAULT_MIN_MODELS
+    for tier in (5, 4, 3, 2, 1):
+        if edge_pct >= thresholds.get(tier, 999) and models_agreeing >= min_models.get(tier, 0):
+            return tier
     return 0
