@@ -1,0 +1,89 @@
+"""Tests for confidence recalibrator."""
+from datetime import date, datetime, timezone
+from backend.analysis.recalibrator import Recalibrator, MIN_PICKS_PER_TIER
+from backend.models import Base, PickModel, PickResult, Game, Team, StrategyModel, CalibrationHistory
+from backend.database import get_engine, get_session
+
+
+def _setup_db():
+    engine = get_engine(":memory:")
+    Base.metadata.create_all(engine)
+    session = get_session(engine)
+    t1 = Team(name="Team A", abbreviation="TA", sport="nba")
+    t2 = Team(name="Team B", abbreviation="TB", sport="nba")
+    session.add_all([t1, t2])
+    session.commit()
+    strat = StrategyModel(name="test", sport="nba", config_json="{}")
+    session.add(strat)
+    session.commit()
+    return session, t1, t2, strat
+
+
+def _add_picks(session, t1, t2, strat, confidence, wins, losses):
+    for i in range(wins + losses):
+        game = Game(
+            sport="nba", season="2025-26",
+            date=date(2026, 3, i % 28 + 1),
+            home_team_id=t1.id, away_team_id=t2.id,
+            home_score=100 + i, away_score=95,
+            status="final",
+        )
+        session.add(game)
+        session.commit()
+        pick = PickModel(
+            game_id=game.id, strategy_id=strat.id,
+            pick_type="moneyline", pick_value="HOME ML",
+            confidence=confidence, edge_pct=10.0, odds_at_pick=-150,
+        )
+        session.add(pick)
+        session.commit()
+        result = PickResult(
+            pick_id=pick.id,
+            result="win" if i < wins else "loss",
+            payout=100.0 if i < wins else 0.0,
+        )
+        session.add(result)
+    session.commit()
+
+
+def test_min_picks_per_tier():
+    assert MIN_PICKS_PER_TIER == 20
+
+
+def test_recalibrator_skips_small_samples():
+    session, t1, t2, strat = _setup_db()
+    _add_picks(session, t1, t2, strat, confidence=5, wins=8, losses=2)
+    recal = Recalibrator(session, sport="nba")
+    adjustments = recal.run(days=90)
+    assert 5 not in adjustments
+
+
+def test_recalibrator_tightens_when_underperforming():
+    session, t1, t2, strat = _setup_db()
+    _add_picks(session, t1, t2, strat, confidence=5, wins=11, losses=9)
+    recal = Recalibrator(session, sport="nba")
+    adjustments = recal.run(days=90)
+    assert 5 in adjustments
+    assert adjustments[5]["direction"] == "tighten"
+    assert adjustments[5]["new_threshold"] > 12.0
+
+
+def test_recalibrator_loosens_when_overperforming():
+    session, t1, t2, strat = _setup_db()
+    _add_picks(session, t1, t2, strat, confidence=3, wins=18, losses=6)
+    recal = Recalibrator(session, sport="nba")
+    adjustments = recal.run(days=90)
+    assert 3 in adjustments
+    assert adjustments[3]["direction"] == "loosen"
+    assert adjustments[3]["new_threshold"] < 5.0
+
+
+def test_recalibrator_saves_to_db():
+    session, t1, t2, strat = _setup_db()
+    _add_picks(session, t1, t2, strat, confidence=5, wins=11, losses=9)
+    recal = Recalibrator(session, sport="nba")
+    recal.run(days=90)
+    rows = session.query(CalibrationHistory).all()
+    assert len(rows) >= 1
+    assert rows[0].sport == "nba"
+    assert rows[0].confidence_tier == 5
