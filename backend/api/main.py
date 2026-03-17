@@ -32,6 +32,9 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
     from backend.api.users import router as users_router
     app.include_router(users_router, prefix="/users", tags=["users"])
 
+    from backend.api.websocket import websocket_endpoint
+    app.websocket("/ws")(websocket_endpoint)
+
     import os
     static_dir = os.path.join(os.path.dirname(__file__), "../../frontend/dist")
     if os.path.exists(static_dir):
