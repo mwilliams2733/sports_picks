@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import time
-from datetime import date
+from datetime import date, datetime, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.config import load_config, is_sport_in_season
 from backend.database import get_engine, get_session
@@ -9,7 +9,9 @@ from backend.pipeline.full_pipeline import fetch_and_store_games, fetch_and_stor
 from backend.pipeline.pick_generator import generate_and_store_picks
 from backend.pipeline.prop_pipeline import run_prop_pipeline
 from backend.pipeline.grader import grade_pick
-from backend.models import Base, Game, Odds, PickModel, PickResult, StrategyModel
+from backend.models import Base, Game, Odds, PickModel, PickResult, StrategyModel, PaperPick, UserProfile, PlayerStat
+from backend.analysis.odds_utils import calculate_payout
+from backend.pipeline.grader import grade_prop_pick
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +122,50 @@ def grade_pending_picks(session):
                 odds_at_close=closing_odds_val
             ))
     session.commit()
-    logger.info(f"Graded {len(ungraded)} picks")
+    logger.info(f"Graded {len(ungraded)} strategy picks")
+
+    # Also grade pending PaperPicks
+    pending_paper = (
+        session.query(PaperPick, Game)
+        .join(Game, PaperPick.game_id == Game.id)
+        .filter(PaperPick.result.is_(None))
+        .filter(Game.status == "final")
+        .all()
+    )
+    paper_graded = 0
+    for pick, game in pending_paper:
+        if game.home_score is None or game.away_score is None:
+            continue
+
+        if pick.pick_type == "prop" and pick.prop_player and pick.prop_market:
+            player_stat = (
+                session.query(PlayerStat)
+                .filter_by(player_name=pick.prop_player, stat_type="game_log", game_date=game.date)
+                .first()
+            )
+            prop_result = grade_prop_pick(pick.pick_value, pick.prop_market, player_stat)
+            if not prop_result:
+                continue
+            pick.result = prop_result[0]
+        else:
+            result, _ = grade_pick(
+                pick.pick_type, pick.pick_value,
+                game.home_score, game.away_score, pick.odds
+            )
+            pick.result = result
+
+        if pick.result == "win":
+            pick.payout = pick.stake * calculate_payout(pick.odds)
+        elif pick.result == "push":
+            pick.payout = 0.0
+        else:
+            pick.payout = -pick.stake
+
+        pick.graded_at = datetime.now(timezone.utc) if hasattr(pick, 'graded_at') else None
+        paper_graded += 1
+
+    session.commit()
+    logger.info(f"Auto-graded {paper_graded} paper picks")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
