@@ -170,6 +170,9 @@ export interface UserProfile {
   pushes: number;
   pending: number;
   win_rate: number;
+  current_streak: number;
+  best_streak: number;
+  streak_type: string;
   created_at?: string;
 }
 
