@@ -1,0 +1,17 @@
+{
+  "name": "SP Sports Picks",
+  "short_name": "Sports Picks",
+  "description": "Data-driven sports betting analysis for your friend group",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1121",
+  "theme_color": "#3b82f6",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
