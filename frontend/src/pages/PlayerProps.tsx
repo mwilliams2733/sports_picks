@@ -3,6 +3,7 @@ import { useAppStore } from '../stores/appStore';
 import { useProps } from '../hooks/useProps';
 import type { PropData } from '../types';
 import ConfidenceStars from '../components/ConfidenceStars';
+import BetModal from '../components/BetModal';
 
 const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'boxing', 'mma'] as const;
 
@@ -14,6 +15,24 @@ export default function PlayerProps() {
   const { sport, setSport } = useAppStore();
   const [market, setMarket] = useState<string>('');
   const [minConfidence, setMinConfidence] = useState(0);
+  const [betModalOpen, setBetModalOpen] = useState(false);
+  const [betModalData, setBetModalData] = useState<{
+    pickValue: string; pickType: string; odds: number; gameId: number;
+    edgePct?: number; propMarket?: string; propPlayer?: string;
+  } | null>(null);
+
+  const handleBetProp = (p: PropData) => {
+    setBetModalData({
+      pickValue: `${p.player_name} ${p.outcome} ${p.line}`,
+      pickType: 'prop',
+      odds: p.odds,
+      gameId: p.game_id,
+      edgePct: p.edge_pct ?? undefined,
+      propMarket: p.market,
+      propPlayer: p.player_name,
+    });
+    setBetModalOpen(true);
+  };
 
   const marketParam = market || undefined;
   const { props, markets } = useProps(sport, marketParam);
@@ -94,6 +113,7 @@ export default function PlayerProps() {
                     <th>Edge</th>
                     <th>Conf</th>
                     <th>Source</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -134,6 +154,11 @@ export default function PlayerProps() {
                               <span className="badge badge-yellow" style={{ marginLeft: '0.35rem' }}>stale</span>
                             )}
                           </td>
+                          <td>
+                            <button className="btn-bet" onClick={() => handleBetProp(over ?? under!)}>
+                              Bet This
+                            </button>
+                          </td>
                         </tr>
                       );
                     });
@@ -143,6 +168,20 @@ export default function PlayerProps() {
             </div>
           </div>
         ))
+      )}
+
+      {betModalData && (
+        <BetModal
+          open={betModalOpen}
+          onClose={() => setBetModalOpen(false)}
+          pickValue={betModalData.pickValue}
+          pickType={betModalData.pickType}
+          odds={betModalData.odds}
+          gameId={betModalData.gameId}
+          edgePct={betModalData.edgePct}
+          propMarket={betModalData.propMarket}
+          propPlayer={betModalData.propPlayer}
+        />
       )}
     </div>
   );

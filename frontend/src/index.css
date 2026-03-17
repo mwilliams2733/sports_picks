@@ -1209,3 +1209,142 @@ body {
     padding-bottom: 72px; /* space for bottom nav */
   }
 }
+
+/* === Bet Modal === */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 300;
+}
+
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  width: 90%;
+  max-width: 420px;
+  z-index: 301;
+  box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.25rem;
+  cursor: pointer;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-body {
+  padding: 1.25rem;
+}
+
+.bet-modal-user-setup {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.bet-modal-user-setup .input {
+  flex: 1;
+}
+
+.bet-modal-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.bet-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.bet-detail-label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.bet-detail-value {
+  font-weight: 600;
+}
+
+.bet-stake-input {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.bet-stake-input .input {
+  width: 120px;
+  text-align: right;
+}
+
+.bet-result {
+  text-align: center;
+  padding: 1.5rem;
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+}
+
+.bet-result.win {
+  border: 1px solid var(--green);
+}
+
+.bet-result.loss {
+  border: 1px solid var(--red);
+}
+
+.bet-result-label {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.bet-result-payout {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.btn-bet {
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  min-height: 32px;
+  transition: all var(--transition);
+}
+
+.btn-bet:hover {
+  opacity: 0.9;
+}

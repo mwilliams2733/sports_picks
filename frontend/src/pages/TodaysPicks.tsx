@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { useAppStore } from '../stores/appStore';
 import { useTodaysPicks } from '../hooks/useTodaysPicks';
-import type { PropData } from '../types';
+import type { PropData, PickData } from '../types';
 import SummaryCards from '../components/SummaryCards';
 import PicksTable from '../components/PicksTable';
 import ConfidenceStars from '../components/ConfidenceStars';
+import BetModal from '../components/BetModal';
 
 const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'boxing', 'mma'] as const;
 
@@ -23,6 +24,35 @@ export default function TodaysPicks() {
   const { sport, setSport } = useAppStore();
   const { picks, record, games } = useTodaysPicks(sport);
   const [topProps, setTopProps] = useState<PropData[]>([]);
+  const [betModalOpen, setBetModalOpen] = useState(false);
+  const [betModalData, setBetModalData] = useState<{
+    pickValue: string; pickType: string; odds: number; gameId: number;
+    edgePct?: number; propMarket?: string; propPlayer?: string;
+  } | null>(null);
+
+  const handleBetPick = (pick: PickData) => {
+    setBetModalData({
+      pickValue: pick.pick_value,
+      pickType: pick.pick_type,
+      odds: pick.odds_at_pick,
+      gameId: pick.game_id,
+      edgePct: pick.edge_pct,
+    });
+    setBetModalOpen(true);
+  };
+
+  const handleBetProp = (p: PropData) => {
+    setBetModalData({
+      pickValue: `${p.player_name} ${p.outcome} ${p.line}`,
+      pickType: 'prop',
+      odds: p.odds,
+      gameId: p.game_id,
+      edgePct: p.edge_pct ?? undefined,
+      propMarket: p.market,
+      propPlayer: p.player_name,
+    });
+    setBetModalOpen(true);
+  };
 
   const sportParam = sport === 'all' ? undefined : sport;
 
@@ -58,7 +88,7 @@ export default function TodaysPicks() {
 
       <SummaryCards record={recordData} pickCount={picksData.length} strategyName="Ensemble" />
 
-      {picksData.length > 0 && <PicksTable picks={picksData} />}
+      {picksData.length > 0 && <PicksTable picks={picksData} onBet={handleBetPick} />}
 
       {gamesData.length > 0 && (
         <div style={{ marginTop: '1.25rem' }}>
@@ -129,6 +159,7 @@ export default function TodaysPicks() {
                   <th>Projection</th>
                   <th>Edge</th>
                   <th>Confidence</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -141,6 +172,11 @@ export default function TodaysPicks() {
                     <td className="mono">{p.projection}</td>
                     <td className="mono text-green">{p.edge_pct?.toFixed(1)}%</td>
                     <td><ConfidenceStars rating={p.confidence ?? 0} /></td>
+                    <td>
+                      <button className="btn-bet" onClick={() => handleBetProp(p)}>
+                        Bet This
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -154,6 +190,20 @@ export default function TodaysPicks() {
           <div className="empty-state-title">No games or picks today</div>
           <div className="empty-state-sub">Run the pipeline to fetch today's games and odds.</div>
         </div>
+      )}
+
+      {betModalData && (
+        <BetModal
+          open={betModalOpen}
+          onClose={() => setBetModalOpen(false)}
+          pickValue={betModalData.pickValue}
+          pickType={betModalData.pickType}
+          odds={betModalData.odds}
+          gameId={betModalData.gameId}
+          edgePct={betModalData.edgePct}
+          propMarket={betModalData.propMarket}
+          propPlayer={betModalData.propPlayer}
+        />
       )}
     </div>
   );

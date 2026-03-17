@@ -1,7 +1,7 @@
 import type { PickData } from '../types';
 import ConfidenceStars from './ConfidenceStars';
 
-interface Props { picks: PickData[]; showResult?: boolean; }
+interface Props { picks: PickData[]; showResult?: boolean; onBet?: (pick: PickData) => void; }
 
 function formatOdds(odds: number): string {
   return odds > 0 ? `+${odds}` : `${odds}`;
@@ -23,7 +23,7 @@ function typeBadgeClass(type: string): string {
   return 'badge badge-default';
 }
 
-export default function PicksTable({ picks, showResult = false }: Props) {
+export default function PicksTable({ picks, showResult = false, onBet }: Props) {
   if (picks.length === 0) {
     return (
       <div className="empty-state">
@@ -44,6 +44,7 @@ export default function PicksTable({ picks, showResult = false }: Props) {
             <th>Confidence</th>
             <th>Odds</th>
             {showResult && <th>Result</th>}
+            {onBet && <th>Action</th>}
           </tr>
         </thead>
         <tbody>
@@ -72,6 +73,13 @@ export default function PicksTable({ picks, showResult = false }: Props) {
                       {pick.payout != null ? ` (${pick.payout > 0 ? '+' : ''}${pick.payout.toFixed(2)}u)` : ''}
                     </span>
                   ) : <span className="text-muted">Pending</span>}
+                </td>
+              )}
+              {onBet && (
+                <td>
+                  <button className="btn-bet" onClick={() => onBet(pick)}>
+                    Bet This
+                  </button>
                 </td>
               )}
             </tr>
