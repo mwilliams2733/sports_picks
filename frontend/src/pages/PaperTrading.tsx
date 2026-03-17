@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useLeaderboard } from '../hooks/useLeaderboard';
 import { useUserStore } from '../stores/userStore';
+import { useFeedStore } from '../stores/feedStore';
 import type { PaperPickData, GameOddsData, UserStats, PropData, UserProfile } from '../types';
 import { useToast } from '../components/Toast';
 
@@ -10,11 +11,15 @@ export default function PaperTrading() {
   const queryClient = useQueryClient();
   const { data: users = [], isLoading: usersLoading } = useLeaderboard();
   const { selectedUser, setSelectedUser } = useUserStore();
+  const { events: wsEvents } = useFeedStore();
   const [userPicks, setUserPicks] = useState<PaperPickData[]>([]);
   const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [games, setGames] = useState<GameOddsData[]>([]);
   const [newName, setNewName] = useState('');
   const { toast } = useToast();
+
+  // Activity feed state (initial load from API + real-time from WS)
+  const [initialFeedEvents, setInitialFeedEvents] = useState<{ message: string; timestamp: string }[]>([]);
 
   // Place pick form state
   const [selectedGame, setSelectedGame] = useState<number | ''>('');
@@ -42,7 +47,21 @@ export default function PaperTrading() {
     }
   };
 
-  useEffect(() => { loadGames(); loadProps(); }, []);
+  const loadFeed = async () => {
+    try {
+      const feedData = await api.users.feed(20);
+      setInitialFeedEvents(
+        feedData.map((e) => ({
+          message: e.payload?.message || `${e.event_type}`,
+          timestamp: e.created_at,
+        }))
+      );
+    } catch {
+      // Feed may not be available
+    }
+  };
+
+  useEffect(() => { loadGames(); loadProps(); loadFeed(); }, []);
 
   const selectUser = async (user: UserProfile) => {
     setSelectedUser(user);
@@ -117,13 +136,6 @@ export default function PaperTrading() {
         toast(e.message, 'error');
       }
     }
-  };
-
-  const handleGrade = async () => {
-    const result = await api.users.grade();
-    toast(`Graded ${result.graded} picks`, 'success');
-    queryClient.invalidateQueries({ queryKey: ['users'] });
-    if (selectedUser) selectUser(selectedUser);
   };
 
   // Auto-fill odds when game + pick type changes
@@ -201,6 +213,29 @@ export default function PaperTrading() {
     return `$${n.toFixed(0)}`;
   };
 
+  const formatTime = (ts: string) => {
+    try {
+      const d = new Date(ts);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return ts;
+    }
+  };
+
+  const getStreakIndicator = (user: UserProfile) => {
+    if (user.current_streak >= 3 && user.streak_type === 'win') return '\u{1F525}';
+    if (user.current_streak >= 3 && user.streak_type === 'loss') return '\u{2744}\u{FE0F}';
+    return null;
+  };
+
+  // Merge WS events + initial API events for the feed
+  const allFeedEvents = [
+    ...wsEvents.map(e => ({ message: e.message, timestamp: e.timestamp })),
+    ...initialFeedEvents.filter(
+      ie => !wsEvents.some(we => we.timestamp === ie.timestamp && we.message === ie.message)
+    ),
+  ];
+
   if (usersLoading) return <div className="loading"><div className="spinner" /> Loading...</div>;
 
   const selectedProp = props.find(p => p.id === selectedPropId);
@@ -210,9 +245,6 @@ export default function PaperTrading() {
     <div>
       <div className="page-header">
         <h2 className="page-title">Paper Trading</h2>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button className="btn btn-success" onClick={handleGrade}>Grade Picks</button>
-        </div>
       </div>
 
       {/* Create User */}
@@ -228,50 +260,46 @@ export default function PaperTrading() {
         <button className="btn btn-primary" onClick={handleCreateUser}>Join</button>
       </div>
 
-      {/* Leaderboard */}
+      {/* Compact Leaderboard Bar */}
       <div className="section-header">Leaderboard <span className="section-divider" /></div>
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: '5%' }}>#</th>
-              <th>Name</th>
-              <th>Balance</th>
-              <th>Profit</th>
-              <th>ROI</th>
-              <th>Record</th>
-              <th>Win %</th>
-              <th>Pending</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u, i) => (
-              <tr
-                key={u.id}
-                onClick={() => selectUser(u)}
-                style={{ cursor: 'pointer', background: selectedUser?.id === u.id ? 'var(--card-hover)' : undefined }}
-              >
-                <td className="mono text-muted">{i + 1}</td>
-                <td className="font-medium">{u.name}</td>
-                <td className="mono" style={{ color: u.current_balance >= u.starting_balance ? 'var(--green)' : 'var(--red)' }}>
-                  {formatMoney(u.current_balance)}
-                </td>
-                <td className="mono" style={{ color: u.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                  {u.profit >= 0 ? '+' : ''}{formatMoney(u.profit)}
-                </td>
-                <td className="mono" style={{ color: u.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                  {u.roi >= 0 ? '+' : ''}{u.roi}%
-                </td>
-                <td className="mono">{u.wins}-{u.losses}{u.pushes > 0 ? `-${u.pushes}` : ''}</td>
-                <td className="mono">{u.win_rate}%</td>
-                <td className="mono text-muted">{u.pending}</td>
-              </tr>
-            ))}
-            {users.length === 0 && (
-              <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No users yet. Create one above!</td></tr>
+      <div className="leaderboard-bar">
+        {users.map((u, i) => (
+          <div
+            key={u.id}
+            className={`leaderboard-entry${selectedUser?.id === u.id ? ' selected' : ''}`}
+            onClick={() => selectUser(u)}
+          >
+            <span className="leaderboard-rank">#{i + 1}</span>
+            <span className="leaderboard-name">{u.name}</span>
+            <span className="leaderboard-roi" style={{ color: u.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>
+              {u.roi >= 0 ? '+' : ''}{u.roi}%
+            </span>
+            <span className="leaderboard-roi">{formatMoney(u.current_balance)}</span>
+            {getStreakIndicator(u) && (
+              <span className="leaderboard-streak">{getStreakIndicator(u)}</span>
             )}
-          </tbody>
-        </table>
+          </div>
+        ))}
+        {users.length === 0 && (
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '0.5rem' }}>
+            No users yet. Create one above!
+          </div>
+        )}
+      </div>
+
+      {/* Activity Feed */}
+      <div className="activity-feed">
+        <div className="activity-feed-header">Activity Feed</div>
+        {allFeedEvents.length > 0 ? (
+          allFeedEvents.map((event, i) => (
+            <div key={`${event.timestamp}-${i}`} className="feed-event">
+              <span className="feed-event-message">{event.message}</span>
+              <span className="feed-event-time">{formatTime(event.timestamp)}</span>
+            </div>
+          ))
+        ) : (
+          <div className="feed-empty">No activity yet. Place some picks!</div>
+        )}
       </div>
 
       {/* Selected User Detail */}
@@ -282,18 +310,6 @@ export default function PaperTrading() {
           {/* Stats Cards */}
           <div className="results-grid" style={{ marginBottom: '1rem' }}>
             <div className="stat-card" style={{ padding: '0.75rem' }}>
-              <div className="stat-label">Balance</div>
-              <div className="stat-value" style={{ fontSize: '1.25rem', color: selectedUser.current_balance >= selectedUser.starting_balance ? 'var(--green)' : 'var(--red)' }}>
-                {formatMoney(selectedUser.current_balance)}
-              </div>
-            </div>
-            <div className="stat-card" style={{ padding: '0.75rem' }}>
-              <div className="stat-label">Profit</div>
-              <div className="stat-value" style={{ fontSize: '1.25rem', color: selectedUser.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                {selectedUser.profit >= 0 ? '+' : ''}{formatMoney(selectedUser.profit)}
-              </div>
-            </div>
-            <div className="stat-card" style={{ padding: '0.75rem' }}>
               <div className="stat-label">ROI</div>
               <div className="stat-value" style={{ fontSize: '1.25rem', color: selectedUser.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>
                 {selectedUser.roi >= 0 ? '+' : ''}{selectedUser.roi}%
@@ -303,6 +319,12 @@ export default function PaperTrading() {
               <div className="stat-label">Record</div>
               <div className="stat-value" style={{ fontSize: '1.25rem' }}>
                 {selectedUser.wins}-{selectedUser.losses}
+              </div>
+            </div>
+            <div className="stat-card" style={{ padding: '0.75rem' }}>
+              <div className="stat-label">Best Streak</div>
+              <div className="stat-value" style={{ fontSize: '1.25rem' }}>
+                {selectedUser.best_streak}
               </div>
             </div>
           </div>

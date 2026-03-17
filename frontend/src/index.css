@@ -1348,3 +1348,104 @@ body {
 .btn-bet:hover {
   opacity: 0.9;
 }
+
+/* === Paper Trading Overhaul === */
+.leaderboard-bar {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding: 0.75rem 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.leaderboard-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 100px;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition);
+  gap: 0.25rem;
+}
+
+.leaderboard-entry:hover,
+.leaderboard-entry.selected {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.leaderboard-rank {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.leaderboard-name {
+  font-weight: 700;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.leaderboard-roi {
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+}
+
+.leaderboard-streak {
+  font-size: 0.85rem;
+}
+
+.activity-feed {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 1rem 0;
+}
+
+.activity-feed-header {
+  padding: 0.75rem 1rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--border-default);
+  position: sticky;
+  top: 0;
+  background: var(--bg-surface);
+  z-index: 1;
+}
+
+.feed-event {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border-default);
+  font-size: 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.feed-event:last-child {
+  border-bottom: none;
+}
+
+.feed-event-message {
+  color: var(--text-primary);
+}
+
+.feed-event-time {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  margin-left: 1rem;
+}
+
+.feed-empty {
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
