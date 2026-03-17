@@ -13,7 +13,8 @@ function formatOdds(odds: number): string {
 
 export default function PlayerProps() {
   const { sport, setSport } = useAppStore();
-  const [market, setMarket] = useState<string>('');
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<'edge' | 'confidence' | 'name'>('edge');
   const [minConfidence, setMinConfidence] = useState(0);
   const [betModalOpen, setBetModalOpen] = useState(false);
   const [betModalData, setBetModalData] = useState<{
@@ -34,25 +35,20 @@ export default function PlayerProps() {
     setBetModalOpen(true);
   };
 
-  const marketParam = market || undefined;
-  const { props, markets } = useProps(sport, marketParam);
+  const { props } = useProps(sport);
 
   const propsData = props.data ?? [];
-  const marketsData = markets.data ?? [];
 
-  const filtered = propsData
+  const filteredProps = propsData
     .filter(p => p.confidence === null || p.confidence >= minConfidence)
-    .sort((a, b) => (b.edge_pct ?? 0) - (a.edge_pct ?? 0));
+    .filter(p => !search || p.player_name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      if (sortBy === 'edge') return (b.edge_pct ?? 0) - (a.edge_pct ?? 0);
+      if (sortBy === 'confidence') return (b.confidence ?? 0) - (a.confidence ?? 0);
+      return a.player_name.localeCompare(b.player_name);
+    });
 
-  const grouped = filtered.reduce<Record<string, Record<string, PropData[]>>>((acc, p) => {
-    const key = p.matchup;
-    if (!acc[key]) acc[key] = {};
-    if (!acc[key][p.player_name]) acc[key][p.player_name] = [];
-    acc[key][p.player_name].push(p);
-    return acc;
-  }, {});
-
-  const error = props.error || markets.error;
+  const error = props.error;
   if (error) return <div className="empty-state"><div className="empty-state-title text-red">Error: {(error as Error).message}</div></div>;
 
   return (
@@ -69,105 +65,75 @@ export default function PlayerProps() {
             </button>
           ))}
         </div>
-        <div className="toolbar-spacer" />
-        <select className="select" value={market} onChange={e => setMarket(e.target.value)}>
-          <option value="">All Markets</option>
-          {(marketsData as any[]).map((m: any) => {
-            const key = typeof m === 'string' ? m : m.key;
-            const label = typeof m === 'string' ? m : m.label;
-            return <option key={key} value={key}>{label}</option>;
-          })}
+      </div>
+
+      <div className="props-toolbar">
+        <input
+          className="input props-search"
+          placeholder="Search player..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select className="select" value={sortBy} onChange={e => setSortBy(e.target.value as any)}>
+          <option value="edge">Sort: Edge %</option>
+          <option value="confidence">Sort: Confidence</option>
+          <option value="name">Sort: Player Name</option>
         </select>
         <select className="select" value={minConfidence} onChange={e => setMinConfidence(Number(e.target.value))}>
-          <option value={0}>All Confidence</option>
-          <option value={1}>1+ Stars</option>
-          <option value={2}>2+ Stars</option>
-          <option value={3}>3+ Stars</option>
-          <option value={4}>4+ Stars</option>
-          <option value={5}>5 Stars Only</option>
+          {[0, 1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}+ Stars</option>)}
         </select>
       </div>
 
       {props.isLoading ? (
         <div className="loading"><div className="spinner" /> Loading props...</div>
-      ) : filtered.length === 0 ? (
+      ) : filteredProps.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-title">No player props available</div>
           <div className="empty-state-sub">Props are fetched daily from The Odds API. Run the pipeline to load today's props.</div>
         </div>
       ) : (
-        Object.entries(grouped).map(([matchup, players]) => (
-          <div key={matchup} style={{ marginBottom: '1.25rem' }}>
-            <div className="table-wrap">
-              <div className="matchup-header">{matchup}</div>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th style={{ width: '22%' }}>Player</th>
-                    <th>Market</th>
-                    <th>Line</th>
-                    <th>Over</th>
-                    <th>Under</th>
-                    <th>Book</th>
-                    <th>Proj</th>
-                    <th>Edge</th>
-                    <th>Conf</th>
-                    <th>Source</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(players).map(([player, playerProps]) => {
-                    const byMarket: Record<string, PropData[]> = {};
-                    playerProps.forEach(p => {
-                      if (!byMarket[p.market]) byMarket[p.market] = [];
-                      byMarket[p.market].push(p);
-                    });
-
-                    return Object.entries(byMarket).map(([mkt, mktProps]) => {
-                      const over = mktProps.find(p => p.outcome === 'Over');
-                      const under = mktProps.find(p => p.outcome === 'Under');
-                      const line = over?.line ?? under?.line;
-                      const label = mktProps[0]?.market_label ?? mkt;
-                      const edgePct = over?.edge_pct ?? under?.edge_pct;
-
-                      return (
-                        <tr key={`${player}-${mkt}`}>
-                          <td className="font-medium text-primary">{player}</td>
-                          <td><span className="badge badge-default">{label}</span></td>
-                          <td className="mono">{line != null ? line : '-'}</td>
-                          <td className="mono" style={{ color: over && over.odds > 0 ? 'var(--green)' : undefined }}>
-                            {over ? formatOdds(over.odds) : '-'}
-                          </td>
-                          <td className="mono" style={{ color: under && under.odds > 0 ? 'var(--green)' : undefined }}>
-                            {under ? formatOdds(under.odds) : '-'}
-                          </td>
-                          <td className="text-muted" style={{ fontSize: '0.75rem' }}>{mktProps[0]?.bookmaker}</td>
-                          <td className="mono">{over?.projection ?? under?.projection ?? '-'}</td>
-                          <td className="mono" style={{ color: edgePct && edgePct > 0 ? 'var(--green)' : undefined }}>
-                            {edgePct != null ? `${edgePct.toFixed(1)}%` : '-'}
-                          </td>
-                          <td><ConfidenceStars rating={over?.confidence ?? under?.confidence ?? 0} /></td>
-                          <td className="text-muted" style={{ fontSize: '0.75rem' }}>
-                            {over?.source ?? under?.source ?? '-'}
-                            {(over?.is_stale || under?.is_stale) && (
-                              <span className="badge badge-yellow" style={{ marginLeft: '0.35rem' }}>stale</span>
-                            )}
-                          </td>
-                          <td>
-                            <button className="btn-bet" onClick={() => handleBetProp(over ?? under!)}>
-                              Bet This
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    });
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Market</th>
+                <th>Line</th>
+                <th>Projection</th>
+                <th>Edge</th>
+                <th>Confidence</th>
+                <th>Odds</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredProps.map(prop => (
+                <tr key={prop.game_id + prop.player_name + prop.market + prop.outcome}>
+                  <td>
+                    <div className="font-medium text-primary">{prop.player_name}</div>
+                    <div className="text-muted" style={{ fontSize: '0.7rem' }}>{prop.matchup}</div>
+                    {prop.is_stale && (
+                      <span className="badge badge-yellow" style={{ fontSize: '0.65rem', marginTop: '0.15rem' }}>
+                        stale — {prop.source ?? 'unknown source'}
+                      </span>
+                    )}
+                  </td>
+                  <td><span className="badge badge-purple">{prop.market.replace('player_', '').replace(/_/g, ' ')}</span></td>
+                  <td className="mono">{prop.outcome} {prop.line ?? '—'}</td>
+                  <td className="mono">{prop.projection?.toFixed(1) || '—'}</td>
+                  <td style={{ color: prop.edge_pct && prop.edge_pct > 0 ? 'var(--green)' : undefined, fontFamily: 'var(--font-mono)' }}>
+                    {prop.edge_pct != null ? `${prop.edge_pct > 0 ? '+' : ''}${prop.edge_pct.toFixed(1)}%` : '—'}
+                  </td>
+                  <td><ConfidenceStars rating={prop.confidence ?? 0} /></td>
+                  <td style={{ fontFamily: 'var(--font-mono)' }}>{formatOdds(prop.odds)}</td>
+                  <td>
+                    <button className="btn-bet" onClick={() => handleBetProp(prop)}>Bet This</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {betModalData && (

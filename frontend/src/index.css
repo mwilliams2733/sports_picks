@@ -1594,3 +1594,25 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* === Props Toolbar === */
+.props-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0;
+  flex-wrap: wrap;
+}
+
+.props-search {
+  flex: 1;
+  min-width: 200px;
+}
+
+@media (max-width: 768px) {
+  .props-toolbar {
+    flex-direction: column;
+  }
+  .props-search {
+    min-width: unset;
+  }
+}
