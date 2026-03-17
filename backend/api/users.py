@@ -74,6 +74,9 @@ def list_users(request: Request):
                 "pushes": pushes,
                 "pending": pending,
                 "win_rate": round((wins / total_picks * 100) if total_picks > 0 else 0, 1),
+                "current_streak": u.current_streak or 0,
+                "best_streak": u.best_streak or 0,
+                "streak_type": u.streak_type or "none",
                 "created_at": str(u.created_at),
             })
         # Sort by current_balance descending (leaderboard)
@@ -226,6 +229,7 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
                 "result": result,
                 "payout": payout,
             })
+            _update_streaks(session, user_id)
 
         return {
             "id": pick.id,
@@ -327,10 +331,70 @@ def grade_paper_picks(request: Request):
                 else:
                     pick.payout = -pick.stake
             graded += 1
+
+            # Log grading events to activity feed
+            user = session.query(UserProfile).get(pick.user_id)
+            user_name = user.name if user else "Unknown"
+            event_type = "pick_won" if pick.result == "win" else "pick_lost"
+            if pick.result in ("win", "loss"):
+                _log_feed_event(session, pick.user_id, event_type, {
+                    "user_name": user_name,
+                    "message": f"{user_name} {'won' if pick.result == 'win' else 'lost'} {pick.pick_value} — {'+'  if (pick.payout or 0) > 0 else ''}${pick.payout or 0:,.0f}",
+                    "result": pick.result,
+                    "payout": pick.payout,
+                })
+
+        # Update streaks for all affected users
+        affected_users = set(pick.user_id for pick, _ in pending)
+        for uid in affected_users:
+            _update_streaks(session, uid)
+
         session.commit()
         return {"graded": graded}
     finally:
         session.close()
+
+
+def _update_streaks(session, user_id: int):
+    """Recompute streaks from the user's most recent graded picks."""
+    picks = (
+        session.query(PaperPick)
+        .filter(PaperPick.user_id == user_id, PaperPick.result.isnot(None))
+        .order_by(PaperPick.created_at.desc())
+        .all()
+    )
+    if not picks:
+        return
+
+    # Current streak = consecutive same results from most recent
+    current_result = picks[0].result
+    if current_result == "push":
+        current_result = picks[1].result if len(picks) > 1 else "none"
+
+    streak = 0
+    for p in picks:
+        if p.result == "push":
+            continue
+        if p.result == current_result:
+            streak += 1
+        else:
+            break
+
+    user = session.get(UserProfile, user_id)
+    if user:
+        user.current_streak = streak
+        user.streak_type = "win" if current_result == "win" else "loss" if current_result == "loss" else "none"
+        if current_result == "win" and streak > (user.best_streak or 0):
+            user.best_streak = streak
+
+        # Log streak event if notable (3+)
+        if streak >= 3:
+            _log_feed_event(session, user_id, "streak", {
+                "user_name": user.name,
+                "message": f"{user.name} is on a {streak}-pick {'win' if current_result == 'win' else 'loss'} streak!",
+                "streak": streak,
+                "streak_type": user.streak_type,
+            })
 
 
 def _compute_period_stats(picks: list) -> dict:
