@@ -85,6 +85,12 @@ export default function TodaysPicks() {
   const recordData = record.data ?? null;
   const gamesData = games.data ?? [];
 
+  // Count games per sport from currently loaded games
+  const sportCounts: Record<string, number> = {};
+  gamesData.forEach(g => {
+    sportCounts[g.sport] = (sportCounts[g.sport] || 0) + 1;
+  });
+
   return (
     <div>
       <div className="toolbar">
@@ -92,6 +98,8 @@ export default function TodaysPicks() {
           {SPORTS.map(s => (
             <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => handleSportChange(s)}>
               {s.toUpperCase()}
+              {s !== 'all' && sportCounts[s] ? ` (${sportCounts[s]})` : ''}
+              {s === 'all' && gamesData.length > 0 ? ` (${gamesData.length})` : ''}
             </button>
           ))}
         </div>

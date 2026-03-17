@@ -16,6 +16,7 @@ export default function BottomNav() {
           to={path}
           end={path === '/'}
           className={({ isActive }) => `bottom-nav-tab ${isActive ? 'active' : ''}`}
+          aria-label={label}
         >
           <span className="bottom-nav-icon">{icon}</span>
           <span className="bottom-nav-label">{label}</span>

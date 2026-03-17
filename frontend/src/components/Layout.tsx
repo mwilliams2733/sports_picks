@@ -36,7 +36,7 @@ export default function Layout() {
             <span className="header-logo-accent">SP</span> Sports Picks
           </div>
         </div>
-        <nav className="header-nav">
+        <nav className="header-nav" aria-label="Main navigation">
           {NAV_ITEMS.map(([path, label]) => (
             <NavLink
               key={path}
@@ -48,7 +48,7 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
-        <div className="header-sport-filter">
+        <div className="header-sport-filter" aria-label="Sport filter">
           {SPORTS.map((s) => (
             <button
               key={s}
