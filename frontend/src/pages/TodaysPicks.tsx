@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAppStore } from '../stores/appStore';
 import { useTodaysPicks } from '../hooks/useTodaysPicks';
@@ -12,7 +13,21 @@ import BetModal from '../components/BetModal';
 const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'boxing', 'mma'] as const;
 
 export default function TodaysPicks() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { sport, setSport } = useAppStore();
+
+  // Sync URL → store on mount
+  useEffect(() => {
+    const urlSport = searchParams.get('sport');
+    if (urlSport && urlSport !== sport) setSport(urlSport);
+  }, []);
+
+  // Sync store → URL on sport change
+  const handleSportChange = (s: string) => {
+    setSport(s);
+    setSearchParams(s === 'all' ? {} : { sport: s });
+  };
+
   const { picks, record, games } = useTodaysPicks(sport);
   const [topProps, setTopProps] = useState<PropData[]>([]);
   const [betModalOpen, setBetModalOpen] = useState(false);
@@ -75,7 +90,7 @@ export default function TodaysPicks() {
       <div className="toolbar">
         <div className="tab-group">
           {SPORTS.map(s => (
-            <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => setSport(s)}>
+            <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => handleSportChange(s)}>
               {s.toUpperCase()}
             </button>
           ))}

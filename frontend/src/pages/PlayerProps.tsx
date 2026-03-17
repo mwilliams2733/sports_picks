@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAppStore } from '../stores/appStore';
 import { useProps } from '../hooks/useProps';
 import type { PropData } from '../types';
@@ -12,10 +13,26 @@ function formatOdds(odds: number): string {
 }
 
 export default function PlayerProps() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { sport, setSport } = useAppStore();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'edge' | 'confidence' | 'name'>('edge');
   const [minConfidence, setMinConfidence] = useState(0);
+
+  useEffect(() => {
+    const urlSport = searchParams.get('sport');
+    const urlConf = searchParams.get('confidence');
+    if (urlSport && urlSport !== sport) setSport(urlSport);
+    if (urlConf) setMinConfidence(Number(urlConf));
+  }, []);
+
+  const handleSportChange = (s: string) => {
+    setSport(s);
+    const params: Record<string, string> = {};
+    if (s !== 'all') params.sport = s;
+    if (minConfidence > 0) params.confidence = String(minConfidence);
+    setSearchParams(params);
+  };
   const [betModalOpen, setBetModalOpen] = useState(false);
   const [betModalData, setBetModalData] = useState<{
     pickValue: string; pickType: string; odds: number; gameId: number;
@@ -60,7 +77,7 @@ export default function PlayerProps() {
       <div className="toolbar">
         <div className="tab-group">
           {SPORTS.map(s => (
-            <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => setSport(s)}>
+            <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => handleSportChange(s)}>
               {s.toUpperCase()}
             </button>
           ))}
