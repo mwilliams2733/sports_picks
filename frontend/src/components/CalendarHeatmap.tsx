@@ -15,7 +15,7 @@ export default function CalendarHeatmap({ data }: Props) {
           : 'var(--red)';
         return (
           <div key={d.date} title={`${d.date}: ${d.wins}W ${d.losses}L`} style={{
-            width: '14px', height: '14px', borderRadius: '3px', background: color,
+            width: '18px', height: '18px', borderRadius: '3px', background: color,
             transition: 'transform 150ms ease',
           }}
           onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.4)')}

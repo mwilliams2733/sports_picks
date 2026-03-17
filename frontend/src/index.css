@@ -1616,3 +1616,38 @@ body {
     min-width: unset;
   }
 }
+
+/* === Track Record Improvements === */
+.range-selector {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.range-btn {
+  background: transparent;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  min-height: 32px;
+  transition: all var(--transition);
+}
+
+.range-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.confidence-breakdown {
+  margin: 1.5rem 0;
+}
+
+.section-title {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+}
