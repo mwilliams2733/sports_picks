@@ -1651,3 +1651,54 @@ body {
   font-weight: 700;
   margin-bottom: 0.75rem;
 }
+
+/* === Backtesting Improvements === */
+.backtest-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.pipeline-status {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  margin-bottom: 1rem;
+}
+
+.pipeline-status-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.pipeline-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  display: inline-block;
+}
+
+.progress-bar {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+}
+
+.progress-text {
+  font-size: 0.85rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.run-history-select {
+  font-size: 0.8rem;
+}

@@ -29,6 +29,7 @@ export default function Backtesting() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [pipelineRunning, setPipelineRunning] = useState(false);
+  const [pipelineLastRun, setPipelineLastRun] = useState<string | null>(null);
   const { toast } = useToast();
 
   // Filters
@@ -43,6 +44,10 @@ export default function Backtesting() {
   // Results
   const [results, setResults] = useState<RunAllResult | null>(null);
 
+  // Run history
+  const [runHistory, setRunHistory] = useState<{ timestamp: string; results: RunAllResult }[]>([]);
+  const [selectedRunIndex, setSelectedRunIndex] = useState<number>(-1);
+
   useEffect(() => {
     api.stats.daily().then(setDaily).finally(() => setLoading(false));
   }, []);
@@ -50,9 +55,13 @@ export default function Backtesting() {
   const handleRunAll = async () => {
     setRunning(true);
     setResults(null);
+    setSelectedRunIndex(-1);
     try {
       const res = await api.backtest.runAll({ sport, start_date: startDate, end_date: endDate });
       setResults(res);
+      const timestamp = new Date().toLocaleString();
+      setRunHistory(prev => [{ timestamp, results: res }, ...prev]);
+      setSelectedRunIndex(-1);
       const variantCount = Object.keys(res.variants).length;
       toast(`Backtest complete: ${variantCount} variants tested across ${res.games_count} games`, 'success');
     } catch (e: any) {
@@ -66,12 +75,25 @@ export default function Backtesting() {
     setPipelineRunning(true);
     try {
       const result = await api.pipeline.run();
+      setPipelineLastRun(new Date().toLocaleString());
       toast(`Pipeline: ${result.games_stored} games, ${result.odds_stored} odds, ${result.props_stored} props`, 'success');
     } catch (e: any) {
       toast(`Pipeline error: ${e.message}`, 'error');
     } finally {
       setPipelineRunning(false);
     }
+  };
+
+  const handleSelectRun = (index: number) => {
+    if (index === -1) {
+      // Current run (latest)
+      if (runHistory.length > 0) {
+        setResults(runHistory[0].results);
+      }
+    } else {
+      setResults(runHistory[index].results);
+    }
+    setSelectedRunIndex(index);
   };
 
   // Get current variant result
@@ -115,11 +137,24 @@ export default function Backtesting() {
       <div className="page-header">
         <h2 className="page-title">Backtesting</h2>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button className="btn btn-success" onClick={handleRunPipeline} disabled={pipelineRunning}>
-            {pipelineRunning ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Running...</> : 'Run Pipeline'}
-          </button>
           <button className="btn btn-primary" onClick={handleRunAll} disabled={running}>
             {running ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2, borderTopColor: '#fff' }} /> Running All...</> : 'Run All Variants'}
+          </button>
+        </div>
+      </div>
+
+      {/* Pipeline Status */}
+      <div className="pipeline-status">
+        <span className="pipeline-status-dot" style={{ background: pipelineRunning ? 'var(--yellow)' : 'var(--green)' }} />
+        <div>
+          <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Pipeline Status</div>
+          <div className="pipeline-status-label">
+            {pipelineLastRun ? `Last run: ${pipelineLastRun}` : 'No pipeline runs this session'}
+          </div>
+        </div>
+        <div style={{ marginLeft: 'auto' }}>
+          <button className="btn btn-success" onClick={handleRunPipeline} disabled={pipelineRunning}>
+            {pipelineRunning ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Running...</> : 'Run Now'}
           </button>
         </div>
       </div>
@@ -149,7 +184,31 @@ export default function Backtesting() {
             </select>
           </div>
         )}
+        {runHistory.length > 0 && (
+          <div>
+            <div className="input-label">Run History</div>
+            <select
+              className="input run-history-select"
+              value={selectedRunIndex}
+              onChange={e => handleSelectRun(Number(e.target.value))}
+            >
+              <option value={-1}>Latest Run</option>
+              {runHistory.map((run, i) => (
+                <option key={i} value={i}>
+                  {run.timestamp} ({Object.keys(run.results.variants).length} variants)
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
+
+      {/* Progress Indicator */}
+      {running && (
+        <div className="progress-bar">
+          <div className="progress-text">Running backtest across all variants...</div>
+        </div>
+      )}
 
       {/* Performance Chart */}
       <div className="section-header">Performance Over Time <span className="section-divider" /></div>
