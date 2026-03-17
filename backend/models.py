@@ -190,6 +190,16 @@ class PaperPick(Base):
     game = relationship("Game")
 
 
+class ActivityFeed(Base):
+    __tablename__ = "activity_feed"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("user_profiles.id"), nullable=True)
+    event_type = Column(String, nullable=False)  # pick_placed, pick_won, pick_lost, streak
+    payload = Column(Text, nullable=False)  # JSON with event details
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    user = relationship("UserProfile")
+
+
 class CalibrationHistory(Base):
     __tablename__ = "calibration_history"
     id = Column(Integer, primary_key=True)

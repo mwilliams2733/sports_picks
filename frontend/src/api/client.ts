@@ -82,6 +82,7 @@ export const api = {
       post<{ id: number; result: string | null; payout: number | null; new_balance: number }>(`/users/${userId}/picks`, data),
     grade: () => post<{ graded: number }>('/users/grade', {}),
     stats: (id: number) => get<UserStats>(`/users/${id}/stats`),
+    feed: (limit?: number) => get<{ id: number; user_id: number; event_type: string; payload: Record<string, string>; created_at: string }[]>(`/users/feed${limit ? `?limit=${limit}` : ''}`),
   },
   pipeline: {
     run: () => post<{ status: string; active_sports: string[];

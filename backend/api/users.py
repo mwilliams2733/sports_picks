@@ -3,11 +3,31 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func
 from backend.database import get_session
-from backend.models import UserProfile, PaperPick, Game, PlayerStat
+from backend.models import UserProfile, PaperPick, Game, PlayerStat, ActivityFeed
 from backend.pipeline.grader import grade_pick, grade_prop_pick
 from backend.analysis.odds_utils import calculate_payout
+import json
+import asyncio
 
 router = APIRouter()
+
+
+def _log_feed_event(session, user_id: int | None, event_type: str, payload: dict):
+    """Save activity event to DB and broadcast via WebSocket."""
+    session.add(ActivityFeed(
+        user_id=user_id,
+        event_type=event_type,
+        payload=json.dumps(payload),
+    ))
+    session.commit()
+    # Broadcast via WebSocket (fire-and-forget)
+    try:
+        from backend.api.websocket import manager
+        asyncio.get_event_loop().create_task(
+            manager.broadcast(event_type, payload)
+        )
+    except RuntimeError:
+        pass  # No event loop running (e.g., in tests)
 
 
 class CreateUserRequest(BaseModel):
@@ -185,6 +205,28 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
         )
         session.add(pick)
         session.commit()
+
+        # Log activity feed event
+        user = session.query(UserProfile).get(user_id)
+        user_name = user.name if user else "Unknown"
+        odds_str = f"{body.odds:+d}" if body.odds >= 0 else str(body.odds)
+        _log_feed_event(session, user_id, "pick_placed", {
+            "user_name": user_name,
+            "message": f"{user_name} bet {body.pick_value} {odds_str} — ${body.stake:,.0f}",
+            "pick_value": body.pick_value,
+            "odds": body.odds,
+            "stake": body.stake,
+        })
+
+        if result:
+            event_type = "pick_won" if result == "win" else "pick_lost"
+            _log_feed_event(session, user_id, event_type, {
+                "user_name": user_name,
+                "message": f"{user_name} {'won' if result == 'win' else 'lost'} {body.pick_value} — {'+'  if (payout or 0) > 0 else ''}${payout or 0:,.0f}",
+                "result": result,
+                "payout": payout,
+            })
+
         return {
             "id": pick.id,
             "result": result,
@@ -350,5 +392,30 @@ def get_user_stats(request: Request, user_id: int):
             "all_time": _compute_period_stats(all_picks),
             "daily_breakdown": daily_breakdown,
         }
+    finally:
+        session.close()
+
+
+@router.get("/feed")
+def get_activity_feed(request: Request, limit: int = 50):
+    """Get recent activity feed events."""
+    session = get_session(request.app.state.engine)
+    try:
+        events = (
+            session.query(ActivityFeed)
+            .order_by(ActivityFeed.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": e.id,
+                "user_id": e.user_id,
+                "event_type": e.event_type,
+                "payload": json.loads(e.payload),
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in events
+        ]
     finally:
         session.close()
