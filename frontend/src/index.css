@@ -1449,3 +1449,148 @@ body {
   color: var(--text-muted);
   font-size: 0.85rem;
 }
+
+/* === Game Cards === */
+.game-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.game-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.game-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.game-card-status {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.game-card-matchup {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.game-card-team {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  gap: 0.25rem;
+}
+
+.game-card-team-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.game-card-odds {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.game-card-vs {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.game-card-lines {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.game-card-line {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+}
+
+.game-card-pick {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-default);
+}
+
+.game-card-pick-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.game-card-pick-value {
+  font-weight: 700;
+  color: var(--green);
+  font-size: 0.85rem;
+}
+
+.game-card-edge {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+
+/* === Summary Bar === */
+.summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+
+.summary-bar-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  white-space: nowrap;
+}
+
+.summary-bar-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.summary-bar-value {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.summary-bar-divider {
+  width: 1px;
+  height: 28px;
+  background: var(--border-default);
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .game-card-grid {
+    grid-template-columns: 1fr;
+  }
+}

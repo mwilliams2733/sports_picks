@@ -3,22 +3,13 @@ import { api } from '../api/client';
 import { useAppStore } from '../stores/appStore';
 import { useTodaysPicks } from '../hooks/useTodaysPicks';
 import type { PropData, PickData } from '../types';
-import SummaryCards from '../components/SummaryCards';
+import SummaryBar from '../components/SummaryBar';
+import GameCard from '../components/GameCard';
 import PicksTable from '../components/PicksTable';
 import ConfidenceStars from '../components/ConfidenceStars';
 import BetModal from '../components/BetModal';
 
 const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'boxing', 'mma'] as const;
-
-function formatOdds(odds: number | null): string {
-  if (odds == null) return '-';
-  return odds > 0 ? `+${odds}` : `${odds}`;
-}
-
-function formatSpread(spread: number | null): string {
-  if (spread == null) return '-';
-  return spread > 0 ? `+${spread}` : `${spread}`;
-}
 
 export default function TodaysPicks() {
   const { sport, setSport } = useAppStore();
@@ -54,6 +45,11 @@ export default function TodaysPicks() {
     setBetModalOpen(true);
   };
 
+  const handleBetFromCard = (bet: { pickValue: string; pickType: string; odds: number; gameId: number; edgePct?: number }) => {
+    setBetModalData(bet);
+    setBetModalOpen(true);
+  };
+
   const sportParam = sport === 'all' ? undefined : sport;
 
   useEffect(() => {
@@ -86,60 +82,32 @@ export default function TodaysPicks() {
         </div>
       </div>
 
-      <SummaryCards record={recordData} pickCount={picksData.length} strategyName="Ensemble" />
-
-      {picksData.length > 0 && <PicksTable picks={picksData} onBet={handleBetPick} />}
+      <SummaryBar record={recordData} pickCount={picksData.length} strategyName="Ensemble" />
 
       {gamesData.length > 0 && (
         <div style={{ marginTop: '1.25rem' }}>
           <div className="section-header">
-            Today's Games & Odds <span className="section-divider" />
+            Today's Games <span className="section-divider" />
           </div>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Sport</th>
-                  <th>Matchup</th>
-                  <th>Status</th>
-                  <th>Spread</th>
-                  <th>ML Home</th>
-                  <th>ML Away</th>
-                  <th>O/U</th>
-                  <th>Book</th>
-                </tr>
-              </thead>
-              <tbody>
-                {gamesData.map(g => (
-                  <tr key={g.id}>
-                    <td><span className="badge badge-default">{g.sport.toUpperCase()}</span></td>
-                    <td className="font-medium">
-                      {g.away_team} <span className="text-muted">@</span> {g.home_team}
-                      {g.status === 'final' && (
-                        <span className="text-muted mono" style={{ marginLeft: '0.5rem' }}>
-                          ({g.away_score} - {g.home_score})
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      <span className={`badge ${g.status === 'final' ? 'badge-green' : g.status === 'in_progress' ? 'badge-yellow' : 'badge-default'}`}>
-                        {g.status}
-                      </span>
-                    </td>
-                    <td className="mono">{formatSpread(g.spread_home)}</td>
-                    <td className="mono" style={{ color: g.moneyline_home && g.moneyline_home > 0 ? 'var(--green)' : undefined }}>
-                      {formatOdds(g.moneyline_home)}
-                    </td>
-                    <td className="mono" style={{ color: g.moneyline_away && g.moneyline_away > 0 ? 'var(--green)' : undefined }}>
-                      {formatOdds(g.moneyline_away)}
-                    </td>
-                    <td className="mono">{g.over_under ?? '-'}</td>
-                    <td className="text-muted" style={{ fontSize: '0.75rem' }}>{g.bookmaker ?? '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="game-card-grid">
+            {gamesData.map(game => (
+              <GameCard
+                key={game.id}
+                game={game}
+                picks={picksData}
+                onBet={handleBetFromCard}
+              />
+            ))}
           </div>
+        </div>
+      )}
+
+      {picksData.length > 0 && (
+        <div style={{ marginTop: '1.25rem' }}>
+          <div className="section-header">
+            AI Picks <span className="section-divider" />
+          </div>
+          <PicksTable picks={picksData} onBet={handleBetPick} />
         </div>
       )}
 
