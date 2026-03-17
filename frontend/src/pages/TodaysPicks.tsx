@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api/client';
-import type { PickData, RecordData, PropData, GameOddsData } from '../types';
+import { useAppStore } from '../stores/appStore';
+import { useTodaysPicks } from '../hooks/useTodaysPicks';
+import type { PropData } from '../types';
 import SummaryCards from '../components/SummaryCards';
 import PicksTable from '../components/PicksTable';
 import ConfidenceStars from '../components/ConfidenceStars';
@@ -18,35 +20,29 @@ function formatSpread(spread: number | null): string {
 }
 
 export default function TodaysPicks() {
-  const [picks, setPicks] = useState<PickData[]>([]);
-  const [record, setRecord] = useState<RecordData | null>(null);
-  const [games, setGames] = useState<GameOddsData[]>([]);
+  const { sport, setSport } = useAppStore();
+  const { picks, record, games } = useTodaysPicks(sport);
   const [topProps, setTopProps] = useState<PropData[]>([]);
-  const [sport, setSport] = useState<string>('all');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  const sportParam = sport === 'all' ? undefined : sport;
 
   useEffect(() => {
-    setLoading(true);
-    const sportParam = sport === 'all' ? undefined : sport;
-    Promise.all([
-      api.picks.today(sportParam),
-      api.stats.record(sportParam),
-      api.games.today(sportParam),
-    ])
-      .then(([p, r, g]) => { setPicks(p); setRecord(r); setGames(g); })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
-
     api.props.today(sportParam).then(allProps => {
       setTopProps(allProps.filter((p: PropData) => p.confidence !== null && p.confidence >= 3)
         .sort((a: PropData, b: PropData) => (b.edge_pct ?? 0) - (a.edge_pct ?? 0))
         .slice(0, 10));
     }).catch(() => {});
-  }, [sport]);
+  }, [sportParam]);
 
-  if (error) return <div className="empty-state"><div className="empty-state-title text-red">Error: {error}</div></div>;
+  const error = picks.error || record.error || games.error;
+  const loading = picks.isLoading || record.isLoading || games.isLoading;
+
+  if (error) return <div className="empty-state"><div className="empty-state-title text-red">Error: {(error as Error).message}</div></div>;
   if (loading) return <div className="loading"><div className="spinner" /> Loading picks...</div>;
+
+  const picksData = picks.data ?? [];
+  const recordData = record.data ?? null;
+  const gamesData = games.data ?? [];
 
   return (
     <div>
@@ -60,11 +56,11 @@ export default function TodaysPicks() {
         </div>
       </div>
 
-      <SummaryCards record={record} pickCount={picks.length} strategyName="Ensemble" />
+      <SummaryCards record={recordData} pickCount={picksData.length} strategyName="Ensemble" />
 
-      {picks.length > 0 && <PicksTable picks={picks} />}
+      {picksData.length > 0 && <PicksTable picks={picksData} />}
 
-      {games.length > 0 && (
+      {gamesData.length > 0 && (
         <div style={{ marginTop: '1.25rem' }}>
           <div className="section-header">
             Today's Games & Odds <span className="section-divider" />
@@ -84,7 +80,7 @@ export default function TodaysPicks() {
                 </tr>
               </thead>
               <tbody>
-                {games.map(g => (
+                {gamesData.map(g => (
                   <tr key={g.id}>
                     <td><span className="badge badge-default">{g.sport.toUpperCase()}</span></td>
                     <td className="font-medium">
@@ -153,7 +149,7 @@ export default function TodaysPicks() {
         </div>
       )}
 
-      {games.length === 0 && picks.length === 0 && (
+      {gamesData.length === 0 && picksData.length === 0 && (
         <div className="empty-state">
           <div className="empty-state-title">No games or picks today</div>
           <div className="empty-state-sub">Run the pipeline to fetch today's games and odds.</div>

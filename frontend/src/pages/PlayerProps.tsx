@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { api } from '../api/client';
+import { useState } from 'react';
+import { useAppStore } from '../stores/appStore';
+import { useProps } from '../hooks/useProps';
 import type { PropData } from '../types';
 import ConfidenceStars from '../components/ConfidenceStars';
 
@@ -10,34 +11,17 @@ function formatOdds(odds: number): string {
 }
 
 export default function PlayerProps() {
-  const [props, setProps] = useState<PropData[]>([]);
-  const [sport, setSport] = useState<string>('all');
+  const { sport, setSport } = useAppStore();
   const [market, setMarket] = useState<string>('');
-  const [markets, setMarkets] = useState<{ key: string; label: string }[]>([]);
   const [minConfidence, setMinConfidence] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const sportParam = sport === 'all' ? undefined : sport;
-    api.backtest.sportMarkets(sportParam).then(m => {
-      setMarkets(m);
-      setMarket(prev => m.some(x => x.key === prev) ? prev : '');
-    }).catch(() => {});
-  }, [sport]);
+  const marketParam = market || undefined;
+  const { props, markets } = useProps(sport, marketParam);
 
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    const sportParam = sport === 'all' ? undefined : sport;
-    const marketParam = market || undefined;
-    api.props.today(sportParam, marketParam)
-      .then(setProps)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [sport, market]);
+  const propsData = props.data ?? [];
+  const marketsData = markets.data ?? [];
 
-  const filtered = props
+  const filtered = propsData
     .filter(p => p.confidence === null || p.confidence >= minConfidence)
     .sort((a, b) => (b.edge_pct ?? 0) - (a.edge_pct ?? 0));
 
@@ -49,7 +33,8 @@ export default function PlayerProps() {
     return acc;
   }, {});
 
-  if (error) return <div className="empty-state"><div className="empty-state-title text-red">Error: {error}</div></div>;
+  const error = props.error || markets.error;
+  if (error) return <div className="empty-state"><div className="empty-state-title text-red">Error: {(error as Error).message}</div></div>;
 
   return (
     <div>
@@ -68,7 +53,11 @@ export default function PlayerProps() {
         <div className="toolbar-spacer" />
         <select className="select" value={market} onChange={e => setMarket(e.target.value)}>
           <option value="">All Markets</option>
-          {markets.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+          {(marketsData as any[]).map((m: any) => {
+            const key = typeof m === 'string' ? m : m.key;
+            const label = typeof m === 'string' ? m : m.label;
+            return <option key={key} value={key}>{label}</option>;
+          })}
         </select>
         <select className="select" value={minConfidence} onChange={e => setMinConfidence(Number(e.target.value))}>
           <option value={0}>All Confidence</option>
@@ -80,7 +69,7 @@ export default function PlayerProps() {
         </select>
       </div>
 
-      {loading ? (
+      {props.isLoading ? (
         <div className="loading"><div className="spinner" /> Loading props...</div>
       ) : filtered.length === 0 ? (
         <div className="empty-state">

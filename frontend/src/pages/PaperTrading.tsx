@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { UserProfile, PaperPickData, GameOddsData, UserStats, PropData } from '../types';
+import { useLeaderboard } from '../hooks/useLeaderboard';
+import { useUserStore } from '../stores/userStore';
+import type { PaperPickData, GameOddsData, UserStats, PropData, UserProfile } from '../types';
 import { useToast } from '../components/Toast';
 
 export default function PaperTrading() {
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
+  const queryClient = useQueryClient();
+  const { data: users = [], isLoading: usersLoading } = useLeaderboard();
+  const { selectedUser, setSelectedUser } = useUserStore();
   const [userPicks, setUserPicks] = useState<PaperPickData[]>([]);
   const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [games, setGames] = useState<GameOddsData[]>([]);
   const [newName, setNewName] = useState('');
-  const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
   // Place pick form state
@@ -24,15 +27,6 @@ export default function PaperTrading() {
   const [props, setProps] = useState<PropData[]>([]);
   const [selectedPropId, setSelectedPropId] = useState<number | ''>('');
   const [propSearch, setPropSearch] = useState('');
-
-  const loadUsers = async () => {
-    try {
-      const u = await api.users.list();
-      setUsers(u);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const loadGames = async () => {
     const g = await api.games.today();
@@ -48,7 +42,7 @@ export default function PaperTrading() {
     }
   };
 
-  useEffect(() => { loadUsers(); loadGames(); loadProps(); }, []);
+  useEffect(() => { loadGames(); loadProps(); }, []);
 
   const selectUser = async (user: UserProfile) => {
     setSelectedUser(user);
@@ -66,7 +60,7 @@ export default function PaperTrading() {
       await api.users.create(newName.trim());
       setNewName('');
       toast('User created!', 'success');
-      loadUsers();
+      queryClient.invalidateQueries({ queryKey: ['users'] });
     } catch (e: any) {
       toast(e.message, 'error');
     }
@@ -94,7 +88,7 @@ export default function PaperTrading() {
           ? `Pick graded: ${result.result}! Balance: $${result.new_balance.toLocaleString()}`
           : `Pick placed! Balance: $${result.new_balance.toLocaleString()}`;
         toast(msg, result.result === 'loss' ? 'error' : 'success');
-        loadUsers();
+        queryClient.invalidateQueries({ queryKey: ['users'] });
         selectUser(selectedUser);
         setSelectedPropId('');
         setPropSearch('');
@@ -116,7 +110,7 @@ export default function PaperTrading() {
           ? `Pick graded: ${result.result}! Balance: $${result.new_balance.toLocaleString()}`
           : `Pick placed! Balance: $${result.new_balance.toLocaleString()}`;
         toast(msg, result.result === 'loss' ? 'error' : 'success');
-        loadUsers();
+        queryClient.invalidateQueries({ queryKey: ['users'] });
         selectUser(selectedUser);
         setPickValue('');
       } catch (e: any) {
@@ -128,7 +122,7 @@ export default function PaperTrading() {
   const handleGrade = async () => {
     const result = await api.users.grade();
     toast(`Graded ${result.graded} picks`, 'success');
-    loadUsers();
+    queryClient.invalidateQueries({ queryKey: ['users'] });
     if (selectedUser) selectUser(selectedUser);
   };
 
@@ -207,7 +201,7 @@ export default function PaperTrading() {
     return `$${n.toFixed(0)}`;
   };
 
-  if (loading) return <div className="loading"><div className="spinner" /> Loading...</div>;
+  if (usersLoading) return <div className="loading"><div className="spinner" /> Loading...</div>;
 
   const selectedProp = props.find(p => p.id === selectedPropId);
   const propOptions = getSelectedPropOptions();
