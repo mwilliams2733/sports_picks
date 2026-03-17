@@ -1,35 +1,70 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { useState } from 'react'
+import { NavLink, Outlet } from 'react-router-dom'
+import { useAppStore } from '../stores/appStore'
+import { useWebSocket } from '../hooks/useWebSocket'
+import BottomNav from './BottomNav'
+import MobileMenu from './MobileMenu'
 
-const NAV_ITEMS = [
-  { path: '/', label: "Today's Picks" },
-  { path: '/props', label: 'Player Props' },
-  { path: '/backtesting', label: 'Backtesting' },
-  { path: '/track-record', label: 'Track Record' },
-  { path: '/paper-trading', label: 'Paper Trading' },
-  { path: '/faq', label: 'FAQ' },
-];
+const NAV_ITEMS: [string, string][] = [
+  ['/', "Today's Picks"],
+  ['/props', 'Player Props'],
+  ['/backtesting', 'Backtesting'],
+  ['/track-record', 'Track Record'],
+  ['/paper-trading', 'Paper Trading'],
+  ['/faq', 'FAQ'],
+]
+
+const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf']
 
 export default function Layout() {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const { sport, setSport } = useAppStore()
+  useWebSocket()
+
   return (
-    <div id="app">
+    <>
       <header className="header">
-        <div className="header-logo">
-          <span className="header-logo-accent">SP</span> Sports Picks
+        <div className="header-left">
+          <button
+            className="hamburger-btn"
+            onClick={() => setMenuOpen(!menuOpen)}
+            aria-label="Menu"
+          >
+            ☰
+          </button>
+          <div className="header-logo">
+            <span className="header-logo-accent">SP</span> Sports Picks
+          </div>
         </div>
         <nav className="header-nav">
-          {NAV_ITEMS.map(item => (
+          {NAV_ITEMS.map(([path, label]) => (
             <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
-              end={item.path === '/'}
+              key={path}
+              to={path}
+              end={path === '/'}
+              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
             >
-              {item.label}
+              {label}
             </NavLink>
           ))}
         </nav>
+        <div className="header-sport-filter">
+          {SPORTS.map((s) => (
+            <button
+              key={s}
+              className={`sport-filter-btn ${sport === s ? 'active' : ''}`}
+              onClick={() => setSport(s)}
+            >
+              {s.toUpperCase()}
+            </button>
+          ))}
+        </div>
       </header>
-      <main className="main-content"><Outlet /></main>
-    </div>
-  );
+      <MobileMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
+      <main className="main-content">
+        <Outlet />
+      </main>
+      <BottomNav />
+    </>
+  )
 }
