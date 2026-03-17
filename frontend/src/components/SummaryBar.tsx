@@ -30,9 +30,9 @@ export default function SummaryBar({ record, pickCount, strategyName }: Props) {
       </div>
       <div className="summary-bar-divider" />
       <div className="summary-bar-item">
-        <span className="summary-bar-label">Season</span>
+        <span className="summary-bar-label">Win Rate</span>
         <span className="summary-bar-value">
-          {record ? `${record.wins}-${record.losses}` : '—'}
+          {record ? `${record.win_rate}%` : '—'}
         </span>
       </div>
       <div className="summary-bar-divider" />

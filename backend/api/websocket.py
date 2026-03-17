@@ -25,13 +25,14 @@ class ConnectionManager:
         """Send an event to all connected clients."""
         message = json.dumps({"type": event_type, "data": payload})
         disconnected = []
-        for connection in self.active_connections:
+        for connection in list(self.active_connections):  # iterate over copy
             try:
                 await connection.send_text(message)
             except Exception:
                 disconnected.append(connection)
         for conn in disconnected:
-            self.active_connections.remove(conn)
+            if conn in self.active_connections:
+                self.active_connections.remove(conn)
 
 
 manager = ConnectionManager()

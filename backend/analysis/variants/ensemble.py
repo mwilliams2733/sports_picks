@@ -58,11 +58,11 @@ class EnsembleStrategy(Strategy):
 
         # Spread picks — distribution-based: P(cover) via normal CDF
         if avg_odds.get("spread_home") is not None:
-            predicted_diff = self._predicted_point_diff(game)
+            predicted_diff, diff_std = self._predicted_point_diff_ml(game)
             spread_home = avg_odds["spread_home"]  # e.g., -3.5 for home favorite
             # Home covers when margin > abs(spread) for favorites
             cover_threshold = -spread_home  # -(-3.5) = 3.5: home must win by >3.5
-            home_cover_prob = self._spread_cover_prob(predicted_diff, cover_threshold)
+            home_cover_prob = self._spread_cover_prob(predicted_diff, cover_threshold, std=diff_std)
             away_cover_prob = 1.0 - home_cover_prob
             spread_fair = 0.5  # spread markets are ~50/50 after vig by design
             home_spread_edge = (home_cover_prob - spread_fair) * 100
@@ -95,7 +95,7 @@ class EnsembleStrategy(Strategy):
         if avg_odds.get("over_under") is not None:
             predicted_total = self._predicted_total(game)
             ou_line = avg_odds["over_under"]
-            over_prob = self._over_probability(predicted_total, ou_line)
+            over_prob = self._over_probability(predicted_total, ou_line, std=TOTAL_POINTS_STD)
             under_prob = 1.0 - over_prob
             ou_fair = 0.5  # O/U markets are ~50/50 after vig by design
             over_edge = (over_prob - ou_fair) * 100
