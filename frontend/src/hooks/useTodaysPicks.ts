@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import api from '../api/client'
-import { PickData, RecordData, GameOddsData } from '../types'
+import { api } from '../api/client'
+import type { PickData, RecordData, GameOddsData } from '../types'
 
 export function useTodaysPicks(sport?: string) {
   const sportParam = sport === 'all' ? undefined : sport

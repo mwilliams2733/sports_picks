@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import api from '../api/client'
-import { RecordData, DailyData, PickData } from '../types'
+import { api } from '../api/client'
+import type { RecordData, DailyData, PickData } from '../types'
 
 export function useRecord(sport?: string) {
   const sportParam = sport === 'all' ? undefined : sport

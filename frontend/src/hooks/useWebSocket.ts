@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { useFeedStore, FeedEvent } from '../stores/feedStore'
+import { useFeedStore } from '../stores/feedStore'
+import type { FeedEvent } from '../stores/feedStore'
 
 const MAX_RECONNECT_DELAY = 30000
 const BASE_RECONNECT_DELAY = 1000
@@ -7,8 +8,9 @@ const BASE_RECONNECT_DELAY = 1000
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectDelay = useRef(BASE_RECONNECT_DELAY)
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>()
-  const { addEvent, setWsConnected } = useFeedStore()
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const addEvent = useFeedStore((s) => s.addEvent)
+  const setWsConnected = useFeedStore((s) => s.setWsConnected)
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

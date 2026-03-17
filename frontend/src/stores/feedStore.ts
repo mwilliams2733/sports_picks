@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 export interface FeedEvent {
   id: string
-  type: 'pick_placed' | 'pick_won' | 'pick_lost' | 'streak'
+  type: string
   userName: string
   message: string
   timestamp: string
