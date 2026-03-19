@@ -7,6 +7,9 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
     app = FastAPI(title="Sports Picks API")
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     engine = get_engine(db_path)
+    from backend.database import migrate_api_usage, migrate_game_start_time
+    migrate_api_usage(engine)
+    migrate_game_start_time(engine)
     Base.metadata.create_all(engine)
 
     @app.get("/health")
@@ -21,6 +24,7 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
     from backend.api.games import router as games_router
     from backend.api.props import router as props_router
     from backend.api.pipeline_api import router as pipeline_router
+    from backend.api.credits import router as credits_router
 
     app.include_router(picks_router, prefix="/picks", tags=["picks"])
     app.include_router(stats_router, prefix="/stats", tags=["stats"])
@@ -28,6 +32,7 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
     app.include_router(games_router, prefix="/games", tags=["games"])
     app.include_router(props_router, prefix="/props", tags=["props"])
     app.include_router(pipeline_router, prefix="/pipeline", tags=["pipeline"])
+    app.include_router(credits_router, prefix="/credits", tags=["credits"])
 
     from backend.api.users import router as users_router
     app.include_router(users_router, prefix="/users", tags=["users"])

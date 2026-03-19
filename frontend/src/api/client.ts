@@ -85,8 +85,19 @@ export const api = {
     feed: (limit?: number) => get<{ id: number; user_id: number; event_type: string; payload: Record<string, string>; created_at: string }[]>(`/users/feed${limit ? `?limit=${limit}` : ''}`),
   },
   pipeline: {
-    run: () => post<{ status: string; active_sports: string[];
+    run: (sport?: string) => post<{
+      status: string; active_sports: string[];
       games_stored: number; odds_stored: number; props_stored: number;
-      picks_generated: number }>('/pipeline/run', {}),
+      props_analyzed: number; picks_generated: number;
+      credits_used: number; credits_remaining_today: number;
+      credits_remaining_month: number;
+    }>(`/pipeline/run${sport ? `?sport=${sport}` : ''}`, {}),
+  },
+  credits: {
+    get: () => get<{
+      monthly_used: number; monthly_limit: number; monthly_remaining: number;
+      daily_used: number; daily_target: number;
+      api_requests_remaining: number | null;
+    }>('/credits/'),
   },
 };
