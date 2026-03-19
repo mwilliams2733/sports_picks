@@ -1,9 +1,17 @@
+import os
 from datetime import date
 import yaml
+from dotenv import load_dotenv
+
+load_dotenv(override=False)
 
 def load_config(path: str) -> dict:
     with open(path) as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+    api_key = os.environ.get("ODDS_API_KEY")
+    if api_key:
+        config["odds_api_key"] = api_key
+    return config
 
 def is_sport_in_season(sport: str, seasons: dict, today: date | None = None) -> bool:
     today = today or date.today()

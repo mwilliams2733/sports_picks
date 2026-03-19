@@ -1,4 +1,3 @@
-odds_api_key: "4876d143ebafaa754e114ed5103ea3a0"
 database_path: "sports_picks.db"
 
 seasons:
@@ -22,5 +21,6 @@ seasons:
     end: "12-31"
 
 odds_budget:
-  monthly_limit: 500
-  pause_at: 450
+  monthly_limit: 20000
+  daily_target: 600
+  reserve: 2000
