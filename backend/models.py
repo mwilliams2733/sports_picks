@@ -23,6 +23,7 @@ class Game(Base):
     season = Column(String, nullable=False)
     week = Column(Integer, nullable=True)
     date = Column(Date, nullable=False)
+    start_time = Column(DateTime, nullable=True)
     home_team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
     away_team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
     home_score = Column(Integer, nullable=True)
@@ -154,10 +155,11 @@ class PlayerStat(Base):
 class ApiUsage(Base):
     __tablename__ = "api_usage"
     id = Column(Integer, primary_key=True)
-    source = Column(String, nullable=False)
-    request_count = Column(Integer, nullable=False, default=0)
-    month = Column(String, nullable=False)
-    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
+    endpoint = Column(String, nullable=False)  # "odds", "events", "player_props"
+    sport = Column(String, nullable=False)
+    credits_used = Column(Integer, nullable=False, default=1)
+    requests_remaining = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc), index=True)
 
 
 class UserProfile(Base):
