@@ -1,84 +1,195 @@
 import asyncio
 import logging
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.config import load_config, is_sport_in_season
-from backend.database import get_engine, get_session
-from backend.pipeline.full_pipeline import fetch_and_store_games, fetch_and_store_odds, fetch_and_store_props, ALL_SPORTS
+from backend.database import get_engine, get_session, migrate_api_usage, migrate_game_start_time
+from backend.pipeline.full_pipeline import (
+    fetch_and_store_games, fetch_and_store_odds, fetch_and_store_props, ALL_SPORTS,
+)
 from backend.pipeline.pick_generator import generate_and_store_picks
 from backend.pipeline.prop_pipeline import run_prop_pipeline
-from backend.pipeline.grader import grade_pick
-from backend.models import Base, Game, Odds, PickModel, PickResult, StrategyModel, PaperPick, UserProfile, PlayerStat
+from backend.pipeline.grader import grade_pick, grade_prop_pick
+from backend.collectors.budget import get_credit_summary, DEFAULT_BUDGET
+from backend.models import (
+    Base, Game, Odds, PickModel, PickResult, StrategyModel,
+    PaperPick, PlayerStat,
+)
 from backend.analysis.odds_utils import calculate_payout
-from backend.pipeline.grader import grade_prop_pick
 
 logger = logging.getLogger(__name__)
+ET = ZoneInfo("America/New_York")
+LEAD_TIME = timedelta(hours=2)
+
+
+def cluster_game_windows(games: list[dict], gap_minutes: int = 30) -> list[dict]:
+    if not games:
+        return []
+    sorted_games = sorted(games, key=lambda g: g["start_time"])
+    gap = timedelta(minutes=gap_minutes)
+    windows = []
+    current = [sorted_games[0]]
+    window_anchor = sorted_games[0]["start_time"]
+    for g in sorted_games[1:]:
+        if g["start_time"] - window_anchor > gap:
+            windows.append(_build_window(current))
+            current = [g]
+            window_anchor = g["start_time"]
+        else:
+            current.append(g)
+    windows.append(_build_window(current))
+    return windows
+
+
+def _build_window(games: list[dict]) -> dict:
+    earliest = min(g["start_time"] for g in games)
+    return {
+        "games": games,
+        "run_at": earliest - LEAD_TIME,
+        "window_start": earliest,
+        "window_end": max(g["start_time"] for g in games),
+    }
+
 
 def run_pipeline(config_path: str = "config.yaml"):
     config = load_config(config_path)
     engine = get_engine(config["database_path"])
+    migrate_api_usage(engine)
+    migrate_game_start_time(engine)
     Base.metadata.create_all(engine)
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(lambda: daily_job(config, engine), 'cron', hour=6, minute=0, id='daily_pipeline')
+
+    scheduler = BackgroundScheduler(timezone=ET)
+    scheduler.add_job(
+        lambda: morning_scout(config, engine, scheduler),
+        'cron', hour=8, minute=0, id='morning_scout', replace_existing=True,
+    )
+    scheduler.add_job(
+        lambda: morning_scout(config, engine, scheduler, is_retry=True),
+        'cron', hour=9, minute=0, id='scout_retry_9', replace_existing=True,
+    )
+    scheduler.add_job(
+        lambda: morning_scout(config, engine, scheduler, is_retry=True),
+        'cron', hour=10, minute=0, id='scout_retry_10', replace_existing=True,
+    )
     from backend.pipeline.recalibration_job import run_recalibration
     scheduler.add_job(
         lambda: run_recalibration(config["database_path"]),
-        'cron', hour=3, minute=0, id='recalibration',
-        replace_existing=True,
+        'cron', hour=3, minute=0, id='recalibration', replace_existing=True,
     )
     scheduler.start()
-    logger.info("Pipeline scheduler started (daily at 6 AM, recalibration at 3 AM).")
+    logger.info("Scheduler started (morning scout at 8 AM ET, recalibration at 3 AM ET)")
     try:
         while True:
             time.sleep(60)
     except KeyboardInterrupt:
         scheduler.shutdown()
 
-def daily_job(config, engine):
+
+def morning_scout(config, engine, scheduler, is_retry=False):
     session = get_session(engine)
     try:
-        logger.info("Starting daily pipeline run")
         grade_pending_picks(session)
-
         active_sports = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]
-        logger.info(f"Active sports: {active_sports}")
-
-        # Fetch and store games, odds, props
-        asyncio.run(fetch_and_store_games(session, active_sports, date.today()))
-
-        api_key = config.get("odds_api_key")
-        if api_key:
-            asyncio.run(fetch_and_store_odds(session, active_sports, api_key))
-            asyncio.run(fetch_and_store_props(session, active_sports, api_key))
-
-        # Generate game picks
-        active_strategy = session.query(StrategyModel).filter(
-            StrategyModel.is_active == True,
-            StrategyModel.strategy_type == "game",
-        ).first()
-        if active_strategy:
-            count = generate_and_store_picks(session, active_strategy.id)
-            logger.info(f"Generated {count} game picks")
-
-        # Run prop pipeline
+        scheduled_sports = [s for s in active_sports if s in ("nba", "nfl")]
+        if not scheduled_sports:
+            logger.info("No auto-scheduled sports in season today")
+            return
+        today = date.today()
         try:
-            prop_strategy = session.query(StrategyModel).filter(
-                StrategyModel.is_active == True,
-                StrategyModel.strategy_type == "prop"
-            ).first()
-            prop_result = asyncio.run(run_prop_pipeline(
-                session,
-                target_date=date.today(),
-                strategy_id=prop_strategy.id if prop_strategy else None
-            ))
-            logger.info(f"Prop pipeline: {prop_result}")
-        except Exception as prop_e:
-            logger.error(f"Prop pipeline error: {prop_e}")
+            asyncio.run(fetch_and_store_games(session, scheduled_sports, today))
+        except Exception as e:
+            if is_retry:
+                logger.error(f"Scout retry failed fetching games: {e}")
+                return
+            logger.warning(f"Scout failed fetching games: {e}, will retry at 9/10 AM")
+            return
+
+        # Scout succeeded — remove retry jobs
+        for retry_id in ("scout_retry_9", "scout_retry_10"):
+            try:
+                scheduler.remove_job(retry_id)
+            except Exception:
+                pass
+
+        existing_jobs = {j.id for j in scheduler.get_jobs()}
+        for sport in scheduled_sports:
+            games = session.query(Game).filter(
+                Game.sport == sport, Game.date == today,
+                Game.status == "scheduled", Game.start_time.isnot(None),
+            ).all()
+            if not games:
+                logger.info(f"No {sport} games scheduled for today, no windows created")
+                continue
+            game_dicts = [{"id": g.id, "start_time": g.start_time} for g in games]
+            windows = cluster_game_windows(game_dicts)
+            for i, window in enumerate(windows):
+                job_id = f"window_{sport}_{today}_{i}"
+                if job_id in existing_jobs:
+                    continue
+                run_at = window["run_at"]
+                now_utc = datetime.now(tz=timezone.utc)
+                if run_at <= now_utc:
+                    logger.info(f"Window {job_id} run_at is past, running now")
+                    _run_window(config, engine, sport, window)
+                else:
+                    run_at_et = run_at.astimezone(ET)
+                    scheduler.add_job(
+                        lambda c=config, e=engine, s=sport, w=window: _run_window(c, e, s, w),
+                        'date', run_date=run_at_et, id=job_id, replace_existing=True,
+                    )
+                    earliest_et = window["window_start"].astimezone(ET)
+                    n_games = len(window["games"])
+                    logger.info(
+                        f"Scheduled {sport} window: {n_games} games tipping off "
+                        f"~{earliest_et.strftime('%I:%M %p')} ET, pipeline run at "
+                        f"{run_at_et.strftime('%I:%M %p')} ET"
+                    )
     except Exception as e:
-        logger.error(f"Pipeline error: {e}")
+        logger.error(f"Morning scout error: {e}", exc_info=True)
     finally:
         session.close()
+
+
+def _run_window(config, engine, sport: str, window: dict):
+    session = get_session(engine)
+    try:
+        today = date.today()
+        budget = config.get("odds_budget", DEFAULT_BUDGET)
+        api_key = config.get("odds_api_key")
+        window_game_ids = {g["id"] for g in window["games"]}
+        logger.info(f"Running {sport} window: {len(window_game_ids)} games")
+        if api_key:
+            asyncio.run(fetch_and_store_odds(session, [sport], api_key, budget=budget))
+            asyncio.run(fetch_and_store_props(
+                session, [sport], api_key, budget=budget, window_game_ids=window_game_ids,
+            ))
+        game_strategy = session.query(StrategyModel).filter(
+            StrategyModel.is_active == True, StrategyModel.strategy_type == "game",
+        ).first()
+        if game_strategy:
+            count = generate_and_store_picks(session, game_strategy.id, today)
+            logger.info(f"Generated {count} game picks")
+        prop_strategy = session.query(StrategyModel).filter(
+            StrategyModel.is_active == True, StrategyModel.strategy_type == "prop",
+        ).first()
+        try:
+            result = asyncio.run(run_prop_pipeline(
+                session, target_date=today,
+                strategy_id=prop_strategy.id if prop_strategy else None,
+            ))
+            logger.info(f"Prop pipeline: {result}")
+        except Exception as e:
+            logger.error(f"Prop pipeline error: {e}")
+        summary = get_credit_summary(session, budget)
+        logger.info(f"Window complete. Credits today: {summary['daily_used']}, month: {summary['monthly_used']}/{summary['monthly_limit']}")
+    except Exception as e:
+        logger.error(f"Window run error ({sport}): {e}", exc_info=True)
+    finally:
+        session.close()
+
 
 def grade_pending_picks(session):
     ungraded = (
@@ -166,6 +277,7 @@ def grade_pending_picks(session):
 
     session.commit()
     logger.info(f"Auto-graded {paper_graded} paper picks")
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
