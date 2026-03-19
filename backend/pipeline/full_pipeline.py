@@ -4,6 +4,8 @@ from datetime import date, datetime, timezone
 from sqlalchemy.orm import Session
 from backend.collectors.espn import ESPNCollector
 from backend.collectors.odds_api import OddsAPICollector
+from backend.collectors.budget import check_budget, record_api_call, BudgetStatus
+from backend.exceptions import BudgetExhaustedError
 from backend.models import Team, Game, Odds, PlayerProp
 
 logger = logging.getLogger(__name__)
@@ -30,7 +32,8 @@ async def fetch_and_store_games(session: Session, sports: list[str], target_date
     return total
 
 
-async def fetch_and_store_odds(session: Session, sports: list[str], api_key: str) -> int:
+async def fetch_and_store_odds(session: Session, sports: list[str], api_key: str,
+                                budget: dict | None = None) -> int:
     """Fetch odds from The Odds API and store them.
 
     For sports without ESPN coverage (boxing), also creates games from Odds API events.
@@ -40,7 +43,14 @@ async def fetch_and_store_odds(session: Session, sports: list[str], api_key: str
     try:
         for sport in sports:
             try:
+                if budget:
+                    status = check_budget(session, budget)
+                    if status == BudgetStatus.MONTHLY_EXHAUSTED:
+                        from backend.collectors.budget import get_credit_summary
+                        summary = get_credit_summary(session, budget)
+                        raise BudgetExhaustedError(summary["monthly_used"], budget["monthly_limit"], summary["daily_used"])
                 odds_data = await collector.fetch_odds(sport)
+                record_api_call(session, "odds", sport, collector.requests_remaining)
                 # For each event, ensure a game exists (creates from Odds API if needed)
                 for event in odds_data:
                     _ensure_game_from_odds(session, sport, event)
@@ -54,7 +64,9 @@ async def fetch_and_store_odds(session: Session, sports: list[str], api_key: str
     return total
 
 
-async def fetch_and_store_props(session: Session, sports: list[str], api_key: str) -> int:
+async def fetch_and_store_props(session: Session, sports: list[str], api_key: str,
+                                 budget: dict | None = None,
+                                 window_game_ids: set[int] | None = None) -> int:
     """Fetch player props from The Odds API and store them.
 
     Only fetches for sports that have prop markets defined.
@@ -69,7 +81,14 @@ async def fetch_and_store_props(session: Session, sports: list[str], api_key: st
             if not PROP_MARKETS.get(sport):
                 continue
             try:
+                if budget:
+                    status = check_budget(session, budget)
+                    if status == BudgetStatus.MONTHLY_EXHAUSTED:
+                        from backend.collectors.budget import get_credit_summary
+                        summary = get_credit_summary(session, budget)
+                        raise BudgetExhaustedError(summary["monthly_used"], budget["monthly_limit"], summary["daily_used"])
                 events = await collector.fetch_events(sport)
+                record_api_call(session, "events", sport, collector.requests_remaining)
                 for event in events:
                     event_id = event.get("id")
                     if not event_id:
@@ -78,7 +97,16 @@ async def fetch_and_store_props(session: Session, sports: list[str], api_key: st
                     game = _find_game_for_event(session, sport, event)
                     if not game:
                         continue
+                    if window_game_ids is not None and game.id not in window_game_ids:
+                        continue
+                    # Budget check before expensive prop call
+                    if budget:
+                        status = check_budget(session, budget)
+                        if status in (BudgetStatus.MONTHLY_EXHAUSTED, BudgetStatus.RESERVE_EXHAUSTED):
+                            logger.warning(f"Budget limit reached, stopping prop fetch for {sport}")
+                            break
                     props = await collector.fetch_player_props(sport, event_id)
+                    record_api_call(session, "player_props", sport, collector.requests_remaining)
                     if not props:
                         continue
                     stored = _store_props(session, game.id, props)
@@ -104,6 +132,7 @@ def _store_games(session: Session, sport: str, target_date: date, games: list[di
         away_id = _ensure_team(session, team_cache, away_abbr, g["away_team_name"], sport)
 
         game_date = _parse_date(g["date"])
+        start_time = _parse_start_time(g["date"])
 
         existing = session.query(Game).filter(
             Game.sport == sport,
@@ -117,10 +146,13 @@ def _store_games(session: Session, sport: str, target_date: date, games: list[di
                 existing.home_score = g["home_score"]
                 existing.away_score = g["away_score"]
                 existing.status = g["status"]
+            if existing.start_time is None:
+                existing.start_time = start_time
             continue
 
         game = Game(
             sport=sport, season=season_label, date=game_date,
+            start_time=start_time,
             home_team_id=home_id, away_team_id=away_id,
             home_score=g["home_score"], away_score=g["away_score"],
             status=g["status"],
@@ -272,3 +304,8 @@ def _ensure_team(session: Session, cache: dict[str, int], abbr: str, name: str, 
 
 def _parse_date(date_str: str) -> date:
     return datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
+
+
+def _parse_start_time(date_str: str) -> datetime:
+    """Parse ISO datetime string to full UTC datetime."""
+    return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
