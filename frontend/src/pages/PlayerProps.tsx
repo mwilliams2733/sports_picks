@@ -54,10 +54,16 @@ export default function PlayerProps() {
     setBetModalOpen(true);
   };
 
-  const { props, markets } = useProps(sport);
+  const { props } = useProps(sport);
 
   const propsData = props.data ?? [];
-  const marketsData = markets.data ?? [];
+
+  // Derive available markets from the loaded props (sport-filtered automatically)
+  const sportMarkets = Array.from(
+    new Map(
+      propsData.map(p => [p.market, { key: p.market, label: p.market_label }])
+    ).values()
+  ).sort((a, b) => a.label.localeCompare(b.label));
 
   // Extract unique teams from matchup strings (e.g. "BOS @ LAL")
   const teams = Array.from(new Set(
@@ -110,10 +116,10 @@ export default function PlayerProps() {
             {teams.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         )}
-        {marketsData.length > 0 && (
+        {sportMarkets.length > 0 && (
           <select className="select" value={marketFilter} onChange={e => setMarketFilter(e.target.value)}>
             <option value="">All Markets</option>
-            {marketsData.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+            {sportMarkets.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
           </select>
         )}
         <select className="select" value={sortBy} onChange={e => setSortBy(e.target.value as any)}>

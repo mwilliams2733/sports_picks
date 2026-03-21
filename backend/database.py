@@ -65,3 +65,17 @@ def migrate_elo_history(engine):
     if "elo_history" not in inspector.get_table_names():
         from backend.models import EloHistory
         EloHistory.__table__.create(engine)
+
+
+def migrate_parlays(engine):
+    """Create parlays table and add parlay_id to paper_picks if missing."""
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "parlays" not in inspector.get_table_names():
+        from backend.models import Parlay
+        Parlay.__table__.create(engine)
+    if "paper_picks" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("paper_picks")]
+        if "parlay_id" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE paper_picks ADD COLUMN parlay_id INTEGER REFERENCES parlays(id)"))

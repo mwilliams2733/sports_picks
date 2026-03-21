@@ -3,7 +3,7 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func
 from backend.database import get_session
-from backend.models import UserProfile, PaperPick, Game, PlayerStat, ActivityFeed
+from backend.models import UserProfile, PaperPick, Game, PlayerStat, ActivityFeed, Parlay
 from backend.pipeline.grader import grade_pick, grade_prop_pick
 from backend.analysis.odds_utils import calculate_payout
 import json
@@ -42,6 +42,20 @@ class PlacePickRequest(BaseModel):
     stake: float
     prop_market: str | None = None
     prop_player: str | None = None
+
+
+class ParlayLeg(BaseModel):
+    game_id: int
+    pick_type: str
+    pick_value: str
+    odds: int
+    prop_market: str | None = None
+    prop_player: str | None = None
+
+
+class PlaceParlayRequest(BaseModel):
+    legs: list[ParlayLeg]
+    stake: float
 
 
 @router.get("/")
@@ -297,6 +311,146 @@ def get_user_picks(request: Request, user_id: int):
                 entry["prop_player"] = p.prop_player
             result.append(entry)
         return result
+    finally:
+        session.close()
+
+
+@router.post("/{user_id}/parlay")
+def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
+    """Place a parlay bet with multiple legs across any sports."""
+    session = get_session(request.app.state.engine)
+    try:
+        user = session.get(UserProfile, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        if len(body.legs) < 2:
+            raise HTTPException(status_code=400, detail="Parlay requires at least 2 legs")
+        if body.stake <= 0:
+            raise HTTPException(status_code=400, detail="Stake must be positive")
+
+        # Check balance
+        picks = session.query(PaperPick).filter(PaperPick.user_id == user_id).all()
+        total_payout = sum(p.payout or 0 for p in picks)
+        current_balance = user.starting_balance + total_payout
+        if body.stake > current_balance:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
+
+        # Calculate combined decimal odds (multiply all legs)
+        combined_decimal = 1.0
+        for leg in body.legs:
+            if leg.odds < 0:
+                combined_decimal *= 1 + (100 / abs(leg.odds))
+            else:
+                combined_decimal *= 1 + (leg.odds / 100)
+
+        # Convert back to American odds
+        if combined_decimal >= 2.0:
+            combined_american = int(round((combined_decimal - 1) * 100))
+        else:
+            combined_american = int(round(-100 / (combined_decimal - 1)))
+
+        # Create parlay record
+        parlay = Parlay(
+            user_id=user_id,
+            stake=body.stake,
+            combined_odds=combined_american,
+        )
+        session.add(parlay)
+        session.flush()
+
+        # Create individual legs as PaperPick entries linked to this parlay
+        all_graded = True
+        all_won = True
+        has_push = False
+        leg_results = []
+
+        for leg in body.legs:
+            game = session.get(Game, leg.game_id)
+            if not game:
+                raise HTTPException(status_code=404, detail=f"Game {leg.game_id} not found")
+
+            result = None
+            if game.status == "final" and game.home_score is not None and game.away_score is not None:
+                if leg.pick_type == "prop" and leg.prop_player and leg.prop_market:
+                    player_stat = (
+                        session.query(PlayerStat)
+                        .filter_by(player_name=leg.prop_player, stat_type="game_log", game_date=game.date)
+                        .first()
+                    )
+                    prop_result = grade_prop_pick(leg.pick_value, leg.prop_market, player_stat)
+                    if prop_result:
+                        result = prop_result[0]
+                else:
+                    grade_result, _ = grade_pick(
+                        leg.pick_type, leg.pick_value,
+                        game.home_score, game.away_score, leg.odds
+                    )
+                    result = grade_result
+            else:
+                all_graded = False
+
+            if result == "loss":
+                all_won = False
+            elif result == "push":
+                has_push = True
+            elif result is None:
+                all_graded = False
+                all_won = False
+
+            pick = PaperPick(
+                user_id=user_id,
+                game_id=leg.game_id,
+                pick_type=leg.pick_type,
+                pick_value=leg.pick_value,
+                odds=leg.odds,
+                stake=0,  # Individual legs have 0 stake; parlay has the stake
+                result=result,
+                payout=0,
+                prop_market=leg.prop_market,
+                prop_player=leg.prop_player,
+                parlay_id=parlay.id,
+            )
+            session.add(pick)
+            leg_results.append({"pick_value": leg.pick_value, "odds": leg.odds, "result": result})
+
+        # Grade parlay if all legs are graded
+        parlay_payout = None
+        if all_graded:
+            if all_won and not has_push:
+                parlay.result = "win"
+                parlay.payout = body.stake * (combined_decimal - 1)
+                parlay_payout = parlay.payout
+            elif has_push and all_won:
+                parlay.result = "push"
+                parlay.payout = 0
+                parlay_payout = 0
+            else:
+                parlay.result = "loss"
+                parlay.payout = -body.stake
+                parlay_payout = -body.stake
+
+        session.commit()
+
+        # Log activity
+        user = session.query(UserProfile).get(user_id)
+        user_name = user.name if user else "Unknown"
+        legs_str = " + ".join(leg.pick_value for leg in body.legs)
+        _log_feed_event(session, user_id, "pick_placed", {
+            "user_name": user_name,
+            "message": f"{user_name} placed {len(body.legs)}-leg parlay: {legs_str} — ${body.stake:,.0f} to win ${body.stake * (combined_decimal - 1):,.0f}",
+            "parlay": True,
+            "legs": len(body.legs),
+        })
+
+        return {
+            "id": parlay.id,
+            "legs": leg_results,
+            "combined_odds": combined_american,
+            "potential_payout": round(body.stake * (combined_decimal - 1), 2),
+            "result": parlay.result,
+            "payout": parlay_payout,
+            "new_balance": round(current_balance + (parlay_payout or 0), 2),
+        }
     finally:
         session.close()
 

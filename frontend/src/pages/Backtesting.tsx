@@ -37,9 +37,13 @@ export default function Backtesting() {
   const [selectedVariant, setSelectedVariant] = useState<string>('ensemble');
   const [marketFilter, setMarketFilter] = useState<string>('');
 
-  // Date range
-  const [startDate, setStartDate] = useState('2026-02-01');
-  const [endDate, setEndDate] = useState('2026-03-14');
+  // Date range — default to today through 10 days from now
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 10);
+    return d.toISOString().slice(0, 10);
+  });
 
   // Results
   const [results, setResults] = useState<RunAllResult | null>(null);

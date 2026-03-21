@@ -90,6 +90,14 @@ export const api = {
     stats: (id: number) => get<UserStats>(`/users/${id}/stats`),
     feed: (limit?: number) => get<{ id: number; user_id: number; event_type: string; payload: Record<string, string>; created_at: string }[]>(`/users/feed${limit ? `?limit=${limit}` : ''}`),
     delete: (id: number) => del<{ deleted: boolean; id: number }>(`/users/${id}`),
+    placeParlay: (userId: number, data: {
+      legs: Array<{ game_id: number; pick_type: string; pick_value: string; odds: number; prop_market?: string; prop_player?: string }>;
+      stake: number;
+    }) => post<{
+      id: number; legs: Array<{ pick_value: string; odds: number; result: string | null }>;
+      combined_odds: number; potential_payout: number;
+      result: string | null; payout: number | null; new_balance: number;
+    }>(`/users/${userId}/parlay`, data),
   },
   pipeline: {
     run: (sport?: string) => post<{

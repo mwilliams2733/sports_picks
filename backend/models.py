@@ -196,10 +196,25 @@ class PaperPick(Base):
     payout = Column(Float, nullable=True)  # net payout (positive for wins, negative for losses)
     prop_market = Column(String, nullable=True)  # e.g. "player_points" — only for prop picks
     prop_player = Column(String, nullable=True)  # player name — only for prop picks
+    parlay_id = Column(Integer, ForeignKey("parlays.id"), nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
     graded_at = Column(DateTime, nullable=True)
     user = relationship("UserProfile")
     game = relationship("Game")
+    parlay = relationship("Parlay", back_populates="legs")
+
+
+class Parlay(Base):
+    __tablename__ = "parlays"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("user_profiles.id"), nullable=False)
+    stake = Column(Float, nullable=False)
+    combined_odds = Column(Integer, nullable=False)  # American odds for the parlay
+    result = Column(String, nullable=True)  # "win", "loss", "push", null=pending
+    payout = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
+    user = relationship("UserProfile")
+    legs = relationship("PaperPick", back_populates="parlay")
 
 
 class ActivityFeed(Base):

@@ -28,6 +28,12 @@ export default function PaperTrading() {
   const [pickOdds, setPickOdds] = useState(-110);
   const [stake, setStake] = useState(10000);
 
+  // Parlay builder state
+  type ParlayLeg = { game_id: number; pick_type: string; pick_value: string; odds: number; label: string; sport: string; prop_market?: string; prop_player?: string };
+  const [parlayLegs, setParlayLegs] = useState<ParlayLeg[]>([]);
+  const [parlayStake, setParlayStake] = useState(5000);
+  const [, setParlayResult] = useState<{ combined_odds: number; potential_payout: number; result: string | null; payout: number | null } | null>(null);
+
   // Prop-specific state
   const [props, setProps] = useState<PropData[]>([]);
   const [selectedPropId, setSelectedPropId] = useState<number | ''>('');
@@ -135,6 +141,74 @@ export default function PaperTrading() {
       } catch (e: any) {
         toast(e.message, 'error');
       }
+    }
+  };
+
+  const addParlayLeg = () => {
+    if (pickType === 'prop') {
+      const prop = props.find(p => p.id === selectedPropId);
+      if (!prop) return;
+      const game = games.find(g => g.id === prop.game_id);
+      setParlayLegs(prev => [...prev, {
+        game_id: prop.game_id,
+        pick_type: 'prop',
+        pick_value: `${prop.player_name} ${prop.outcome} ${prop.line} ${prop.market_label}`,
+        odds: prop.odds,
+        label: `${prop.player_name} ${prop.outcome} ${prop.line}`,
+        sport: game?.sport ?? '',
+        prop_market: prop.market,
+        prop_player: prop.player_name,
+      }]);
+      setSelectedPropId('');
+      setPropSearch('');
+    } else {
+      if (!selectedGame || !pickValue.trim()) return;
+      const game = games.find(g => g.id === selectedGame);
+      setParlayLegs(prev => [...prev, {
+        game_id: selectedGame as number,
+        pick_type: pickType,
+        pick_value: pickValue,
+        odds: pickOdds,
+        label: `${game ? `${game.away_team}@${game.home_team}` : ''} ${pickValue}`,
+        sport: game?.sport ?? '',
+      }]);
+      setPickValue('');
+    }
+  };
+
+  const removeParlayLeg = (index: number) => {
+    setParlayLegs(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const parlayDecimalOdds = parlayLegs.reduce((acc, leg) => {
+    const dec = leg.odds < 0 ? 1 + (100 / Math.abs(leg.odds)) : 1 + (leg.odds / 100);
+    return acc * dec;
+  }, 1);
+
+  const parlayAmericanOdds = parlayDecimalOdds >= 2
+    ? `+${Math.round((parlayDecimalOdds - 1) * 100)}`
+    : `${Math.round(-100 / (parlayDecimalOdds - 1))}`;
+
+  const handlePlaceParlay = async () => {
+    if (!selectedUser || parlayLegs.length < 2) return;
+    try {
+      const res = await api.users.placeParlay(selectedUser.id, {
+        legs: parlayLegs.map(l => ({
+          game_id: l.game_id, pick_type: l.pick_type, pick_value: l.pick_value,
+          odds: l.odds, prop_market: l.prop_market, prop_player: l.prop_player,
+        })),
+        stake: parlayStake,
+      });
+      setParlayResult(res);
+      const msg = res.result
+        ? `Parlay ${res.result}! ${res.result === 'win' ? '+' : ''}$${(res.payout || 0).toLocaleString()}`
+        : `${parlayLegs.length}-leg parlay placed! Potential: $${res.potential_payout.toLocaleString()}`;
+      toast(msg, res.result === 'loss' ? 'error' : 'success');
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      selectUser(selectedUser);
+      setParlayLegs([]);
+    } catch (e: any) {
+      toast(e.message, 'error');
     }
   };
 
@@ -517,6 +591,88 @@ export default function PaperTrading() {
                     {' '}| Edge: {selectedProp.edge_pct > 0 ? '+' : ''}{selectedProp.edge_pct.toFixed(1)}%
                   </span>
                 )}
+              </div>
+            )}
+          </div>
+
+          {/* Parlay Builder */}
+          <div className="card" style={{ marginBottom: '1rem' }}>
+            <div className="input-label" style={{ marginBottom: '0.5rem' }}>
+              Parlay Builder
+              <span className="text-muted" style={{ fontWeight: 400, marginLeft: '0.5rem', fontSize: '0.75rem' }}>
+                Combine picks across any sport
+              </span>
+            </div>
+
+            {/* Add leg button in the existing pick form */}
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+              <button className="btn btn-primary" onClick={addParlayLeg}
+                disabled={pickType === 'prop' ? !selectedPropId : (!selectedGame || !pickValue.trim())}
+                style={{ fontSize: '0.8rem' }}>
+                + Add Leg
+              </button>
+              <span className="text-muted" style={{ alignSelf: 'center', fontSize: '0.8rem' }}>
+                Select a game/prop above, then click "Add Leg" to build your parlay
+              </span>
+            </div>
+
+            {/* Parlay legs list */}
+            {parlayLegs.length > 0 && (
+              <div style={{ marginBottom: '0.75rem' }}>
+                {parlayLegs.map((leg, i) => (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    padding: '0.5rem 0.75rem', background: 'var(--card-hover)',
+                    borderRadius: '0.375rem', marginBottom: '0.25rem', fontSize: '0.85rem',
+                  }}>
+                    <span className="badge badge-blue" style={{ fontSize: '0.65rem' }}>{leg.sport.toUpperCase()}</span>
+                    <span className="font-medium" style={{ flex: 1 }}>{leg.label}</span>
+                    <span className="mono">{leg.odds > 0 ? `+${leg.odds}` : leg.odds}</span>
+                    <button onClick={() => removeParlayLeg(i)}
+                      style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: '1rem' }}>
+                      &#x2715;
+                    </button>
+                  </div>
+                ))}
+
+                {/* Parlay summary */}
+                <div style={{
+                  display: 'flex', gap: '1rem', alignItems: 'center', padding: '0.75rem',
+                  background: 'var(--bg)', borderRadius: '0.375rem', marginTop: '0.5rem',
+                  border: '1px solid var(--border)',
+                }}>
+                  <div>
+                    <div className="text-muted" style={{ fontSize: '0.7rem' }}>Legs</div>
+                    <div className="font-medium">{parlayLegs.length}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted" style={{ fontSize: '0.7rem' }}>Combined Odds</div>
+                    <div className="mono font-medium" style={{ color: 'var(--green)' }}>{parlayAmericanOdds}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted" style={{ fontSize: '0.7rem' }}>Potential Win</div>
+                    <div className="mono font-medium" style={{ color: 'var(--green)' }}>
+                      ${(parlayStake * (parlayDecimalOdds - 1)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </div>
+                  </div>
+                  <div style={{ minWidth: '100px' }}>
+                    <div className="text-muted" style={{ fontSize: '0.7rem' }}>Stake ($)</div>
+                    <input className="input" type="number" value={parlayStake}
+                      onChange={e => setParlayStake(Number(e.target.value))} min={1}
+                      style={{ padding: '0.25rem 0.5rem', fontSize: '0.85rem' }} />
+                  </div>
+                  <button className="btn btn-success" onClick={handlePlaceParlay}
+                    disabled={parlayLegs.length < 2}
+                    style={{ alignSelf: 'end', whiteSpace: 'nowrap' }}>
+                    Place Parlay
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {parlayLegs.length === 0 && (
+              <div className="text-muted" style={{ fontSize: '0.8rem' }}>
+                No legs added yet. Use the pick form above to select games or props, then click "Add Leg".
               </div>
             )}
           </div>
