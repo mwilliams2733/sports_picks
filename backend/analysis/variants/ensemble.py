@@ -286,11 +286,17 @@ class EnsembleStrategy(Strategy):
         return hs.point_diff - aws.point_diff
 
     def _predicted_total(self, game: GameData) -> float:
-        """Predict total score from pace and offensive/defensive ratings."""
+        """Predict total score using matchup-based efficiency.
+
+        Each team's expected points = possessions * (own_off + opp_def) / 200.
+        This accounts for the fact that a great offense vs bad defense scores more.
+        """
         hs, aws = game.home_stats, game.away_stats
         avg_pace = (hs.pace + aws.pace) / 2
-        total_off = hs.offensive_rating + aws.offensive_rating
-        return avg_pace * total_off / 200
+        possessions = avg_pace
+        home_pts = possessions * (hs.offensive_rating + aws.defensive_rating) / 200
+        away_pts = possessions * (aws.offensive_rating + hs.defensive_rating) / 200
+        return home_pts + away_pts
 
     def _spread_cover_prob(self, predicted_diff: float, cover_threshold: float, std: float = POINT_DIFF_STD) -> float:
         """Probability that home margin exceeds the cover threshold.

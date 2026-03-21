@@ -69,35 +69,23 @@ def test_spread_pick_away_side():
 
 def test_over_under_pick_generated():
     """O/U pick generated when predicted total differs from line."""
-    # pace=110 each, off_rtg=115 each
-    # predicted_total = (110+110)/2 * (115+115)/200 = 110 * 1.15 = 126.5
-    # Line is 215, so predicted < line => Under pick, edge = 215-126.5=88.5
-    # Actually let's use more realistic values
+    # Matchup-based formula: each team's pts = pace * (own_off + opp_def) / 200
     # pace=100, off_rtg=110, def_rtg=100 for both
-    # predicted = (100+100)/2 * (110+110)/200 = 100 * 1.1 = 110
-    # Line = 215, edge = 105 (huge, but shows the logic)
-    # Let's make it tighter: pace=105 each, off_rtg=108 each
-    # predicted = 105 * 216/200 = 105 * 1.08 = 113.4, line=215 => Under
-    # Actually let's use values that produce realistic totals
-    # For NBA: pace~100, off_rtg~110 => total = 100 * 220/200 = 110 per team? No.
-    # predicted_total = avg_pace * (home_off + away_off) / 200
-    # For total ~220: pace=100, combined_off=440 => 100*440/200=220
-    # off_rtg=220 each => predicted=100*440/200=220
-    # That's unrealistic. Let's just use the formula and set line far from it.
-    # pace=100, off_rtg=110 each => predicted = 100*(110+110)/200 = 110
-    # line=120 => edge=10, Under pick
+    # home_pts = 100 * (110 + 100) / 200 = 105
+    # away_pts = 100 * (110 + 100) / 200 = 105
+    # predicted_total = 210, line=225 => Under pick
     game = GameData(game_id=1, sport="nba", date=date(2026, 3, 13),
         home_team_id=1, away_team_id=2,
         home_stats=_stats(offensive_rating=110.0, defensive_rating=100.0, pace=100.0),
         away_stats=_stats(offensive_rating=110.0, defensive_rating=100.0, pace=100.0),
         odds=[OddsSnapshot(bookmaker="dk", moneyline_home=-110, moneyline_away=-110,
-            spread_home=-1.0, spread_away=1.0, over_under=120.0)])
+            spread_home=-1.0, spread_away=1.0, over_under=225.0)])
     strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0})
     picks = strategy.predict(game)
     ou_picks = [p for p in picks if p.pick_type == "over_under"]
     assert len(ou_picks) == 1
     assert "Under" in ou_picks[0].pick_value
-    assert "120" in ou_picks[0].pick_value
+    assert "225" in ou_picks[0].pick_value
     assert ou_picks[0].odds_at_pick == -110
 
 def test_over_pick_generated():
