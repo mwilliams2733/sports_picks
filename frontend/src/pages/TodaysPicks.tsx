@@ -77,6 +77,9 @@ export default function TodaysPicks() {
     }).catch(() => {});
   }, [sportParam]);
 
+  // Reset team filter when sport changes (must be before early returns)
+  useEffect(() => { setTeamFilter(''); }, [sport]);
+
   const error = picks.error || record.error || games.error;
   const loading = picks.isLoading || record.isLoading || games.isLoading;
 
@@ -97,9 +100,6 @@ export default function TodaysPicks() {
   const teams = Array.from(new Set(
     gamesData.flatMap(g => [g.home_team_name, g.away_team_name]).filter(Boolean)
   )).sort();
-
-  // Reset team filter when sport changes
-  useEffect(() => { setTeamFilter(''); }, [sport]);
 
   // Filter games and picks by team
   const filteredGames = teamFilter

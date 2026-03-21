@@ -47,7 +47,24 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
     static_dir = os.path.join(os.path.dirname(__file__), "../../frontend/dist")
     if os.path.exists(static_dir):
         from fastapi.staticfiles import StaticFiles
-        app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
+        from fastapi.responses import FileResponse
+
+        # Serve static assets (JS, CSS, images)
+        app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
+
+        # Serve known static files at root
+        for static_file in ["favicon.svg", "icons.svg", "manifest.json", "registerSW.js"]:
+            file_path = os.path.join(static_dir, static_file)
+            if os.path.exists(file_path):
+                @app.get(f"/{static_file}", include_in_schema=False)
+                def serve_static(f=file_path):
+                    return FileResponse(f)
+
+        # SPA catch-all: serve index.html for any unmatched route
+        index_path = os.path.join(static_dir, "index.html")
+        @app.get("/{path:path}", include_in_schema=False)
+        def spa_catch_all(path: str):
+            return FileResponse(index_path)
 
     return app
 

@@ -1,27 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   plugins: [
     react(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      manifest: false, // use public/manifest.json
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https?:\/\/.*\/(picks|stats|games|props|users)\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: { maxAgeSeconds: 300 },
-            },
-          },
-        ],
-      },
-    }),
   ],
   server: {
     proxy: {

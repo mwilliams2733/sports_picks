@@ -26,12 +26,12 @@ export default function PaperTrading() {
   const [pickType, setPickType] = useState('moneyline');
   const [pickValue, setPickValue] = useState('');
   const [pickOdds, setPickOdds] = useState(-110);
-  const [stake, setStake] = useState(10000);
+  const [stake, setStake] = useState(100);
 
   // Parlay builder state
   type ParlayLeg = { game_id: number; pick_type: string; pick_value: string; odds: number; label: string; sport: string; prop_market?: string; prop_player?: string };
   const [parlayLegs, setParlayLegs] = useState<ParlayLeg[]>([]);
-  const [parlayStake, setParlayStake] = useState(5000);
+  const [parlayStake, setParlayStake] = useState(100);
   const [, setParlayResult] = useState<{ combined_odds: number; potential_payout: number; result: string | null; payout: number | null } | null>(null);
 
   // Prop-specific state

@@ -176,7 +176,7 @@ class UserProfile(Base):
     __tablename__ = "user_profiles"
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False, unique=True)
-    starting_balance = Column(Float, nullable=False, default=1000000.0)
+    starting_balance = Column(Float, nullable=False, default=10000.0)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
     current_streak = Column(Integer, default=0)
     best_streak = Column(Integer, default=0)

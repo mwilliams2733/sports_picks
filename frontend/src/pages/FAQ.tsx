@@ -266,12 +266,12 @@ const SECTIONS: FAQSection[] = [
       {
         question: 'What is Paper Trading?',
         answer:
-          'Paper Trading lets you and your friends compete with simulated bets using a virtual bankroll. Everyone starts with $1,000,000 in play money. You pick games, set your stake, and the system tracks your results over time. It\u2019s a risk-free way to test your sports betting instincts against your friends without putting up real cash.',
+          'Paper Trading lets you and your friends compete with simulated bets using a virtual bankroll. Everyone starts with $10,000 in play money. You pick games, set your stake, and the system tracks your results over time. It\u2019s a risk-free way to test your sports betting instincts against your friends without putting up real cash.',
       },
       {
         question: 'How do I join?',
         answer:
-          'Go to the Paper Trading page, type your name in the input field, and click "Join" (or press Enter). Each name must be unique. Once created, your profile appears on the leaderboard with a $1,000,000 starting balance.',
+          'Go to the Paper Trading page, type your name in the input field, and click "Join" (or press Enter). Each name must be unique. Once created, your profile appears on the leaderboard with a $10,000 starting balance.',
       },
       {
         question: 'How do I place a pick?',

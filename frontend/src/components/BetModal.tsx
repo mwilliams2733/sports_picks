@@ -19,7 +19,7 @@ interface BetModalProps {
 
 export default function BetModal({
   open, onClose, pickValue, pickType, odds, gameId,
-  suggestedStake = 5000, edgePct, propMarket, propPlayer,
+  suggestedStake = 100, edgePct, propMarket, propPlayer,
 }: BetModalProps) {
   const { currentUserName, setCurrentUserName } = useUserStore()
   const queryClient = useQueryClient()
