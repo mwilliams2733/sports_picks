@@ -104,3 +104,30 @@ def grade_prop_pick(pick_value: str, market: str, player_stat) -> tuple[str, flo
         won = actual < line
 
     return ("win", 1.0) if won else ("loss", -1.0)
+
+
+def capture_closing_odds(session, pick_result, game_id: int, pick_type: str, pick_value: str):
+    """Store closing odds on a PickResult from the most recent odds snapshot.
+
+    Called during grading when a game reaches 'final' status.
+    The most recent pre-game odds snapshot is the closing line.
+    """
+    from backend.models import Odds
+    closing = (
+        session.query(Odds)
+        .filter(Odds.game_id == game_id)
+        .order_by(Odds.timestamp.desc())
+        .first()
+    )
+    if not closing:
+        return
+
+    if pick_type == "moneyline":
+        if "HOME" in pick_value:
+            pick_result.odds_at_close = closing.moneyline_home
+        else:
+            pick_result.odds_at_close = closing.moneyline_away
+    elif pick_type == "spread":
+        pick_result.odds_at_close = -110
+    elif pick_type == "over_under":
+        pick_result.odds_at_close = -110
