@@ -29,3 +29,39 @@ def test_upset_causes_larger_shift():
     elo.update("BOS", "LAL", winner="LAL")
     gain = elo.get_rating("LAL") - rating_before
     assert gain > 15
+
+def test_blowout_win_moves_rating_more_than_close_win():
+    from backend.analysis.elo import EloSystem
+    elo1 = EloSystem(k_factor=20)
+    elo1.update("A", "B", "A", margin=1)
+    a_close = elo1.get_rating("A")
+
+    elo2 = EloSystem(k_factor=20)
+    elo2.update("A", "B", "A", margin=25)
+    a_blowout = elo2.get_rating("A")
+
+    assert a_blowout > a_close, "Blowout should produce larger rating change"
+
+def test_home_advantage_boosts_expected():
+    from backend.analysis.elo import EloSystem
+    elo = EloSystem(k_factor=20, home_advantage=100)
+    expected_home = elo.expected_score(1500, 1500, home_advantage=100)
+    expected_neutral = elo.expected_score(1500, 1500, home_advantage=0)
+    assert expected_home > expected_neutral
+    assert expected_home > 0.5
+
+def test_mov_autocorrelation_dampens_expected_blowouts():
+    from backend.analysis.elo import EloSystem
+    elo = EloSystem(k_factor=20)
+    elo.ratings["FAV"] = 1700
+    elo.ratings["DOG"] = 1300
+    elo.update("FAV", "DOG", "FAV", margin=30)
+    change = elo.get_rating("FAV") - 1700
+    assert change < 6, f"Expected dampened change for heavy favorite blowout, got {change}"
+
+def test_backward_compat_no_margin():
+    from backend.analysis.elo import EloSystem
+    elo = EloSystem()
+    elo.update("A", "B", "A")
+    assert elo.get_rating("A") > 1500
+    assert elo.get_rating("B") < 1500

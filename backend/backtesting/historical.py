@@ -99,7 +99,9 @@ def store_games(session: Session, sport: str, season_year: int, games: list[dict
 
 def compute_historical_elo(session: Session, sport: str):
     """Compute ELO ratings by replaying all completed games in chronological order."""
-    elo = EloSystem(k_factor=20)
+    from backend.analysis.sport_constants import get_home_advantage_elo
+    hca = get_home_advantage_elo(sport)
+    elo = EloSystem(k_factor=20, home_advantage=hca)
     games = (
         session.query(Game)
         .filter(Game.sport == sport, Game.status == "final")
@@ -115,8 +117,10 @@ def compute_historical_elo(session: Session, sport: str):
         if game.home_score is None or game.away_score is None:
             continue
 
-        winner = home_team.abbreviation if game.home_score > game.away_score else away_team.abbreviation
-        elo.update(home_team.abbreviation, away_team.abbreviation, winner)
+        margin = game.home_score - game.away_score
+        winner = home_team.abbreviation if margin > 0 else away_team.abbreviation
+        elo.update(home_team.abbreviation, away_team.abbreviation, winner,
+                   margin=abs(margin))
 
     # Save final ratings to DB
     for team_abbr, rating in elo.ratings.items():
