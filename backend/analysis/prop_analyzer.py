@@ -188,7 +188,7 @@ class PropAnalyzer:
         if use_distribution:
             # Compute variance from game-by-game values
             mean_val = sum(game_values) / len(game_values)
-            variance = sum((v - mean_val) ** 2 for v in game_values) / len(game_values)
+            variance = sum((v - mean_val) ** 2 for v in game_values) / (len(game_values) - 1)
 
             # Exceedance probability P(X > line) using the projection as center
             # We use the projection (weighted mean) as the distribution center

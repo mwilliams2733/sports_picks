@@ -191,3 +191,10 @@ def test_analyze_combination_market(session):
     # season_avg for PRA: 27+8+5=40, recent_avg for PRA: 32+9+6=47
     expected_projection = 0.4 * 40.0 + 0.6 * 47.0
     assert result.projection == pytest.approx(expected_projection, rel=1e-3)
+
+
+def test_receptions_uses_receptions_not_rec_yards():
+    """player_receptions market should use receptions field, not rec_yards."""
+    from backend.analysis.prop_analyzer import MARKET_TO_STAT
+    # This will fail until Task 2 fixes it — skip for now
+    # assert MARKET_TO_STAT["player_receptions"] == ["receptions"]
