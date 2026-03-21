@@ -75,7 +75,11 @@ def tune_game_strategy(
     end_date: date,
     optimize_for: str = "roi",
 ) -> dict:
-    """Grid-search game strategy parameters and return the best config + results."""
+    """Grid-search game strategy parameters with walk-forward validation.
+
+    Splits the date range: first 70% for training/tuning, last 30% for validation.
+    Reports validation metrics to prevent look-ahead bias.
+    """
     strategy_cls = STRATEGY_MAP.get(strategy_name)
     if not strategy_cls:
         return {"error": f"Unknown strategy: {strategy_name}"}
@@ -83,10 +87,10 @@ def tune_game_strategy(
     grid = GAME_PARAM_GRIDS.get(strategy_name, {"min_edge": [3.0, 5.0, 7.0, 10.0]})
     configs = _expand_grid(grid)
 
-    # Pre-load games once (shared across all configs)
+    # Pre-load games once, ordered by date for temporal split
     games = session.query(Game).filter(
         Game.status == "final", Game.date >= start_date, Game.date <= end_date,
-    ).all()
+    ).order_by(Game.date).all()
     games_with_results = []
     for g in games:
         if g.home_score is not None and g.away_score is not None:
@@ -96,38 +100,69 @@ def tune_game_strategy(
     if not games_with_results:
         return {"error": "No completed games found in date range"}
 
-    logger.info(f"Auto-tuning {strategy_name}: {len(configs)} configs x {len(games_with_results)} games")
+    # Walk-forward split: 70% train, 30% validation
+    split_idx = int(len(games_with_results) * 0.7)
+    if split_idx < 10 or (len(games_with_results) - split_idx) < 5:
+        train_games = games_with_results
+        val_games = games_with_results
+        walk_forward = False
+    else:
+        train_games = games_with_results[:split_idx]
+        val_games = games_with_results[split_idx:]
+        walk_forward = True
+
+    logger.info(
+        f"Auto-tuning {strategy_name}: {len(configs)} configs, "
+        f"{len(train_games)} train / {len(val_games)} val games"
+    )
 
     best_result = None
     best_config = None
+    min_picks = 3
     all_results = []
 
     for cfg in configs:
         strategy = strategy_cls(strategy_name, cfg)
         bt = Backtester(strategy)
-        result = bt.run(games_with_results)
-        result.pop("picks", None)  # Don't include full pick list in summary
+        train_result = bt.run(train_games)
+        train_result.pop("picks", None)
 
-        entry = {"config": cfg, **result}
+        entry = {"config": cfg, "train": train_result}
+
+        score = train_result.get(optimize_for, 0)
+        min_picks = max(3, len(train_games) // 20)
+        if train_result["total"] < min_picks:
+            entry["validation"] = None
+            all_results.append(entry)
+            continue
+
+        if walk_forward:
+            val_result = bt.run(val_games)
+            val_result.pop("picks", None)
+            entry["validation"] = val_result
+        else:
+            entry["validation"] = train_result
+
         all_results.append(entry)
 
-        score = result.get(optimize_for, 0)
-        # Require a minimum number of picks to avoid trivial configs
-        min_picks = max(3, len(games_with_results) // 20)
-        if result["total"] < min_picks:
-            continue
-        if best_result is None or score > best_result.get(optimize_for, 0):
-            best_result = result
+        if best_result is None or score > best_result.get("train", {}).get(optimize_for, 0):
+            best_result = entry
             best_config = cfg
 
     return {
         "strategy_name": strategy_name,
+        "walk_forward": walk_forward,
         "min_picks_required": min_picks,
-        "games_tested": len(games_with_results),
+        "train_games": len(train_games),
+        "validation_games": len(val_games),
         "configs_tested": len(configs),
         "best_config": best_config,
         "best_result": best_result,
-        "all_results": sorted(all_results, key=lambda r: r.get(optimize_for, 0), reverse=True),
+        "all_results": sorted(
+            all_results,
+            key=lambda r: (r.get("train") or {}).get(optimize_for, 0),
+            reverse=True,
+        ),
     }
 
 
