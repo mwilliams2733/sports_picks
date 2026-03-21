@@ -31,6 +31,7 @@ export default function TodaysPicks() {
 
   const { picks, record, games } = useTodaysPicks(sport);
   const [topProps, setTopProps] = useState<PropData[]>([]);
+  const [teamFilter, setTeamFilter] = useState('');
   const [betModalOpen, setBetModalOpen] = useState(false);
   const [betModalData, setBetModalData] = useState<{
     pickValue: string; pickType: string; odds: number; gameId: number;
@@ -92,6 +93,23 @@ export default function TodaysPicks() {
     sportCounts[g.sport] = (sportCounts[g.sport] || 0) + 1;
   });
 
+  // Extract unique teams from games for filter dropdown
+  const teams = Array.from(new Set(
+    gamesData.flatMap(g => [g.home_team_name, g.away_team_name]).filter(Boolean)
+  )).sort();
+
+  // Reset team filter when sport changes
+  useEffect(() => { setTeamFilter(''); }, [sport]);
+
+  // Filter games and picks by team
+  const filteredGames = teamFilter
+    ? gamesData.filter(g => g.home_team_name === teamFilter || g.away_team_name === teamFilter)
+    : gamesData;
+  const filteredGameIds = new Set(filteredGames.map(g => g.id));
+  const filteredPicks = teamFilter
+    ? picksData.filter(p => filteredGameIds.has(p.game_id))
+    : picksData;
+
   return (
     <div>
       <div className="toolbar">
@@ -104,21 +122,30 @@ export default function TodaysPicks() {
             </button>
           ))}
         </div>
+        {teams.length > 0 && (
+          <select className="select" value={teamFilter} onChange={e => setTeamFilter(e.target.value)}
+            style={{ minWidth: '10rem' }}>
+            <option value="">All Teams</option>
+            {teams.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
       </div>
 
-      <SummaryBar record={recordData} pickCount={picksData.length} strategyName="Ensemble" />
+      <SummaryBar record={recordData} pickCount={filteredPicks.length} strategyName="Ensemble" />
 
-      {gamesData.length > 0 && (
+      {filteredGames.length > 0 && (
         <div style={{ marginTop: '1.25rem' }}>
           <div className="section-header">
-            Today's Games <span className="section-divider" />
+            Today's Games
+            {teamFilter && <span className="badge badge-blue" style={{ marginLeft: '0.5rem' }}>{teamFilter}</span>}
+            <span className="section-divider" />
           </div>
           <div className="game-card-grid">
-            {gamesData.map(game => (
+            {filteredGames.map(game => (
               <GameCard
                 key={game.id}
                 game={game}
-                picks={picksData}
+                picks={filteredPicks}
                 onBet={handleBetFromCard}
               />
             ))}
@@ -126,12 +153,12 @@ export default function TodaysPicks() {
         </div>
       )}
 
-      {picksData.length > 0 && (
+      {filteredPicks.length > 0 && (
         <div style={{ marginTop: '1.25rem' }}>
           <div className="section-header">
             AI Picks <span className="section-divider" />
           </div>
-          <PicksTable picks={picksData} onBet={handleBetPick} />
+          <PicksTable picks={filteredPicks} onBet={handleBetPick} />
         </div>
       )}
 
@@ -177,7 +204,7 @@ export default function TodaysPicks() {
         </div>
       )}
 
-      {gamesData.length === 0 && picksData.length === 0 && (
+      {filteredGames.length === 0 && filteredPicks.length === 0 && (
         <div className="empty-state">
           <div className="empty-state-title">No games or picks today</div>
           <div className="empty-state-sub">Run the pipeline to fetch today's games and odds.</div>

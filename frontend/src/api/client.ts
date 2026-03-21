@@ -34,6 +34,12 @@ async function patch<T>(path: string): Promise<T> {
   return res.json();
 }
 
+async function del<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 export const api = {
   picks: {
     today: (sport?: string) => get<PickData[]>(`/picks/today${sport ? `?sport=${sport}` : ''}`),
@@ -83,6 +89,7 @@ export const api = {
     grade: () => post<{ graded: number }>('/users/grade', {}),
     stats: (id: number) => get<UserStats>(`/users/${id}/stats`),
     feed: (limit?: number) => get<{ id: number; user_id: number; event_type: string; payload: Record<string, string>; created_at: string }[]>(`/users/feed${limit ? `?limit=${limit}` : ''}`),
+    delete: (id: number) => del<{ deleted: boolean; id: number }>(`/users/${id}`),
   },
   pipeline: {
     run: (sport?: string) => post<{

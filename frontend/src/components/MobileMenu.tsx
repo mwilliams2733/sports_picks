@@ -8,6 +8,7 @@ interface Props {
 const MENU_ITEMS = [
   { path: '/backtesting', label: 'Backtesting' },
   { path: '/faq', label: 'FAQ' },
+  { path: '/admin', label: 'Admin' },
 ]
 
 export default function MobileMenu({ open, onClose }: Props) {

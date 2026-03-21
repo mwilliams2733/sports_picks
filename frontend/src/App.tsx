@@ -8,6 +8,7 @@ import Backtesting from './pages/Backtesting';
 import TrackRecord from './pages/TrackRecord';
 import PaperTrading from './pages/PaperTrading';
 import FAQ from './pages/FAQ';
+import Admin from './pages/Admin';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,6 +32,7 @@ export default function App() {
               <Route path="track-record" element={<TrackRecord />} />
               <Route path="paper-trading" element={<PaperTrading />} />
               <Route path="faq" element={<FAQ />} />
+              <Route path="admin" element={<Admin />} />
             </Route>
           </Routes>
         </BrowserRouter>

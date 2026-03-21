@@ -18,6 +18,8 @@ export default function PlayerProps() {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'edge' | 'confidence' | 'name'>('edge');
   const [minConfidence, setMinConfidence] = useState(0);
+  const [teamFilter, setTeamFilter] = useState('');
+  const [marketFilter, setMarketFilter] = useState('');
 
   useEffect(() => {
     const urlSport = searchParams.get('sport');
@@ -52,13 +54,24 @@ export default function PlayerProps() {
     setBetModalOpen(true);
   };
 
-  const { props } = useProps(sport);
+  const { props, markets } = useProps(sport);
 
   const propsData = props.data ?? [];
+  const marketsData = markets.data ?? [];
+
+  // Extract unique teams from matchup strings (e.g. "BOS @ LAL")
+  const teams = Array.from(new Set(
+    propsData.flatMap(p => p.matchup ? p.matchup.split(' @ ') : [])
+  )).sort();
+
+  // Reset team and market filters when sport changes
+  useEffect(() => { setTeamFilter(''); setMarketFilter(''); }, [sport]);
 
   const filteredProps = propsData
     .filter(p => p.confidence === null || p.confidence >= minConfidence)
     .filter(p => !search || p.player_name.toLowerCase().includes(search.toLowerCase()))
+    .filter(p => !teamFilter || (p.matchup && p.matchup.includes(teamFilter)))
+    .filter(p => !marketFilter || p.market === marketFilter)
     .sort((a, b) => {
       if (sortBy === 'edge') return (b.edge_pct ?? 0) - (a.edge_pct ?? 0);
       if (sortBy === 'confidence') return (b.confidence ?? 0) - (a.confidence ?? 0);
@@ -91,6 +104,18 @@ export default function PlayerProps() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        {teams.length > 0 && (
+          <select className="select" value={teamFilter} onChange={e => setTeamFilter(e.target.value)}>
+            <option value="">All Teams</option>
+            {teams.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
+        {marketsData.length > 0 && (
+          <select className="select" value={marketFilter} onChange={e => setMarketFilter(e.target.value)}>
+            <option value="">All Markets</option>
+            {marketsData.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+          </select>
+        )}
         <select className="select" value={sortBy} onChange={e => setSortBy(e.target.value as any)}>
           <option value="edge">Sort: Edge %</option>
           <option value="confidence">Sort: Confidence</option>

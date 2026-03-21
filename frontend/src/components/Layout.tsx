@@ -12,6 +12,7 @@ const NAV_ITEMS: [string, string][] = [
   ['/track-record', 'Track Record'],
   ['/paper-trading', 'Paper Trading'],
   ['/faq', 'FAQ'],
+  ['/admin', 'Admin'],
 ]
 
 const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf']

@@ -102,6 +102,23 @@ def create_user(request: Request, body: CreateUserRequest):
         session.close()
 
 
+@router.delete("/{user_id}")
+def delete_user(request: Request, user_id: int):
+    """Delete a user and all their picks."""
+    session = get_session(request.app.state.engine)
+    try:
+        user = session.get(UserProfile, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        session.query(PaperPick).filter(PaperPick.user_id == user_id).delete()
+        session.query(ActivityFeed).filter(ActivityFeed.user_id == user_id).delete()
+        session.delete(user)
+        session.commit()
+        return {"deleted": True, "id": user_id}
+    finally:
+        session.close()
+
+
 @router.get("/{user_id}")
 def get_user(request: Request, user_id: int):
     """Get a user profile with full stats."""
