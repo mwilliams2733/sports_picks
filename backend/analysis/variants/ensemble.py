@@ -192,7 +192,11 @@ class EnsembleStrategy(Strategy):
             return
 
         X_list, y_list, dates_list = [], [], []
-        elo_map = {e.team_id: e.rating for e in session.query(EloRating).all()}
+        from backend.models import EloHistory
+        elo_history = {}
+        for eh in session.query(EloHistory).all():
+            elo_history[(eh.team_id, eh.game_id)] = eh.rating
+        elo_fallback = {e.team_id: e.rating for e in session.query(EloRating).all()}
 
         for game in games:
             home_stats = session.query(TeamStat).filter(
@@ -209,7 +213,8 @@ class EnsembleStrategy(Strategy):
                 defensive_rating=_stat_value(home_stats, "defensive_rating") or 100.0,
                 pace=_stat_value(home_stats, "pace") or 100.0,
                 strength_of_schedule=0.0,
-                elo_rating=elo_map.get(game.home_team_id, 1500.0),
+                elo_rating=elo_history.get((game.home_team_id, game.id),
+                                           elo_fallback.get(game.home_team_id, 1500.0)),
                 rest_days=int(_stat_value(home_stats, "rest_days") or 1),
             )
             away_ts = TeamStats(
@@ -219,7 +224,8 @@ class EnsembleStrategy(Strategy):
                 defensive_rating=_stat_value(away_stats, "defensive_rating") or 100.0,
                 pace=_stat_value(away_stats, "pace") or 100.0,
                 strength_of_schedule=0.0,
-                elo_rating=elo_map.get(game.away_team_id, 1500.0),
+                elo_rating=elo_history.get((game.away_team_id, game.id),
+                                           elo_fallback.get(game.away_team_id, 1500.0)),
                 rest_days=int(_stat_value(away_stats, "rest_days") or 1),
             )
             gd = GameData(

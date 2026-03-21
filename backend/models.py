@@ -48,6 +48,15 @@ class EloRating(Base):
     rating = Column(Float, nullable=False, default=1500.0)
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
 
+class EloHistory(Base):
+    __tablename__ = "elo_history"
+    id = Column(Integer, primary_key=True)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
+    sport = Column(String, nullable=False)
+    rating = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
 class Odds(Base):
     __tablename__ = "odds"
     id = Column(Integer, primary_key=True)

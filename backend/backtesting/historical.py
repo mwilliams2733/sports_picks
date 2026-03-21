@@ -3,7 +3,7 @@ import logging
 from datetime import date, timedelta, datetime, timezone
 from sqlalchemy.orm import Session
 from backend.collectors.espn import ESPNCollector
-from backend.models import Team, Game, EloRating
+from backend.models import Team, Game, EloRating, EloHistory
 from backend.analysis.elo import EloSystem
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,13 @@ def compute_historical_elo(session: Session, sport: str):
         winner = home_team.abbreviation if margin > 0 else away_team.abbreviation
         elo.update(home_team.abbreviation, away_team.abbreviation, winner,
                    margin=abs(margin))
+
+        home_rating_after = elo.get_rating(home_team.abbreviation)
+        away_rating_after = elo.get_rating(away_team.abbreviation)
+        session.add(EloHistory(team_id=game.home_team_id, game_id=game.id,
+                               sport=sport, rating=home_rating_after))
+        session.add(EloHistory(team_id=game.away_team_id, game_id=game.id,
+                               sport=sport, rating=away_rating_after))
 
     # Save final ratings to DB
     for team_abbr, rating in elo.ratings.items():

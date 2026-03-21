@@ -123,10 +123,16 @@ class CalibratedModel:
         X: list[list[float]] = []
         y: list[int] = []
 
-        # Pre-fetch all elo ratings keyed by team_id for fast lookup
-        elo_map: dict[int, float] = {}
+        # Point-in-time ELO from history table
+        from backend.models import EloHistory
+        elo_history_map: dict[tuple[int, int], float] = {}
+        for eh in session.query(EloHistory).all():
+            elo_history_map[(eh.team_id, eh.game_id)] = eh.rating
+
+        # Fallback: current ELO for games without history
+        elo_current: dict[int, float] = {}
         for elo in session.query(EloRating).all():
-            elo_map[elo.team_id] = elo.rating
+            elo_current[elo.team_id] = elo.rating
 
         for game in completed_games:
             home_stats = (
@@ -151,8 +157,14 @@ class CalibratedModel:
             )
 
             # Extract individual stat values, defaulting to 0 if missing
-            home_elo = elo_map.get(game.home_team_id, 1500.0)
-            away_elo = elo_map.get(game.away_team_id, 1500.0)
+            home_elo = elo_history_map.get(
+                (game.home_team_id, game.id),
+                elo_current.get(game.home_team_id, 1500.0)
+            )
+            away_elo = elo_history_map.get(
+                (game.away_team_id, game.id),
+                elo_current.get(game.away_team_id, 1500.0)
+            )
             elo_diff = home_elo - away_elo
 
             home_pd = _stat_value(home_stats, "point_diff") or 0.0

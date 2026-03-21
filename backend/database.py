@@ -56,3 +56,12 @@ def migrate_player_stat_receptions(engine):
         if "receptions" not in columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE player_stats ADD COLUMN receptions FLOAT"))
+
+
+def migrate_elo_history(engine):
+    """Create elo_history table if missing."""
+    from sqlalchemy import inspect as sa_inspect
+    inspector = sa_inspect(engine)
+    if "elo_history" not in inspector.get_table_names():
+        from backend.models import EloHistory
+        EloHistory.__table__.create(engine)
