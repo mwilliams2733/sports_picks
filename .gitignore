@@ -11,3 +11,4 @@ config.yaml
 .superpowers/
 .claude/settings.local.json
 uvicorn.log
+*.egg-info/

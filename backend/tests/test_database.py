@@ -18,7 +18,7 @@ def test_create_all_tables(db_engine):
         )).scalars().all()
     expected = [
         "activity_feed", "api_usage", "backtest_picks", "backtest_runs",
-        "calibration_history", "elo_ratings", "games", "model_metrics",
+        "calibration_history", "elo_history", "elo_ratings", "games", "model_metrics",
         "odds", "paper_picks", "pick_results", "picks", "player_props",
         "player_stats", "strategies", "team_stats", "teams", "user_profiles"
     ]

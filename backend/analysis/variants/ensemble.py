@@ -9,13 +9,10 @@ from backend.analysis.odds_utils import american_to_implied_prob, remove_vig
 from backend.analysis.calibrated_model import CalibratedModel, extract_features, features_to_array, _stat_value
 from backend.analysis.ml_model import LightGBMModel, MIN_ML_GAMES
 from backend.analysis.kelly import fractional_kelly
+from backend.analysis.sport_constants import get_point_diff_std, get_total_points_std, get_home_win_rate
 from backend.data_types import GameData, TeamStats, Pick
 
 logger = logging.getLogger(__name__)
-
-# NBA empirical standard deviations for CDF-based edge calculations
-POINT_DIFF_STD = 12.0   # game-to-game margin std dev
-TOTAL_POINTS_STD = 15.0  # game-to-game total std dev
 
 class EnsembleStrategy(Strategy):
     _calibrated: CalibratedModel | None = None
@@ -95,7 +92,7 @@ class EnsembleStrategy(Strategy):
         if avg_odds.get("over_under") is not None:
             predicted_total = self._predicted_total(game)
             ou_line = avg_odds["over_under"]
-            over_prob = self._over_probability(predicted_total, ou_line, std=TOTAL_POINTS_STD)
+            over_prob = self._over_probability(predicted_total, ou_line, std=get_total_points_std(game.sport))
             under_prob = 1.0 - over_prob
             ou_fair = 0.5  # O/U markets are ~50/50 after vig by design
             over_edge = (over_prob - ou_fair) * 100
@@ -174,9 +171,9 @@ class EnsembleStrategy(Strategy):
             feature_dict = extract_features(game)
             feature_array = features_to_array(feature_dict)
             margin = self._lgbm_model.predict(np.array([feature_array]))
-            std = self._lgbm_model.residual_std or POINT_DIFF_STD
+            std = self._lgbm_model.residual_std or get_point_diff_std(game.sport)
             return margin, std
-        return self._predicted_point_diff(game), POINT_DIFF_STD
+        return self._predicted_point_diff(game), get_point_diff_std(game.sport)
 
     def train_lgbm_from_db(self, session) -> None:
         """Train LightGBM on all completed games from the database."""
@@ -259,7 +256,7 @@ class EnsembleStrategy(Strategy):
         rating_score = 1 / (1 + 10 ** (-net_diff / 10))
         weights = self.config.get("weights", {"pd": 0.3, "elo": 0.35, "rating": 0.25, "hca": 0.1})
         prob = (weights["pd"] * pd_score + weights["elo"] * elo_score +
-                weights["rating"] * rating_score + weights["hca"] * 0.6)
+                weights["rating"] * rating_score + weights["hca"] * get_home_win_rate(game.sport))
         return max(0.01, min(0.99, prob))
 
     def _average_odds(self, game: GameData) -> dict | None:
@@ -304,7 +301,7 @@ class EnsembleStrategy(Strategy):
         away_pts = possessions * (aws.offensive_rating + hs.defensive_rating) / 200
         return home_pts + away_pts
 
-    def _spread_cover_prob(self, predicted_diff: float, cover_threshold: float, std: float = POINT_DIFF_STD) -> float:
+    def _spread_cover_prob(self, predicted_diff: float, cover_threshold: float, std: float = 12.0) -> float:
         """Probability that home margin exceeds the cover threshold.
 
         Args:
@@ -315,7 +312,7 @@ class EnsembleStrategy(Strategy):
         """
         return float(norm.sf(cover_threshold, loc=predicted_diff, scale=std))
 
-    def _over_probability(self, predicted_total: float, ou_line: float, std: float = TOTAL_POINTS_STD) -> float:
+    def _over_probability(self, predicted_total: float, ou_line: float, std: float = 15.0) -> float:
         """Probability that total points exceeds the O/U line."""
         return float(norm.sf(ou_line, loc=predicted_total, scale=std))
 

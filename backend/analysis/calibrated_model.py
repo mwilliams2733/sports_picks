@@ -72,7 +72,9 @@ def _fallback_probability(game: GameData) -> float:
     net_away = aws.offensive_rating - aws.defensive_rating
     net_diff = net_home - net_away
     rating_score = 1 / (1 + 10 ** (-net_diff / 10))
-    prob = 0.3 * pd_score + 0.35 * elo_score + 0.25 * rating_score + 0.1 * 0.6
+    from backend.analysis.sport_constants import get_home_win_rate
+    hca = get_home_win_rate(game.sport)
+    prob = 0.3 * pd_score + 0.35 * elo_score + 0.25 * rating_score + 0.1 * hca
     return max(0.01, min(0.99, prob))
 
 
