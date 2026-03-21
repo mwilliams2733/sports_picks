@@ -31,6 +31,7 @@ class LightGBMModel:
         """Train LightGBM regression on features -> home margin.
 
         Refuses to train if fewer than MIN_ML_GAMES samples.
+        Automatically runs walk-forward validation to calibrate residual_std.
         """
         if len(y) < MIN_ML_GAMES:
             logger.warning(
@@ -55,10 +56,17 @@ class LightGBMModel:
         self.trained = True
         self.n_training_games = len(y)
 
-        preds = self.model.predict(X)
-        self.residual_std = float(np.std(y - preds))
+        # Use walk-forward residual_std for calibrated uncertainty
+        wf_metrics = self.walk_forward_validate(X, y, dates)
+        if wf_metrics["residual_std"] < float("inf"):
+            self.residual_std = wf_metrics["residual_std"]
+        else:
+            # Fallback to in-sample if walk-forward had no eval dates
+            preds = self.model.predict(X)
+            self.residual_std = float(np.std(y - preds))
+
         logger.info(
-            "Trained LightGBM (regression) on %d games, in-sample residual_std=%.2f",
+            "Trained LightGBM (regression) on %d games, walk-forward residual_std=%.2f",
             len(y), self.residual_std,
         )
 
