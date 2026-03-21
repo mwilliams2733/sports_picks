@@ -145,6 +145,7 @@ class PlayerStat(Base):
     pass_yards = Column(Float, nullable=True)
     rush_yards = Column(Float, nullable=True)
     rec_yards = Column(Float, nullable=True)
+    receptions = Column(Float, nullable=True)
     touchdowns = Column(Float, nullable=True)
     source = Column(String, nullable=False)
     fetched_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))

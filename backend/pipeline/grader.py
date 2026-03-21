@@ -18,7 +18,7 @@ MARKET_STAT_MAP = {
     "player_rush_yds": ["rush_yards"],
     "player_reception_yds": ["rec_yards"],
     "player_pass_tds": ["touchdowns"],
-    "player_receptions": ["rec_yards"],  # closest available stat
+    "player_receptions": ["receptions"],
     "player_anytime_td": ["touchdowns"],
 }
 

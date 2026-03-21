@@ -29,7 +29,7 @@ MARKET_TO_STAT: dict[str, list[str]] = {
     "player_reception_yds": ["rec_yards"],
     "player_touchdowns": ["touchdowns"],
     "player_anytime_td": ["touchdowns"],
-    "player_receptions": ["rec_yards"],
+    "player_receptions": ["receptions"],
 }
 
 # Count-based markets where Poisson is appropriate for low means

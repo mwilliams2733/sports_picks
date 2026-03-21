@@ -45,3 +45,14 @@ def migrate_game_start_time(engine):
         if "start_time" not in columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE games ADD COLUMN start_time DATETIME"))
+
+
+def migrate_player_stat_receptions(engine):
+    """Add receptions column to player_stats table if missing."""
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "player_stats" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("player_stats")]
+        if "receptions" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE player_stats ADD COLUMN receptions FLOAT"))
