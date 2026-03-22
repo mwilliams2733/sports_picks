@@ -1,0 +1,16 @@
+[Unit]
+Description=Sports Picks Data Pipeline & Scheduler
+After=network.target sports-picks-web.service
+
+[Service]
+Type=simple
+User=sportspicks
+Group=sportspicks
+WorkingDirectory=/opt/sports-picks
+EnvironmentFile=/opt/sports-picks/.env
+ExecStart=/opt/sports-picks/.venv/bin/python -m backend.pipeline.scheduler
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

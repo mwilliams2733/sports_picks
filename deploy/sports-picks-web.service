@@ -1,0 +1,16 @@
+[Unit]
+Description=Sports Picks Web Server
+After=network.target
+
+[Service]
+Type=simple
+User=sportspicks
+Group=sportspicks
+WorkingDirectory=/opt/sports-picks
+EnvironmentFile=/opt/sports-picks/.env
+ExecStart=/opt/sports-picks/.venv/bin/python -m uvicorn backend.api.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
