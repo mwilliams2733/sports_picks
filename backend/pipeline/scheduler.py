@@ -170,7 +170,11 @@ def _run_window(config, engine, sport: str, window: dict):
             StrategyModel.is_active == True, StrategyModel.strategy_type == "game",
         ).first()
         if game_strategy:
-            count = generate_and_store_picks(session, game_strategy.id, today)
+            pitcher_scores = None
+            if sport == "mlb":
+                scores_by_abbr = asyncio.run(fetch_pitcher_scores_for_date(today))
+                pitcher_scores = _remap_pitcher_scores_to_game_ids(session, scores_by_abbr, today)
+            count = generate_and_store_picks(session, game_strategy.id, today, pitcher_scores=pitcher_scores)
             logger.info(f"Generated {count} game picks")
         prop_strategy = session.query(StrategyModel).filter(
             StrategyModel.is_active == True, StrategyModel.strategy_type == "prop",
@@ -254,6 +258,58 @@ def grade_pending_picks(session):
 
     session.commit()
     logger.info(f"Auto-graded {paper_graded} paper picks")
+
+
+async def fetch_pitcher_scores_for_date(target_date) -> dict[tuple[str, str], dict[str, float]]:
+    """Return {(home_abbr, away_abbr): {'home': score, 'away': score}} for today's MLB games.
+
+    Keying by team abbreviation tuple keeps the upstream MLB game pk out of our
+    internal data model — the caller translates the tuple to Game.id by querying
+    the local DB. Missing pitchers (not yet announced) get neutral 0.5 scores.
+    """
+    from backend.collectors.mlb_stats import MLBStatsCollector
+    from backend.analysis.pitcher import pitcher_skill_score
+    collector = MLBStatsCollector()
+    out: dict[tuple[str, str], dict[str, float]] = {}
+    try:
+        games = await collector.fetch_schedule(target_date)
+        for g in games:
+            home_id = g.get("home_probable_pitcher_id")
+            away_id = g.get("away_probable_pitcher_id")
+            home_stats = await collector.fetch_pitcher_recent(home_id, season=target_date.year) if home_id else None
+            away_stats = await collector.fetch_pitcher_recent(away_id, season=target_date.year) if away_id else None
+            home_abbr = g.get("home_team")
+            away_abbr = g.get("away_team")
+            if home_abbr is None or away_abbr is None:
+                continue
+            out[(home_abbr, away_abbr)] = {
+                "home": pitcher_skill_score(
+                    era=home_stats["era_recent"] if home_stats else None,
+                    k9=home_stats["k9_recent"] if home_stats else None,
+                ),
+                "away": pitcher_skill_score(
+                    era=away_stats["era_recent"] if away_stats else None,
+                    k9=away_stats["k9_recent"] if away_stats else None,
+                ),
+            }
+    finally:
+        await collector.close()
+    return out
+
+
+def _remap_pitcher_scores_to_game_ids(session, scores_by_abbr, target_date) -> dict[int, dict[str, float]]:
+    """Translate {(home_abbr, away_abbr): scores} -> {game.id: scores} by joining
+    Game rows for sport=mlb on target_date against Team abbreviations.
+    """
+    from backend.models import Game, Team
+    games = session.query(Game).filter(Game.sport == "mlb", Game.date == target_date).all()
+    abbr_lookup = {t.id: t.abbreviation for t in session.query(Team).filter(Team.sport == "mlb").all()}
+    out: dict[int, dict[str, float]] = {}
+    for g in games:
+        key = (abbr_lookup.get(g.home_team_id), abbr_lookup.get(g.away_team_id))
+        if key in scores_by_abbr:
+            out[g.id] = scores_by_abbr[key]
+    return out
 
 
 if __name__ == "__main__":
