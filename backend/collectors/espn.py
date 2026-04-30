@@ -6,6 +6,7 @@ SPORT_URLS = {
     "ncaab": "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard",
     "ncaaf": "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
     "mma": "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard",
+    "mlb": "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
 }
 # Boxing has no ESPN scoreboard API — games come from Odds API only
 
