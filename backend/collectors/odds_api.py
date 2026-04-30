@@ -7,6 +7,7 @@ SPORT_KEYS = {
     "ncaaf": "americanfootball_ncaaf",
     "boxing": "boxing_boxing",
     "mma": "mma_mixed_martial_arts",
+    "mlb": "baseball_mlb",
 }
 
 class OddsAPICollector:
@@ -135,4 +136,5 @@ PROP_MARKETS = {
     "ncaaf": ["player_pass_yds", "player_rush_yds", "player_anytime_td"],
     "boxing": [],  # Limited prop markets available
     "mma": [],     # Limited prop markets available
+    "mlb": ["batter_hits", "batter_home_runs", "batter_total_bases", "pitcher_strikeouts"],
 }
