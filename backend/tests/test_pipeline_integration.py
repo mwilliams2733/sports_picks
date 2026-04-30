@@ -45,3 +45,8 @@ def test_credits_endpoint_after_usage():
     data = resp.json()
     assert data["monthly_used"] == 1
     assert data["api_requests_remaining"] == 19999
+
+
+def test_all_sports_includes_mlb():
+    from backend.pipeline.full_pipeline import ALL_SPORTS
+    assert "mlb" in ALL_SPORTS
