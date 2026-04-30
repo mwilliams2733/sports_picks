@@ -8,7 +8,7 @@ interface Props {
 }
 
 const STRATEGY_TYPES = ['ensemble', 'recent_form', 'value_only', 'sport_specific', 'prop_value'] as const;
-const SPORTS = ['', 'nba', 'nfl', 'ncaab', 'ncaaf', 'boxing', 'mma'] as const;
+const SPORTS = ['', 'nba', 'nfl', 'ncaab', 'ncaaf', 'mlb', 'boxing', 'mma'] as const;
 
 export default function StrategyForm({ editing, onSave, onCancel }: Props) {
   const config = editing?.config ?? {};

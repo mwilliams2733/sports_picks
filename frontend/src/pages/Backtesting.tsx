@@ -4,7 +4,7 @@ import type { DailyData, RunAllResult, VariantResult } from '../types';
 import PerformanceChart from '../components/PerformanceChart';
 import { useToast } from '../components/Toast';
 
-const SPORTS = ['nba', 'nfl', 'ncaab', 'ncaaf'] as const;
+const SPORTS = ['nba', 'nfl', 'ncaab', 'ncaaf', 'mlb'] as const;
 
 const VARIANT_LABELS: Record<string, string> = {
   ensemble: 'Ensemble',

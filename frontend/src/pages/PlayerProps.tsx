@@ -6,7 +6,7 @@ import type { PropData } from '../types';
 import ConfidenceStars from '../components/ConfidenceStars';
 import BetModal from '../components/BetModal';
 
-const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'boxing', 'mma'] as const;
+const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'mlb', 'boxing', 'mma'] as const;
 
 function formatOdds(odds: number): string {
   return odds > 0 ? `+${odds}` : `${odds}`;
