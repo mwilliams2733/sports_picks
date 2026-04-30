@@ -102,6 +102,30 @@ async def test_fetch_pitcher_recent_stats_aggregates_last_n(httpx_mock, pitcher_
 
 
 @pytest.mark.asyncio
+async def test_fetch_pitcher_recent_skips_splits_with_missing_era(httpx_mock):
+    """Splits missing the 'era' key (e.g., relief appearances) must not contribute
+    a fake 0.00 ERA to the rolling mean."""
+    payload = {"stats": [{"splits": [
+        {"stat": {"era": "3.00", "strikeOuts": 6, "inningsPitched": "5.0"}},
+        {"stat": {"strikeOuts": 1, "inningsPitched": "1.0"}},  # no era key
+        {"stat": {"era": "4.00", "strikeOuts": 5, "inningsPitched": "5.0"}},
+    ]}]}
+    httpx_mock.add_response(
+        url="https://statsapi.mlb.com/api/v1/people/5003/stats?stats=gameLog&group=pitching&season=2026",
+        json=payload,
+    )
+    from backend.collectors.mlb_stats import MLBStatsCollector
+    collector = MLBStatsCollector()
+    stats = await collector.fetch_pitcher_recent(pitcher_id=5003, season=2026)
+    # Mean of the two valid ERAs (3.00, 4.00) = 3.50, NOT (3.00 + 0 + 4.00) / 3 = 2.33
+    assert abs(stats["era_recent"] - 3.50) < 0.01
+    # K total still aggregates all three splits = 12, IP = 11.0 → 9.818
+    assert abs(stats["k9_recent"] - 9.818) < 0.05
+    assert stats["starts_seen"] == 3
+    await collector.close()
+
+
+@pytest.mark.asyncio
 async def test_fetch_pitcher_recent_handles_no_starts(httpx_mock):
     httpx_mock.add_response(
         url="https://statsapi.mlb.com/api/v1/people/9999/stats?stats=gameLog&group=pitching&season=2026",

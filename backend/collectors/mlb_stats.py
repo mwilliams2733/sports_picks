@@ -64,10 +64,12 @@ class MLBStatsCollector:
         ip_total = 0.0
         for s in recent:
             stat = s.get("stat", {})
-            try:
-                eras.append(float(stat.get("era", 0)))
-            except (TypeError, ValueError):
-                pass
+            era_val = stat.get("era")
+            if era_val is not None:
+                try:
+                    eras.append(float(era_val))
+                except (TypeError, ValueError):
+                    pass
             ks_total += int(stat.get("strikeOuts", 0) or 0)
             # MLB IP is decimal: 6.0 = 6 IP, 6.1 = 6 1/3, 6.2 = 6 2/3.
             ip_str = str(stat.get("inningsPitched", "0"))
