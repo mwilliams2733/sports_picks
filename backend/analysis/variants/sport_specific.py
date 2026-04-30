@@ -10,6 +10,8 @@ SPORT_WEIGHTS = {
     "nfl": {"pd": 0.20, "elo": 0.30, "rating": 0.15, "turnover": 0.20, "redzone": 0.15},
     "ncaab": {"pd": 0.20, "elo": 0.25, "rating": 0.25, "conference": 0.15, "venue": 0.15},
     "ncaaf": {"pd": 0.20, "elo": 0.30, "rating": 0.15, "conference": 0.20, "venue": 0.15},
+    # MLB: pitcher dominates by design — the starter is the single biggest variable.
+    "mlb": {"pd": 0.10, "elo": 0.20, "rating": 0.10, "pitcher": 0.45, "venue": 0.15},
 }
 
 
@@ -86,6 +88,10 @@ class SportSpecificStrategy(Strategy):
             conf_score = self._conference_score(hs, aws)
             venue_score = self._venue_score(hs, aws)
             prob += weights.get("conference", 0.15) * conf_score + weights.get("venue", 0.15) * venue_score
+        elif sport == "mlb":
+            pitcher_score = self._pitcher_score(hs, aws)
+            venue_score = self._venue_score(hs, aws)
+            prob += weights.get("pitcher", 0.45) * pitcher_score + weights.get("venue", 0.15) * venue_score
 
         # Schedule adjustments
         # Fatigue: penalize fatigued teams
@@ -135,6 +141,18 @@ class SportSpecificStrategy(Strategy):
         diff = h_conf - a_conf
         return 1 / (1 + 10 ** (-diff / 0.3))
 
+    def _pitcher_score(self, hs, aws) -> float:
+        """MLB: home_pitcher_skill / (home + away). Returns 0.5 if either is missing
+        (neutral) so picks still generate before probable pitchers are announced.
+        """
+        h = hs.pitcher_skill_score
+        a = aws.pitcher_skill_score
+        if h is None or a is None:
+            return 0.5
+        diff = h - a
+        # Sigmoid with scale 0.3 -> a 0.3 advantage gives ~0.73, full advantage ~0.95.
+        return 1.0 / (1.0 + 10 ** (-diff / 0.3))
+
     def _count_agreeing(self, game: GameData, side: str) -> int:
         count = 0
         hs, aws = game.home_stats, game.away_stats
@@ -142,10 +160,14 @@ class SportSpecificStrategy(Strategy):
             if hs.point_diff > aws.point_diff: count += 1
             if hs.elo_rating > aws.elo_rating: count += 1
             if (hs.offensive_rating - hs.defensive_rating) > (aws.offensive_rating - aws.defensive_rating): count += 1
+            if game.sport == "mlb" and hs.pitcher_skill_score is not None and aws.pitcher_skill_score is not None:
+                if hs.pitcher_skill_score > aws.pitcher_skill_score: count += 1
         else:
             if aws.point_diff > hs.point_diff: count += 1
             if aws.elo_rating > hs.elo_rating: count += 1
             if (aws.offensive_rating - aws.defensive_rating) > (hs.offensive_rating - hs.defensive_rating): count += 1
+            if game.sport == "mlb" and hs.pitcher_skill_score is not None and aws.pitcher_skill_score is not None:
+                if aws.pitcher_skill_score > hs.pitcher_skill_score: count += 1
         return count
 
     def _average_odds(self, game: GameData) -> dict | None:
