@@ -3,10 +3,11 @@
 Used by the MLB branch of SportSpecificStrategy as the dominant signal —
 in MLB, the starting pitcher is the single biggest game-to-game variable.
 
-Calibration (rough, league-relative):
-  ERA 2.50 -> ~0.85   (ace)
+Calibration (rough, league-relative — ERA only, K/9 at league average 8.5):
+  ERA 2.50 -> ~0.76   (ace ERA)
   ERA 4.00 -> ~0.50   (league average)
-  ERA 5.50 -> ~0.20   (replacement-level)
+  ERA 5.50 -> ~0.26   (replacement-level)
+  ERA 2.40 + K/9 11.5 -> ~0.81  (Cy Young profile)
 """
 from __future__ import annotations
 import math
@@ -17,7 +18,8 @@ _LEAGUE_ERA = 4.00
 _LEAGUE_K9 = 8.5
 
 # Sigmoid scale parameters: smaller scale = sharper slope around the anchor.
-_ERA_SCALE = 0.9  # ERA contributes the bulk of the signal
+_ERA_SCALE = 0.9  # Plan proposed 1.5; lowered to 0.9 so ERA 2.40 + K/9 11.5 maps to ~0.81.
+                  # Smaller scale = sharper slope; 0.9 fits typical MLB ERA range (~2.0-6.0).
 _K9_SCALE = 4.0   # K/9 is a tie-breaker / strikeout-stuff bump
 
 # Weights sum to 1.0
