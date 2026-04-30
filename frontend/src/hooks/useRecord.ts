@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { RecordData, DailyData, PickData } from '../types'
+import type { RecordData, DailyData, PickData, CalibrationData } from '../types'
 
 export function useRecord(sport?: string) {
   const sportParam = sport === 'all' ? undefined : sport
@@ -20,5 +20,10 @@ export function useRecord(sport?: string) {
     queryFn: () => api.picks.history(),
   })
 
-  return { record, daily, history }
+  const calibration = useQuery<CalibrationData>({
+    queryKey: ['calibration', sportParam],
+    queryFn: () => api.stats.calibration(sportParam),
+  })
+
+  return { record, daily, history, calibration }
 }

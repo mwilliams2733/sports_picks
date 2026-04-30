@@ -7,12 +7,14 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
     app = FastAPI(title="Sports Picks API")
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     engine = get_engine(db_path)
-    from backend.database import migrate_api_usage, migrate_game_start_time, migrate_player_stat_receptions, migrate_elo_history, migrate_parlays
+    from backend.database import migrate_api_usage, migrate_game_start_time, migrate_player_stat_receptions, migrate_elo_history, migrate_parlays, migrate_pick_result_line_at_close, migrate_pick_model_prob
     migrate_api_usage(engine)
     migrate_game_start_time(engine)
     migrate_player_stat_receptions(engine)
     migrate_elo_history(engine)
     migrate_parlays(engine)
+    migrate_pick_result_line_at_close(engine)
+    migrate_pick_model_prob(engine)
     Base.metadata.create_all(engine)
 
     @app.get("/health")

@@ -1,4 +1,4 @@
-import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult } from '../types';
+import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult, CalibrationData } from '../types';
 
 const BASE = '';
 
@@ -48,6 +48,7 @@ export const api = {
   stats: {
     record: (sport?: string) => get<RecordData>(`/stats/record${sport ? `?sport=${sport}` : ''}`),
     daily: () => get<DailyData[]>('/stats/daily'),
+    calibration: (sport?: string) => get<CalibrationData>(`/stats/calibration${sport ? `?sport=${sport}` : ''}`),
   },
   backtest: {
     strategies: () => get<StrategyData[]>('/backtest/strategies'),

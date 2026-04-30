@@ -2,6 +2,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useRecord } from '../hooks/useRecord';
 import CalendarHeatmap from '../components/CalendarHeatmap';
 import PerformanceChart from '../components/PerformanceChart';
+import CalibrationChart from '../components/CalibrationChart';
 import ConfidenceStars from '../components/ConfidenceStars';
 
 const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'boxing', 'mma'] as const;
@@ -31,7 +32,7 @@ export default function TrackRecord() {
     setSearchParams(next);
   };
 
-  const { record, daily, history } = useRecord(sport);
+  const { record, daily, history, calibration } = useRecord(sport);
 
   const loading = record.isLoading || daily.isLoading || history.isLoading;
   const error = record.error || daily.error || history.error;
@@ -116,7 +117,17 @@ export default function TrackRecord() {
         <CalendarHeatmap data={filteredDaily} />
       </div>
 
-      {/* 5. Confidence breakdown table */}
+      {/* 5. Calibration chart — predicted vs actual win rate by confidence tier */}
+      <div className="section-header">Calibration <span className="section-divider" /></div>
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        {calibration.data ? (
+          <CalibrationChart data={calibration.data} />
+        ) : (
+          <div className="text-muted">Loading calibration…</div>
+        )}
+      </div>
+
+      {/* 6. Confidence breakdown table */}
       {confidenceBreakdown.length > 0 && (
         <div className="confidence-breakdown">
           <div className="section-header">Confidence Breakdown <span className="section-divider" /></div>
@@ -151,7 +162,7 @@ export default function TrackRecord() {
         </div>
       )}
 
-      {/* 6. Pick history table */}
+      {/* 7. Pick history table */}
       <div className="section-header" style={{ marginTop: '1.5rem' }}>Pick History <span className="section-divider" /></div>
       <div className="table-wrap">
         <table className="table">
@@ -161,25 +172,33 @@ export default function TrackRecord() {
               <th>Sport</th>
               <th>Pick</th>
               <th>Result</th>
+              <th>CLV</th>
               <th>Confidence</th>
             </tr>
           </thead>
           <tbody>
-            {historyData.map(p => (
-              <tr key={p.id}>
-                <td className="mono">{p.date}</td>
-                <td><span className="badge badge-default">{p.sport.toUpperCase()}</span></td>
-                <td className="font-medium text-primary">{p.pick_value}</td>
-                <td>
-                  {p.result ? (
-                    <span className={`badge ${p.result === 'win' ? 'badge-green' : p.result === 'loss' ? 'badge-red' : 'badge-yellow'}`}>
-                      {p.result === 'win' ? 'Won' : p.result === 'loss' ? 'Lost' : 'Push'}
-                    </span>
-                  ) : <span className="text-muted">Pending</span>}
-                </td>
-                <td><ConfidenceStars rating={p.confidence} /></td>
-              </tr>
-            ))}
+            {historyData.map(p => {
+              const clv = p.clv_pct ?? p.clv_points;
+              const clvSuffix = p.clv_pct != null ? 'pp' : 'pts';
+              return (
+                <tr key={p.id}>
+                  <td className="mono">{p.date}</td>
+                  <td><span className="badge badge-default">{p.sport.toUpperCase()}</span></td>
+                  <td className="font-medium text-primary">{p.pick_value}</td>
+                  <td>
+                    {p.result ? (
+                      <span className={`badge ${p.result === 'win' ? 'badge-green' : p.result === 'loss' ? 'badge-red' : 'badge-yellow'}`}>
+                        {p.result === 'win' ? 'Won' : p.result === 'loss' ? 'Lost' : 'Push'}
+                      </span>
+                    ) : <span className="text-muted">Pending</span>}
+                  </td>
+                  <td className={`mono ${clv == null ? 'text-muted' : clv > 0 ? 'text-green' : clv < 0 ? 'text-red' : ''}`}>
+                    {clv == null ? '—' : `${clv > 0 ? '+' : ''}${clv.toFixed(2)} ${clvSuffix}`}
+                  </td>
+                  <td><ConfidenceStars rating={p.confidence} /></td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -79,3 +79,37 @@ def migrate_parlays(engine):
         if "parlay_id" not in columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE paper_picks ADD COLUMN parlay_id INTEGER REFERENCES parlays(id)"))
+
+
+def migrate_pick_result_line_at_close(engine):
+    """Add line_at_close column to pick_results if missing.
+
+    Stores the closing spread or total line for spread/over_under bets so that
+    line CLV can be computed (price CLV is meaningless for those bet types
+    since the juice rarely moves but the line moves significantly).
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "pick_results" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("pick_results")]
+        if "line_at_close" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE pick_results ADD COLUMN line_at_close FLOAT"))
+
+
+def migrate_pick_model_prob(engine):
+    """Add model_prob column to picks if missing.
+
+    Persists the strategy's continuous probability output per pick so that
+    finer-grained reliability diagrams can be built from real predicted-vs-
+    actual data (rather than just the 5-tier confidence buckets). Strategies
+    already compute the value (Pick.model_probability dataclass field); this
+    migration adds the place to store it.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "picks" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("picks")]
+        if "model_prob" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE picks ADD COLUMN model_prob FLOAT"))

@@ -10,6 +10,8 @@ export interface PickData {
   odds_at_pick: number;
   result?: string | null;
   payout?: number | null;
+  clv_pct?: number | null;
+  clv_points?: number | null;
   home_team?: string;
   away_team?: string;
   matchup?: string;
@@ -209,4 +211,17 @@ export interface UserStats {
   this_month: PeriodStats;
   all_time: PeriodStats;
   daily_breakdown: Array<PeriodStats & { date: string }>;
+}
+
+export interface CalibrationTier {
+  tier: number;
+  predicted_win_rate: number;
+  actual_win_rate: number;
+  sample_size: number;
+}
+
+export interface CalibrationData {
+  tiers: CalibrationTier[];
+  total_graded: number;
+  brier_score: number | null;
 }

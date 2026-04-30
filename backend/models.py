@@ -109,6 +109,7 @@ class PickModel(Base):
     confidence = Column(Integer, nullable=False)
     edge_pct = Column(Float, nullable=False)
     odds_at_pick = Column(Integer, nullable=True)
+    model_prob = Column(Float, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
     game = relationship("Game")
 
@@ -119,6 +120,7 @@ class PickResult(Base):
     result = Column(String, nullable=False)
     payout = Column(Float, nullable=False, default=0.0)
     odds_at_close = Column(Integer, nullable=True)
+    line_at_close = Column(Float, nullable=True)
     pick = relationship("PickModel")
 
 class PlayerProp(Base):

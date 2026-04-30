@@ -1,3 +1,6 @@
+import re
+
+
 def american_to_implied_prob(odds: int) -> float:
     if odds < 0: return abs(odds) / (abs(odds) + 100)
     else: return 100 / (odds + 100)
@@ -25,3 +28,63 @@ def no_vig_implied_prob(side: str, home_odds: int, away_odds: int) -> float:
     away_raw = american_to_implied_prob(away_odds)
     home_fair, away_fair = remove_vig(home_raw, away_raw)
     return home_fair if side == "home" else away_fair
+
+
+def parse_pick_line(pick_value: str) -> float | None:
+    """Extract the numeric line from a spread or over_under pick_value.
+
+    Spread values look like "HOME -3.5" / "AWAY +4.0".
+    Total values look like "Over 218.5" / "Under 220.5".
+    Returns None if no numeric line can be parsed.
+    """
+    match = re.search(r"([+-]?\d+\.?\d*)", pick_value)
+    return float(match.group(1)) if match else None
+
+
+def signed_line_clv(pick_type: str, pick_value: str, line_at_close: float) -> float | None:
+    """Return CLV in line points where positive = bettor beat the close.
+
+    For spread: pick_line - close_line works for both HOME and AWAY because the
+    away line is the negation of the home line and the bettor's preferred
+    direction flips with the sign.
+    For totals: OVER wants close > pick (line moved up = bettor took the lower);
+    UNDER wants close < pick.
+    """
+    pick_line = parse_pick_line(pick_value)
+    if pick_line is None:
+        return None
+    if pick_type == "spread":
+        return pick_line - line_at_close
+    if pick_type == "over_under":
+        if "Over" in pick_value:
+            return line_at_close - pick_line
+        if "Under" in pick_value:
+            return pick_line - line_at_close
+    return None
+
+
+def compute_pick_clv(
+    pick_type: str,
+    pick_value: str,
+    odds_at_pick: int | None,
+    odds_at_close: int | None,
+    line_at_close: float | None,
+) -> tuple[float | None, float | None]:
+    """Return (clv_pct, clv_points) for a single graded pick.
+
+    clv_pct is meaningful for moneyline only: implied-probability delta in
+    percentage points. Positive = bettor's price beat the close.
+    clv_points is meaningful for spread / over_under only: how many line points
+    the bettor beat the close by. Positive = better line at pick time.
+    Returns (None, None) for ungradeable picks (props, missing data).
+    """
+    if pick_type == "moneyline":
+        if odds_at_pick is None or odds_at_close is None:
+            return None, None
+        clv_pct = (american_to_implied_prob(odds_at_close) - american_to_implied_prob(odds_at_pick)) * 100
+        return clv_pct, None
+    if pick_type in ("spread", "over_under"):
+        if line_at_close is None:
+            return None, None
+        return None, signed_line_clv(pick_type, pick_value, line_at_close)
+    return None, None

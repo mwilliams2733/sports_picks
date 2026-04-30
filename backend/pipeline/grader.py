@@ -106,11 +106,18 @@ def grade_prop_pick(pick_value: str, market: str, player_stat) -> tuple[str, flo
     return ("win", 1.0) if won else ("loss", -1.0)
 
 
-def capture_closing_odds(session, pick_result, game_id: int, pick_type: str, pick_value: str):
-    """Store closing odds on a PickResult from the most recent odds snapshot.
+def capture_closing_odds(session, pick_result, game_id: int, pick_type: str, pick_value: str, odds_at_pick: int | None = None):
+    """Store closing odds (and, for spread/total, the closing line) on a PickResult.
 
-    Called during grading when a game reaches 'final' status.
-    The most recent pre-game odds snapshot is the closing line.
+    Called during grading when a game reaches 'final' status. The most recent
+    pre-game odds snapshot is treated as the closing line.
+
+    For moneyline bets the price moves materially, so odds_at_close stores the
+    closing moneyline price. For spread/total bets the price (juice) is rarely
+    stored historically and barely moves; the meaningful CLV is in the line
+    number, which is stored in line_at_close. odds_at_close defaults to
+    odds_at_pick for those bet types so price-CLV becomes a no-op rather than
+    fabricated -110.
     """
     from backend.models import Odds
     closing = (
@@ -128,6 +135,11 @@ def capture_closing_odds(session, pick_result, game_id: int, pick_type: str, pic
         else:
             pick_result.odds_at_close = closing.moneyline_away
     elif pick_type == "spread":
-        pick_result.odds_at_close = -110
+        if "HOME" in pick_value:
+            pick_result.line_at_close = closing.spread_home
+        else:
+            pick_result.line_at_close = closing.spread_away
+        pick_result.odds_at_close = odds_at_pick
     elif pick_type == "over_under":
-        pick_result.odds_at_close = -110
+        pick_result.line_at_close = closing.over_under
+        pick_result.odds_at_close = odds_at_pick

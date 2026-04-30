@@ -12,10 +12,10 @@ from backend.pipeline.full_pipeline import (
 )
 from backend.pipeline.pick_generator import generate_and_store_picks
 from backend.pipeline.prop_pipeline import run_prop_pipeline
-from backend.pipeline.grader import grade_pick, grade_prop_pick
+from backend.pipeline.grader import grade_pick, grade_prop_pick, capture_closing_odds
 from backend.collectors.budget import get_credit_summary, DEFAULT_BUDGET
 from backend.models import (
-    Base, Game, Odds, PickModel, PickResult, StrategyModel,
+    Base, Game, PickModel, PickResult, StrategyModel,
     PaperPick, PlayerStat,
 )
 from backend.analysis.odds_utils import calculate_payout
@@ -203,35 +203,12 @@ def grade_pending_picks(session):
         if game.home_score is not None and game.away_score is not None:
             result, payout = grade_pick(pick.pick_type, pick.pick_value,
                 game.home_score, game.away_score, pick.odds_at_pick or -110)
-
-            # Get closing odds (most recent odds snapshot for this game)
-            closing_odds_val = None
-            closing_odds_row = (
-                session.query(Odds)
-                .filter(Odds.game_id == game.id)
-                .order_by(Odds.timestamp.desc())
-                .first()
+            pick_result = PickResult(pick_id=pick.id, result=result, payout=payout)
+            capture_closing_odds(
+                session, pick_result, game.id,
+                pick.pick_type, pick.pick_value, pick.odds_at_pick,
             )
-            if closing_odds_row:
-                if pick.pick_type == "moneyline":
-                    if "HOME" in pick.pick_value:
-                        closing_odds_val = closing_odds_row.moneyline_home
-                    else:
-                        closing_odds_val = closing_odds_row.moneyline_away
-                elif pick.pick_type == "spread":
-                    if "HOME" in pick.pick_value:
-                        closing_odds_val = -110  # spreads are typically -110
-                    else:
-                        closing_odds_val = -110
-                elif pick.pick_type == "over_under":
-                    closing_odds_val = -110
-                elif pick.pick_type == "prop":
-                    closing_odds_val = closing_odds_row.moneyline_home  # fallback
-
-            session.add(PickResult(
-                pick_id=pick.id, result=result, payout=payout,
-                odds_at_close=closing_odds_val
-            ))
+            session.add(pick_result)
     session.commit()
     logger.info(f"Graded {len(ungraded)} strategy picks")
 
