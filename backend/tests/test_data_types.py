@@ -40,3 +40,26 @@ def test_game_data():
     )
     assert game.sport == "nba"
     assert game.week is None
+
+
+def test_team_stats_supports_optional_pitcher_skill_score():
+    """MLB needs a per-game pitcher signal carried alongside team stats."""
+    from backend.data_types import TeamStats
+    stats = TeamStats(
+        point_diff=0.0, home_record=(0, 0), away_record=(0, 0),
+        last_n_record=(0, 0), offensive_rating=100.0, defensive_rating=100.0,
+        pace=100.0, strength_of_schedule=0.5, elo_rating=1500, rest_days=1,
+        pitcher_skill_score=0.72,
+    )
+    assert stats.pitcher_skill_score == 0.72
+
+
+def test_team_stats_pitcher_skill_score_defaults_to_none():
+    """Field must be optional for non-MLB sports — backwards compatibility."""
+    from backend.data_types import TeamStats
+    stats = TeamStats(
+        point_diff=0.0, home_record=(0, 0), away_record=(0, 0),
+        last_n_record=(0, 0), offensive_rating=100.0, defensive_rating=100.0,
+        pace=100.0, strength_of_schedule=0.5, elo_rating=1500, rest_days=1,
+    )
+    assert stats.pitcher_skill_score is None
