@@ -58,17 +58,29 @@ def test_mlb_is_in_sport_keys():
 
 
 def test_mlb_prop_markets_defined():
-    """MLB has popular prop markets — they must be wired up."""
+    """MLB prop market list must contain all four documented batter/pitcher markets."""
     from backend.collectors.odds_api import PROP_MARKETS
-    assert "batter_hits" in PROP_MARKETS["mlb"]
-    assert "pitcher_strikeouts" in PROP_MARKETS["mlb"]
+    assert set(PROP_MARKETS["mlb"]) == {
+        "batter_hits", "batter_home_runs", "batter_total_bases", "pitcher_strikeouts",
+    }
 
 
-def test_mlb_uses_full_market_set():
-    """MLB has h2h + spreads (run line) + totals — should NOT be h2h-only like combat sports."""
-    from backend.collectors.odds_api import OddsAPICollector
-    import inspect
-    src = inspect.getsource(OddsAPICollector.fetch_odds)
-    assert '"boxing", "mma"' in src or "'boxing', 'mma'" in src, (
-        "h2h-only branch must not silently pick up mlb"
-    )
+@pytest.mark.asyncio
+async def test_fetch_odds_for_mlb_requests_full_market_set(monkeypatch):
+    """MLB fetch_odds must request h2h, spreads, AND totals — not h2h-only like combat sports."""
+    captured = {}
+
+    async def mock_get(self, url, **kwargs):
+        captured["params"] = kwargs.get("params", {})
+        request = httpx.Request("GET", url)
+        return httpx.Response(200, json=[], headers={"x-requests-remaining": "490"}, request=request)
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    collector = OddsAPICollector(api_key="test_key")
+    await collector.fetch_odds("mlb")
+
+    markets_param = captured["params"].get("markets", "")
+    markets = [m.strip() for m in markets_param.split(",")]
+    assert "spreads" in markets, f"Expected 'spreads' in markets param, got: {markets_param!r}"
+    assert "totals" in markets, f"Expected 'totals' in markets param, got: {markets_param!r}"
