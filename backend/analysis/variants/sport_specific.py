@@ -93,7 +93,10 @@ class SportSpecificStrategy(Strategy):
             venue_score = self._venue_score(hs, aws)
             prob += weights.get("pitcher", 0.45) * pitcher_score + weights.get("venue", 0.15) * venue_score
 
-        # Schedule adjustments
+        # Schedule adjustments — calibrated for NBA back-to-backs and NFL trap games.
+        # Currently a no-op for MLB because `_check_schedule_fatigue` only fires for
+        # NBA/NCAAB. If MLB fatigue is added, retune these constants (the 4% lookahead
+        # penalty exceeds MLB's typical home-field edge of ~0.04 and would over-correct).
         # Fatigue: penalize fatigued teams
         if hs.is_schedule_fatigued:
             prob -= 0.03 * hs.schedule_fatigue_score  # Up to 3% penalty for home
