@@ -69,6 +69,8 @@ class GameData:
     away_stats: TeamStats
     odds: list[OddsSnapshot] = field(default_factory=list)
     week: int | None = None
+    home_fighter: "FighterStats | None" = None
+    away_fighter: "FighterStats | None" = None
 
 @dataclass
 class FighterStats:
