@@ -17,7 +17,9 @@ STRATEGY_MAP = {
     "prop_value": PropValueStrategy,
 }
 
-def generate_and_store_picks(session: Session, strategy_id: int, target_date: date | None = None) -> int:
+def generate_and_store_picks(session: Session, strategy_id: int,
+                              target_date: date | None = None,
+                              pitcher_scores: dict[int, dict[str, float]] | None = None) -> int:
     target_date = target_date or date.today()
     strat_row = session.get(StrategyModel, strategy_id)
     if not strat_row: return 0
@@ -28,7 +30,7 @@ def generate_and_store_picks(session: Session, strategy_id: int, target_date: da
     games = session.query(Game).filter(Game.date == target_date, Game.status == "scheduled").all()
     count = 0
     for game in games:
-        game_data = _build_game_data(session, game)
+        game_data = _build_game_data(session, game, pitcher_scores=pitcher_scores)
         picks = strategy.predict(game_data)
         for pick in picks:
             if pick.confidence >= 1:
@@ -97,7 +99,8 @@ def _check_lookahead_spot(session: Session, team_id: int, opponent_team_id: int,
     return False
 
 
-def _build_game_data(session: Session, game) -> GameData:
+def _build_game_data(session: Session, game,
+                     pitcher_scores: dict[int, dict[str, float]] | None = None) -> GameData:
     home_stats = _get_team_stats(session, game.home_team_id, game.sport)
     away_stats = _get_team_stats(session, game.away_team_id, game.sport)
     odds_rows = session.query(Odds).filter(Odds.game_id == game.id).all()
@@ -121,6 +124,12 @@ def _build_game_data(session: Session, game) -> GameData:
                                          away_stats.elo_rating, home_stats.elo_rating)
     home_stats.is_lookahead_spot = h_lookahead
     away_stats.is_lookahead_spot = a_lookahead
+
+    # MLB: attach probable-pitcher skill score if the caller has pre-computed it.
+    if game.sport == "mlb" and pitcher_scores and game.id in pitcher_scores:
+        ps = pitcher_scores[game.id]
+        home_stats.pitcher_skill_score = ps.get("home")
+        away_stats.pitcher_skill_score = ps.get("away")
 
     return GameData(game_id=game.id, sport=game.sport, date=game.date,
         home_team_id=game.home_team_id, away_team_id=game.away_team_id,

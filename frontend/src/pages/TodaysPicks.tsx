@@ -11,7 +11,7 @@ import ConfidenceStars from '../components/ConfidenceStars';
 import BetModal from '../components/BetModal';
 import CreditUsage from '../components/CreditUsage';
 
-const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'boxing', 'mma'] as const;
+const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'mlb', 'boxing', 'mma'] as const;
 
 export default function TodaysPicks() {
   const [searchParams, setSearchParams] = useSearchParams();

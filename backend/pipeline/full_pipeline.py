@@ -10,7 +10,7 @@ from backend.models import Team, Game, Odds, PlayerProp
 
 logger = logging.getLogger(__name__)
 
-ALL_SPORTS = ["nba", "nfl", "ncaab", "ncaaf", "boxing", "mma"]
+ALL_SPORTS = ["nba", "nfl", "ncaab", "ncaaf", "boxing", "mma", "mlb"]
 
 
 async def fetch_and_store_games(session: Session, sports: list[str], target_date: date) -> int:

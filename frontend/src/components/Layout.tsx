@@ -15,7 +15,7 @@ const NAV_ITEMS: [string, string][] = [
   ['/admin', 'Admin'],
 ]
 
-const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf']
+const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'mlb']
 
 export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false)

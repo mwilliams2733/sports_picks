@@ -19,6 +19,9 @@ seasons:
   mma:
     start: "01-01"
     end: "12-31"
+  mlb:
+    start: "03-27"
+    end: "10-31"
 
 odds_budget:
   monthly_limit: 20000

@@ -8,6 +8,7 @@ POINT_DIFF_STD = {
     "ncaaf": 17.0,
     "boxing": 12.0,
     "mma": 12.0,
+    "mlb": 3.5,
 }
 
 # Standard deviation of game-to-game total points
@@ -18,6 +19,7 @@ TOTAL_POINTS_STD = {
     "ncaaf": 16.0,
     "boxing": 15.0,
     "mma": 15.0,
+    "mlb": 4.0,
 }
 
 # Home court/field advantage in ELO points
@@ -28,6 +30,7 @@ HOME_ADVANTAGE_ELO = {
     "ncaaf": 65,
     "boxing": 0,
     "mma": 0,
+    "mlb": 24,
 }
 
 # Default home win probability (used as HCA weight in fallback models)
@@ -38,6 +41,7 @@ HOME_WIN_RATE = {
     "ncaaf": 0.62,
     "boxing": 0.50,
     "mma": 0.50,
+    "mlb": 0.54,
 }
 
 

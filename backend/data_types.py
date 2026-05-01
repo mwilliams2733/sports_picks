@@ -19,6 +19,7 @@ class TeamStats:
     is_schedule_fatigued: bool = False  # 3rd game in 4 nights (NBA)
     is_lookahead_spot: bool = False     # weak opponent now, big game next
     schedule_fatigue_score: float = 0.0  # 0 to 1 severity
+    pitcher_skill_score: float | None = None  # MLB-only; 0.5 = league-average
 
 @dataclass
 class OddsSnapshot:

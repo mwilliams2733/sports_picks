@@ -5,7 +5,7 @@ import PerformanceChart from '../components/PerformanceChart';
 import CalibrationChart from '../components/CalibrationChart';
 import ConfidenceStars from '../components/ConfidenceStars';
 
-const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'boxing', 'mma'] as const;
+const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'mlb', 'boxing', 'mma'] as const;
 const RANGES = ['7d', '14d', '30d', '90d', 'all'] as const;
 
 function daysFromRange(range: string): number | null {

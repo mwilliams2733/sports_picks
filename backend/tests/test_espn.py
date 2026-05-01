@@ -36,3 +36,9 @@ async def test_fetch_scoreboard(mock_espn):
     assert games[0]["home_score"] == 112
     assert games[0]["away_score"] == 105
     assert games[0]["status"] == "final"
+
+def test_mlb_scoreboard_url_present():
+    from backend.collectors.espn import SPORT_URLS
+    url = SPORT_URLS.get("mlb")
+    assert url is not None
+    assert "baseball/mlb/scoreboard" in url
