@@ -172,8 +172,14 @@ def _run_window(config, engine, sport: str, window: dict):
         if game_strategy:
             pitcher_scores = None
             if sport == "mlb":
-                scores_by_abbr = asyncio.run(fetch_pitcher_scores_for_date(today))
-                pitcher_scores = _remap_pitcher_scores_to_game_ids(session, scores_by_abbr, today)
+                try:
+                    scores_by_abbr = asyncio.run(fetch_pitcher_scores_for_date(today))
+                    pitcher_scores = _remap_pitcher_scores_to_game_ids(session, scores_by_abbr, today)
+                except Exception as exc:
+                    logger.warning(
+                        "MLB pitcher fetch failed (%s); proceeding with neutral pitcher scores", exc
+                    )
+                    pitcher_scores = None
             count = generate_and_store_picks(session, game_strategy.id, today, pitcher_scores=pitcher_scores)
             logger.info(f"Generated {count} game picks")
         prop_strategy = session.query(StrategyModel).filter(
@@ -309,6 +315,11 @@ def _remap_pitcher_scores_to_game_ids(session, scores_by_abbr, target_date) -> d
         key = (abbr_lookup.get(g.home_team_id), abbr_lookup.get(g.away_team_id))
         if key in scores_by_abbr:
             out[g.id] = scores_by_abbr[key]
+        else:
+            logger.warning(
+                "MLB pitcher remap: no score for game %s on %s (key=%s, available=%s)",
+                g.id, target_date, key, list(scores_by_abbr.keys()),
+            )
     return out
 
 
