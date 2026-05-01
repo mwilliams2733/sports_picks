@@ -1,0 +1,83 @@
+"""CombatSportsStrategy — h2h moneyline picks for boxing and MMA.
+
+Uses fighter Elo + recent-form score + opponent-quality adjustment. Does not
+emit spread or total picks (those don't apply to combat sports).
+"""
+from __future__ import annotations
+from backend.analysis.strategy import Strategy
+from backend.analysis.confidence import calculate_confidence
+from backend.analysis.odds_utils import american_to_implied_prob
+from backend.data_types import GameData, Pick
+
+
+class CombatSportsStrategy(Strategy):
+    """Variant E: combat-sports Elo + recent-form blend, h2h only."""
+
+    def predict(self, game: GameData) -> list[Pick]:
+        if not game.odds:
+            return []
+        home_fighter = getattr(game, "home_fighter", None)
+        away_fighter = getattr(game, "away_fighter", None)
+        if home_fighter is None or away_fighter is None:
+            return []
+
+        home_prob = self._model_probability(home_fighter, away_fighter)
+        away_prob = 1.0 - home_prob
+
+        avg_odds = self._average_h2h_odds(game)
+        if avg_odds is None:
+            return []
+
+        min_edge = self.config.get("min_edge", 5.0)
+        picks: list[Pick] = []
+        implied_home = american_to_implied_prob(avg_odds["moneyline_home"])
+        implied_away = american_to_implied_prob(avg_odds["moneyline_away"])
+        home_edge = (home_prob - implied_home) * 100
+        away_edge = (away_prob - implied_away) * 100
+
+        if home_edge >= min_edge:
+            picks.append(Pick(
+                game_id=game.game_id, pick_type="moneyline", pick_value="HOME ML",
+                confidence=calculate_confidence(home_edge, models_agreeing=2),
+                edge_pct=round(home_edge, 1),
+                model_probability=round(home_prob, 4),
+                implied_probability=round(implied_home, 4),
+                odds_at_pick=avg_odds["moneyline_home"]))
+        elif away_edge >= min_edge:
+            picks.append(Pick(
+                game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
+                confidence=calculate_confidence(away_edge, models_agreeing=2),
+                edge_pct=round(away_edge, 1),
+                model_probability=round(away_prob, 4),
+                implied_probability=round(implied_away, 4),
+                odds_at_pick=avg_odds["moneyline_away"]))
+        return picks
+
+    def _model_probability(self, home, away) -> float:
+        """Blend: 70% Elo + 20% recent form + 10% opponent quality.
+        When opponent_avg_elo is missing for either fighter (debut), fall back
+        to 78% Elo + 22% form (re-normalized).
+        """
+        elo_diff = home.elo_rating - away.elo_rating
+        elo_term = 1 / (1 + 10 ** (-elo_diff / 400))
+
+        form_diff = home.recent_form_score - away.recent_form_score
+        form_term = 1 / (1 + 10 ** (-form_diff / 0.3))
+
+        if home.opponent_avg_elo is not None and away.opponent_avg_elo is not None:
+            quality_diff = home.opponent_avg_elo - away.opponent_avg_elo
+            quality_term = 1 / (1 + 10 ** (-quality_diff / 400))
+            prob = 0.70 * elo_term + 0.20 * form_term + 0.10 * quality_term
+        else:
+            prob = 0.78 * elo_term + 0.22 * form_term
+        return max(0.05, min(0.95, prob))
+
+    def _average_h2h_odds(self, game) -> dict | None:
+        ml_home = [o.moneyline_home for o in game.odds if o.moneyline_home is not None]
+        ml_away = [o.moneyline_away for o in game.odds if o.moneyline_away is not None]
+        if not ml_home or not ml_away:
+            return None
+        return {
+            "moneyline_home": int(sum(ml_home) / len(ml_home)),
+            "moneyline_away": int(sum(ml_away) / len(ml_away)),
+        }
