@@ -69,3 +69,11 @@ class GameData:
     away_stats: TeamStats
     odds: list[OddsSnapshot] = field(default_factory=list)
     week: int | None = None
+
+@dataclass
+class FighterStats:
+    elo_rating: float
+    recent_form_score: float
+    opponent_avg_elo: float | None
+    fights_count: int
+    days_since_last_fight: int | None
