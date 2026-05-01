@@ -182,6 +182,11 @@ def grade_completed_games(session) -> None:
 
     Currently handles combat-sports Elo updates only. Team-sport Elo is
     managed by the backtesting/historical path and is not touched here.
+
+    NOTE: This function is not yet wired into the live scheduler. Combat-8
+    (UFCStats event ingest) should call this after committing fight outcomes,
+    or a follow-up task should add a post-grading step in `scheduler._run_window`.
+    Until then, fighter Elo will remain at seed values in production.
     """
     from backend.models import Game
     final_games = (

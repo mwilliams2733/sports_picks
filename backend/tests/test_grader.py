@@ -128,11 +128,12 @@ def test_combat_grader_does_not_affect_team_sport_elo():
 
     grade_completed_games(session)
 
-    # Team-sport Elo update path is untouched by this task — Elo should remain 1500
-    # OR be updated by the existing path (if one exists). Either is acceptable; what
-    # matters is that the *combat* path didn't fire and apply a 12-point shift.
+    # Team-sport Elo update is not handled by this grader path; both ratings must
+    # remain at the seeded 1500.0. A loose `!= 1512.0` would let any other delta-
+    # introducing bug pass — pin both sides exactly.
     home_elo = (session.query(EloRating)
                 .filter(EloRating.team_id == 1, EloRating.sport == "nba").first()).rating
-    # If combat path fired (incorrect), home would gain ~12 Elo (since 110 != 100,
-    # actual_home would be 1.0). Assert no such delta.
-    assert home_elo != 1512.0, "Combat Elo update must not fire for NBA games"
+    away_elo = (session.query(EloRating)
+                .filter(EloRating.team_id == 2, EloRating.sport == "nba").first()).rating
+    assert abs(home_elo - 1500.0) < 0.01, f"NBA Elo must be untouched, got {home_elo}"
+    assert abs(away_elo - 1500.0) < 0.01, f"NBA Elo must be untouched, got {away_elo}"
