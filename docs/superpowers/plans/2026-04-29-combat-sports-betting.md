@@ -312,7 +312,7 @@ class CombatSportsStrategy(Strategy):
         if home_edge >= min_edge:
             picks.append(Pick(
                 game_id=game.game_id, pick_type="moneyline", pick_value="HOME ML",
-                confidence=calculate_confidence(home_edge, agreeing_models=2),
+                confidence=calculate_confidence(home_edge, models_agreeing=2),
                 edge_pct=round(home_edge, 1),
                 model_probability=round(home_prob, 4),
                 implied_probability=round(implied_home, 4),
@@ -320,7 +320,7 @@ class CombatSportsStrategy(Strategy):
         elif away_edge >= min_edge:
             picks.append(Pick(
                 game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
-                confidence=calculate_confidence(away_edge, agreeing_models=2),
+                confidence=calculate_confidence(away_edge, models_agreeing=2),
                 edge_pct=round(away_edge, 1),
                 model_probability=round(away_prob, 4),
                 implied_probability=round(implied_away, 4),

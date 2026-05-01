@@ -61,8 +61,12 @@ class CombatSportsStrategy(Strategy):
         elo_diff = home.elo_rating - away.elo_rating
         elo_term = 1 / (1 + 10 ** (-elo_diff / 400))
 
+        # form_diff is bounded by [-1, 1] since recent_form_score ∈ [0, 1].
+        # Scale=2.0 keeps the sigmoid responsive without saturating: a 0.5
+        # form gap maps to ~0.64, a full 1.0 gap maps to ~0.76 — a meaningful
+        # but non-decisive signal. (Scale=0.3 would saturate at form_diff≥0.5.)
         form_diff = home.recent_form_score - away.recent_form_score
-        form_term = 1 / (1 + 10 ** (-form_diff / 0.3))
+        form_term = 1 / (1 + 10 ** (-form_diff / 2.0))
 
         if home.opponent_avg_elo is not None and away.opponent_avg_elo is not None:
             quality_diff = home.opponent_avg_elo - away.opponent_avg_elo
