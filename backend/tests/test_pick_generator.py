@@ -160,3 +160,41 @@ def test_build_fighter_stats_aggregates_recent_form():
     assert fs.recent_form_score == 0.6  # 3 wins of 5
     assert fs.opponent_avg_elo == 1500.0
     assert fs.days_since_last_fight is not None
+
+
+def test_pick_generator_routes_mma_to_combat_even_when_strategy_is_sport_specific():
+    """An MMA game must use CombatSportsStrategy even if the active strategy
+    in the DB is named 'sport_specific'. Otherwise team-based strategies
+    silently produce no picks for combat events."""
+    from datetime import date as _date, datetime, timezone
+    from backend.database import get_engine, get_session
+    from backend.models import Base, Team, Game, Odds, EloRating, StrategyModel, PickModel
+    from backend.pipeline.pick_generator import generate_and_store_picks
+
+    engine = get_engine(":memory:")
+    Base.metadata.create_all(engine)
+    session = get_session(engine)
+    home = Team(id=1, name="Fighter A", abbreviation="A", sport="mma")
+    away = Team(id=2, name="Fighter B", abbreviation="B", sport="mma")
+    session.add_all([home, away]); session.flush()
+    session.add_all([
+        EloRating(team_id=1, sport="mma", rating=1500),
+        EloRating(team_id=2, sport="mma", rating=1800),  # B much stronger
+    ])
+    session.flush()
+    session.add(Game(id=1, sport="mma", season="2026", date=_date(2026, 4, 29),
+                     home_team_id=1, away_team_id=2, status="scheduled"))
+    session.add(Odds(game_id=1, bookmaker="dk", moneyline_home=+200, moneyline_away=-250,
+                     spread_home=0.0, spread_away=0.0, over_under=0.0,
+                     timestamp=datetime(2026, 4, 29, 18, 0, tzinfo=timezone.utc)))
+    # The strategy name is "sport_specific" — the team-sport strategy. The dispatch
+    # must still route the MMA game to CombatSportsStrategy.
+    session.add(StrategyModel(id=1, name="sport_specific", config_json='{"min_edge": 2.0}', is_active=True))
+    session.commit()
+
+    n = generate_and_store_picks(session, strategy_id=1, target_date=_date(2026, 4, 29))
+    picks = session.query(PickModel).filter(PickModel.game_id == 1).all()
+    # Must have at least one pick; must be moneyline (combat doesn't emit spreads/totals).
+    # If routing failed (i.e., it ran SportSpecificStrategy on empty TeamStats), no picks would generate.
+    assert n >= 1 or len(picks) >= 1, "Combat dispatch must work even with non-combat strategy name"
+    assert all(p.pick_type == "moneyline" for p in picks)

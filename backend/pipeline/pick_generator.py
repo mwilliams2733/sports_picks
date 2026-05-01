@@ -19,13 +19,6 @@ STRATEGY_MAP = {
     "combat_sports": CombatSportsStrategy,
 }
 
-def _strategy_for_sport(sport: str, name: str, config: dict):
-    """Pick the right strategy class based on sport family."""
-    if sport in ("mma", "boxing"):
-        return CombatSportsStrategy(name=name, config=config)
-    return SportSpecificStrategy(name=name, config=config)
-
-
 def generate_and_store_picks(session: Session, strategy_id: int,
                               target_date: date | None = None,
                               pitcher_scores: dict[int, dict[str, float]] | None = None) -> int:
@@ -38,12 +31,11 @@ def generate_and_store_picks(session: Session, strategy_id: int,
     games = session.query(Game).filter(Game.date == target_date, Game.status == "scheduled").all()
     count = 0
     for game in games:
-        # Use a sport-aware strategy: combat sports get CombatSportsStrategy;
-        # all other sports get the strategy named in the DB row (or the
-        # sport-specific fallback when the strategy name is "combat_sports"
-        # but the game is not a combat sport).
-        if strat_row.name == "combat_sports":
-            strategy = _strategy_for_sport(game.sport, strat_row.name, config)
+        # Combat sports always route to CombatSportsStrategy because the team-based
+        # strategies have no signal for individual fighters. For team sports, use
+        # whichever strategy the user configured.
+        if game.sport in ("mma", "boxing"):
+            strategy = CombatSportsStrategy(strat_row.name, config)
         else:
             strategy = strategy_cls(strat_row.name, config)
         game_data = _build_game_data(session, game, pitcher_scores=pitcher_scores)
