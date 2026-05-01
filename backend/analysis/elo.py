@@ -1,5 +1,21 @@
 import math
 
+K_FACTORS = {
+    "nba": 32, "nfl": 32, "ncaab": 32, "ncaaf": 32, "mlb": 32,
+    "mma": 24, "boxing": 24,
+}
+
+
+def get_k_factor(sport: str) -> int:
+    """Return the Elo K-factor for a given sport.
+
+    Team sports use K=32. Combat sports (MMA, boxing) use K=24 because
+    fighters compete 2-4x/year vs. 80x for NBA — each fight carries more
+    information per match but cumulative data is sparser.
+    """
+    return K_FACTORS.get(sport, 32)
+
+
 class EloSystem:
     def __init__(self, k_factor: float = 20.0, initial_rating: float = 1500.0,
                  home_advantage: float = 0.0):

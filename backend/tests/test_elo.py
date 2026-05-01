@@ -65,3 +65,16 @@ def test_backward_compat_no_margin():
     elo.update("A", "B", "A")
     assert elo.get_rating("A") > 1500
     assert elo.get_rating("B") < 1500
+
+
+def test_combat_sports_k_factor_is_lower_than_team_sports():
+    """Combat sports use K=24 vs. team K=32 due to lower fight frequency."""
+    from backend.analysis.elo import get_k_factor
+    assert get_k_factor("nba") == 32
+    assert get_k_factor("nfl") == 32
+    assert get_k_factor("ncaab") == 32
+    assert get_k_factor("ncaaf") == 32
+    assert get_k_factor("mlb") == 32
+    assert get_k_factor("mma") == 24
+    assert get_k_factor("boxing") == 24
+    assert get_k_factor("unknown") == 32  # default
