@@ -43,6 +43,27 @@ export default function GameCard({ game, picks, onBet }: Props) {
           <span className="game-card-line">O/U: {game.over_under}</span>
         )}
       </div>
+      <div className="game-card-context">
+        <span className="game-card-context-item">
+          {game.home_team} {game.home_l10_record} L10
+        </span>
+        <span className="game-card-context-sep">·</span>
+        <span className="game-card-context-item">
+          {game.away_team} {game.away_l10_record} L10
+        </span>
+        {game.last_meeting && (
+          <>
+            <span className="game-card-context-sep">·</span>
+            <span className="game-card-context-item">
+              Last: {game.last_meeting.winner === 'tie'
+                ? 'tie'
+                : `${game.last_meeting.winner === 'home' ? game.home_team : game.away_team} W`}{' '}
+              {Math.max(game.last_meeting.home_score, game.last_meeting.away_score)}-
+              {Math.min(game.last_meeting.home_score, game.last_meeting.away_score)}
+            </span>
+          </>
+        )}
+      </div>
       {topPick && (
         <div className="game-card-pick">
           <div className="game-card-pick-info">

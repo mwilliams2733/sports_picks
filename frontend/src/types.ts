@@ -67,11 +67,20 @@ export interface PropData {
   is_stale: boolean;
 }
 
+export interface LastMeeting {
+  date: string;
+  home_score: number;
+  away_score: number;
+  // 'home' / 'away' relative to TODAY's matchup (already corner-corrected by API).
+  winner: 'home' | 'away' | 'tie';
+}
+
 export interface GameOddsData {
   id: number;
   sport: string;
   date: string;
   status: string;
+  start_time: string | null;
   home_team: string;
   away_team: string;
   home_team_name: string;
@@ -84,6 +93,9 @@ export interface GameOddsData {
   over_under: number | null;
   bookmaker: string | null;
   odds_count: number;
+  last_meeting: LastMeeting | null;
+  home_l10_record: string;
+  away_l10_record: string;
 }
 
 export interface AutoTuneResult {
