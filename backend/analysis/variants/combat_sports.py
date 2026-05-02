@@ -21,6 +21,15 @@ class CombatSportsStrategy(Strategy):
         if home_fighter is None or away_fighter is None:
             return []
 
+        # Boxing data-thin gate: Wikidata only covers top-tier boxers, so a
+        # missing fight history likely means "fighter unknown to us" rather
+        # than "genuine debut." MMA bypasses this gate — UFCStats coverage
+        # is comprehensive enough that fights_count=0 is a real debut signal.
+        if game.sport == "boxing" and (
+            home_fighter.fights_count == 0 or away_fighter.fights_count == 0
+        ):
+            return []
+
         home_prob = self._model_probability(home_fighter, away_fighter)
         away_prob = 1.0 - home_prob
 
