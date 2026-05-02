@@ -5,6 +5,7 @@ interface Props {
   game: GameOddsData
   picks: PickData[]
   onBet: (pick: { pickValue: string; pickType: string; odds: number; gameId: number; edgePct?: number }) => void
+  onHide?: (gameId: number) => void
 }
 
 function formatOdds(odds: number | null): string {
@@ -12,9 +13,32 @@ function formatOdds(odds: number | null): string {
   return odds >= 0 ? `+${odds}` : `${odds}`
 }
 
-export default function GameCard({ game, picks, onBet }: Props) {
+function formatMeetingDate(iso: string): string {
+  // "2026-03-02" → "Mar 2"
+  const [, m, d] = iso.split('-')
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const monthName = months[Math.max(0, Math.min(11, parseInt(m, 10) - 1))]
+  return `${monthName} ${parseInt(d, 10)}`
+}
+
+export default function GameCard({ game, picks, onBet, onHide }: Props) {
   const gamePicks = picks.filter(p => p.game_id === game.id)
   const topPick = gamePicks.length > 0 ? gamePicks.reduce((a, b) => (a.confidence > b.confidence ? a : b)) : null
+
+  // For "BOS won 114-98" we need the higher score first regardless of which
+  // corner the team was in during the prior meeting.
+  let lastMeetingLabel: string | null = null
+  if (game.last_meeting) {
+    const lm = game.last_meeting
+    const high = Math.max(lm.home_score, lm.away_score)
+    const low = Math.min(lm.home_score, lm.away_score)
+    if (lm.winner === 'tie') {
+      lastMeetingLabel = `tied ${high}-${low}`
+    } else {
+      const winnerAbbr = lm.winner === 'home' ? game.home_team : game.away_team
+      lastMeetingLabel = `${winnerAbbr} won ${high}-${low}`
+    }
+  }
 
   return (
     <div className="game-card">
@@ -23,6 +47,26 @@ export default function GameCard({ game, picks, onBet }: Props) {
         <span className="game-card-status">
           {game.status === 'final' ? `Final: ${game.home_score}-${game.away_score}` : game.status}
         </span>
+        {onHide && (
+          <button
+            className="game-card-hide"
+            onClick={() => onHide(game.id)}
+            title="Hide this game"
+            aria-label="Hide this game"
+            style={{
+              marginLeft: 'auto',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted, #94a3b8)',
+              cursor: 'pointer',
+              fontSize: '1.1rem',
+              lineHeight: 1,
+              padding: '0 0.25rem',
+            }}
+          >
+            ×
+          </button>
+        )}
       </div>
       <div className="game-card-matchup">
         <div className="game-card-team">
@@ -43,25 +87,23 @@ export default function GameCard({ game, picks, onBet }: Props) {
           <span className="game-card-line">O/U: {game.over_under}</span>
         )}
       </div>
-      <div className="game-card-context">
-        <span className="game-card-context-item">
-          {game.home_team} {game.home_l10_record} L10
-        </span>
-        <span className="game-card-context-sep">·</span>
-        <span className="game-card-context-item">
-          {game.away_team} {game.away_l10_record} L10
-        </span>
-        {game.last_meeting && (
-          <>
-            <span className="game-card-context-sep">·</span>
-            <span className="game-card-context-item">
-              Last: {game.last_meeting.winner === 'tie'
-                ? 'tie'
-                : `${game.last_meeting.winner === 'home' ? game.home_team : game.away_team} W`}{' '}
-              {Math.max(game.last_meeting.home_score, game.last_meeting.away_score)}-
-              {Math.min(game.last_meeting.home_score, game.last_meeting.away_score)}
-            </span>
-          </>
+      <div className="game-card-context" style={{
+        marginTop: '0.5rem',
+        fontSize: '0.85rem',
+        color: 'var(--text-muted, #94a3b8)',
+        lineHeight: 1.45,
+      }}>
+        <div>
+          Last 10: <span className="font-medium">{game.home_team} {game.home_l10_record}</span>
+          {' · '}
+          <span className="font-medium">{game.away_team} {game.away_l10_record}</span>
+        </div>
+        {lastMeetingLabel && game.last_meeting && (
+          <div>
+            Last meeting: {lastMeetingLabel}
+            {' '}
+            <span style={{ opacity: 0.75 }}>({formatMeetingDate(game.last_meeting.date)})</span>
+          </div>
         )}
       </div>
       {topPick && (

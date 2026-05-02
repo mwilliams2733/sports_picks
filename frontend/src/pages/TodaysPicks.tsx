@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAppStore } from '../stores/appStore';
 import { useTodaysPicks } from '../hooks/useTodaysPicks';
+import { useHiddenGames } from '../hooks/useHiddenGames';
 import type { PropData, PickData } from '../types';
 import SummaryBar from '../components/SummaryBar';
 import GameCard from '../components/GameCard';
@@ -30,6 +31,7 @@ export default function TodaysPicks() {
   };
 
   const { picks, record, games } = useTodaysPicks(sport);
+  const { hidden: hiddenGames, hide: hideGame, showAll: showAllGames } = useHiddenGames();
   const [topProps, setTopProps] = useState<PropData[]>([]);
   const [teamFilter, setTeamFilter] = useState('');
   const [betModalOpen, setBetModalOpen] = useState(false);
@@ -101,14 +103,17 @@ export default function TodaysPicks() {
     gamesData.flatMap(g => [g.home_team_name, g.away_team_name]).filter(Boolean)
   )).sort();
 
-  // Filter games and picks by team
-  const filteredGames = teamFilter
+  // Filter games and picks by team, then drop user-hidden games.
+  const teamFilteredGames = teamFilter
     ? gamesData.filter(g => g.home_team_name === teamFilter || g.away_team_name === teamFilter)
     : gamesData;
+  const filteredGames = teamFilteredGames.filter(g => !hiddenGames.has(g.id));
+  const hiddenCount = teamFilteredGames.length - filteredGames.length;
   const filteredGameIds = new Set(filteredGames.map(g => g.id));
-  const filteredPicks = teamFilter
+  const filteredPicks = (teamFilter
     ? picksData.filter(p => filteredGameIds.has(p.game_id))
-    : picksData;
+    : picksData
+  ).filter(p => !hiddenGames.has(p.game_id));
 
   return (
     <div>
@@ -147,9 +152,24 @@ export default function TodaysPicks() {
                 game={game}
                 picks={filteredPicks}
                 onBet={handleBetFromCard}
+                onHide={hideGame}
               />
             ))}
           </div>
+          {hiddenCount > 0 && (
+            <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--text-muted, #94a3b8)' }}>
+              {hiddenCount} game{hiddenCount === 1 ? '' : 's'} hidden ·{' '}
+              <button
+                onClick={showAllGames}
+                style={{
+                  background: 'transparent', border: 'none', padding: 0,
+                  color: 'var(--blue, #3b82f6)', cursor: 'pointer', textDecoration: 'underline',
+                }}
+              >
+                show all
+              </button>
+            </div>
+          )}
         </div>
       )}
 
