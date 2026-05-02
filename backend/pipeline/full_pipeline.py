@@ -120,10 +120,22 @@ async def fetch_and_store_props(session: Session, sports: list[str], api_key: st
 
 
 def _store_games(session: Session, sport: str, target_date: date, games: list[dict]) -> int:
-    """Store ESPN games into the database, creating teams as needed."""
+    """Store ESPN games into the database, creating teams as needed.
+
+    After upserting whatever ESPN returned, reconcile against ESPN's
+    authoritative list for `target_date`: any pending row in our DB that
+    ESPN didn't list is marked status='canceled' (and excluded from
+    Today's Picks). A row that was previously canceled but now appears in
+    ESPN's list (e.g. rescheduled postponement) is restored to 'scheduled'.
+    Final / in_progress rows are never altered. Reconciliation is skipped
+    when ESPN returned zero events for the target_date sport — we can't
+    distinguish an off-day from an outage, so we leave the DB alone.
+    """
     team_cache: dict[str, int] = {}
     count = 0
     season_label = f"{target_date.year}-{target_date.year + 1}"
+    # Unordered team pairs ESPN listed for target_date. Used for reconciliation.
+    espn_pairs_target_date: set[frozenset[int]] = set()
 
     for g in games:
         home_abbr = g["home_team"]
@@ -133,6 +145,9 @@ def _store_games(session: Session, sport: str, target_date: date, games: list[di
 
         game_date = _parse_date(g["date"])
         start_time = _parse_start_time(g["date"])
+
+        if game_date == target_date:
+            espn_pairs_target_date.add(frozenset({home_id, away_id}))
 
         existing = session.query(Game).filter(
             Game.sport == sport,
@@ -160,8 +175,35 @@ def _store_games(session: Session, sport: str, target_date: date, games: list[di
         session.add(game)
         count += 1
 
+    if espn_pairs_target_date:
+        _reconcile_against_espn(session, sport, target_date, espn_pairs_target_date)
+
     session.commit()
     return count
+
+
+def _reconcile_against_espn(session: Session, sport: str, target_date: date,
+                            espn_pairs: set[frozenset[int]]) -> None:
+    """Mark/unmark canceled status for (sport, target_date) rows based on
+    whether ESPN's authoritative list includes the team pair. Caller
+    should only invoke this when ESPN returned at least one event for the
+    target_date sport — otherwise we can't tell an outage from an off-day.
+    """
+    db_games = (
+        session.query(Game)
+        .filter(Game.sport == sport, Game.date == target_date)
+        .all()
+    )
+    for db_game in db_games:
+        if db_game.status in ("final", "in_progress"):
+            continue
+        pair = frozenset({db_game.home_team_id, db_game.away_team_id})
+        if pair in espn_pairs:
+            if db_game.status == "canceled":
+                db_game.status = "scheduled"
+        else:
+            if db_game.status != "canceled":
+                db_game.status = "canceled"
 
 
 def _store_odds(session: Session, sport: str, odds_data: list[dict]) -> int:
