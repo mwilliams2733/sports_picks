@@ -1,0 +1,35 @@
+# Build artifacts and caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Frontend artifacts (rebuilt inside the Docker stage)
+frontend/node_modules/
+frontend/dist/
+
+# Local SQLite databases — never ship developer data
+*.db
+*.db-shm
+*.db-wal
+
+# Local secrets and dev tooling
+.env
+.env.*
+!.env.example
+.git/
+.github/
+.vscode/
+.idea/
+
+# Documentation that doesn't need to be in the runtime image
+docs/
+*.md
+!README.md
+
+# OS noise
+.DS_Store
+Thumbs.db

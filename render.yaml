@@ -1,0 +1,30 @@
+# Render Blueprint — declarative service config.
+# After connecting this repo on https://dashboard.render.com, Render reads
+# this file and provisions everything described below. Re-deploys on push.
+
+services:
+  - type: web
+    name: sports-picks
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # API key for The Odds API. Set the actual value in Render's dashboard
+      # ("Environment" tab) — sync: false keeps it out of source.
+      - key: ODDS_API_KEY
+        sync: false
+
+      # Free-tier instances have no persistent disk; /tmp survives the
+      # lifetime of one container but resets on redeploys / cold restarts.
+      # Acceptable for testing — pipeline rehydrates from ESPN/Odds API.
+      - key: DATABASE_PATH
+        value: /tmp/sports_picks.db
+
+      # CORS allow-list. Frontend is served by the same FastAPI process at
+      # this domain, so cross-origin browser calls aren't expected. Keeping
+      # the deployed origin here makes the rule explicit. Replace
+      # YOUR-SLUG with the actual Render subdomain after first deploy.
+      - key: ALLOWED_ORIGINS
+        value: https://sports-picks.onrender.com
