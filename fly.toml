@@ -1,0 +1,60 @@
+# Fly.io app config. After `flyctl launch --no-deploy`, replace the `app`
+# name below with whatever Fly assigned (or pass --name on launch). All
+# other values are deployment-ready.
+
+# IMPORTANT: app names are globally unique on Fly. Run `flyctl launch
+# --copy-config --name <your-unique-name>` to claim one and Fly will
+# rewrite this line.
+app = "sports-picks"
+
+# Pick the region nearest your friends. Run `flyctl platform regions` to
+# list. Common picks: iad (Washington DC), ord (Chicago), sea (Seattle),
+# lhr (London).
+primary_region = "iad"
+
+# Build the existing multi-stage Dockerfile.
+[build]
+  dockerfile = "Dockerfile"
+
+# Runtime environment. Secrets like ODDS_API_KEY are set separately via
+# `flyctl secrets set ODDS_API_KEY=...` so they never live in source.
+[env]
+  DATABASE_PATH = "/data/sports_picks.db"
+  ENABLE_SCHEDULER = "1"
+  # Update this after first deploy when Fly assigns the actual hostname.
+  ALLOWED_ORIGINS = "https://sports-picks.fly.dev"
+
+# HTTP service: terminate TLS at Fly's edge, force https, route to the
+# internal port the FastAPI container binds to.
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Always-on so the morning_scout cron actually fires at 8 AM ET. With
+  # auto_stop_machines = "off" + min_machines_running = 1, Fly won't
+  # idle the instance.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  # Health check the FastAPI /health endpoint.
+  [[http_service.checks]]
+    interval = "30s"
+    grace_period = "10s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+
+# Smallest VM that comfortably holds FastAPI + scipy + lightgbm at boot.
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
+
+# Persistent volume mounted at /data — survives deploys and machine
+# restarts. The volume name "sports_picks_data" must match the volume
+# you create with `flyctl volumes create sports_picks_data --size 1`.
+[[mounts]]
+  source = "sports_picks_data"
+  destination = "/data"
+  initial_size = "1gb"
