@@ -54,13 +54,14 @@ def _build_window(games: list[dict]) -> dict:
     }
 
 
-def run_pipeline(config_path: str = "config.yaml"):
-    config = load_config(config_path)
-    engine = get_engine(config["database_path"])
-    migrate_api_usage(engine)
-    migrate_game_start_time(engine)
-    Base.metadata.create_all(engine)
+def configure_scheduler(config: dict, engine) -> BackgroundScheduler:
+    """Build a BackgroundScheduler with the standard cron job set, but DO
+    NOT start it — the caller is responsible for `.start()` and matching
+    `.shutdown()`.
 
+    Used both by the standalone run_pipeline() entry point and by the
+    FastAPI lifespan in api/main.py (when ENABLE_SCHEDULER=1).
+    """
     scheduler = BackgroundScheduler(timezone=ET)
     scheduler.add_job(
         lambda: morning_scout(config, engine, scheduler),
@@ -79,6 +80,17 @@ def run_pipeline(config_path: str = "config.yaml"):
         lambda: run_recalibration(config["database_path"]),
         'cron', hour=3, minute=0, id='recalibration', replace_existing=True,
     )
+    return scheduler
+
+
+def run_pipeline(config_path: str = "config.yaml"):
+    config = load_config(config_path)
+    engine = get_engine(config["database_path"])
+    migrate_api_usage(engine)
+    migrate_game_start_time(engine)
+    Base.metadata.create_all(engine)
+
+    scheduler = configure_scheduler(config, engine)
     scheduler.start()
     logger.info("Scheduler started (morning scout at 8 AM ET, recalibration at 3 AM ET)")
     try:

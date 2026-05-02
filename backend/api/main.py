@@ -1,9 +1,13 @@
+import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.database import get_engine, get_session
 from backend.models import Base
+
+logger = logging.getLogger(__name__)
 
 # CORS allow-list. Defaults to local dev origins; override via env var in
 # production (comma-separated). The frontend bundle is served by this same
@@ -20,7 +24,39 @@ def _allowed_origins() -> list[str]:
 
 
 def create_app(db_path: str = "sports_picks.db") -> FastAPI:
-    app = FastAPI(title="Sports Picks API")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Start the APScheduler cron jobs (morning_scout 8/9/10am ET +
+        # 3am recalibration) when ENABLE_SCHEDULER=1. Default off so the
+        # test suite — which constructs hundreds of in-memory FastAPI
+        # apps — doesn't accidentally spawn cron threads.
+        scheduler = None
+        if os.environ.get("ENABLE_SCHEDULER", "0") == "1":
+            try:
+                from backend.config import load_config
+                from backend.pipeline.scheduler import configure_scheduler
+                config_path = os.environ.get("CONFIG_PATH", "config.yaml")
+                config = load_config(config_path)
+                # Honor whatever DB path the app was created with — the
+                # config.yaml default ("sports_picks.db") may be wrong in
+                # deployment (where DATABASE_PATH=/data/sports_picks.db).
+                config["database_path"] = db_path
+                scheduler = configure_scheduler(config, app.state.engine)
+                scheduler.start()
+                app.state.scheduler = scheduler
+                logger.info("APScheduler started inside FastAPI lifespan")
+            except Exception:
+                logger.exception("Failed to start scheduler — continuing without cron jobs")
+                app.state.scheduler = None
+        else:
+            app.state.scheduler = None
+        try:
+            yield
+        finally:
+            if scheduler is not None and scheduler.running:
+                scheduler.shutdown(wait=False)
+
+    app = FastAPI(title="Sports Picks API", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_allowed_origins(),

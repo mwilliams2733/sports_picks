@@ -37,3 +37,9 @@ services:
       # YOUR-SLUG with the actual Render subdomain after first deploy.
       - key: ALLOWED_ORIGINS
         value: https://sports-picks.onrender.com
+
+      # Start APScheduler inside the FastAPI lifespan: 8am ET morning_scout
+      # (with 9/10am retries) + 3am ET recalibration. Always-on starter
+      # plan keeps the process alive so the cron actually fires.
+      - key: ENABLE_SCHEDULER
+        value: "1"
