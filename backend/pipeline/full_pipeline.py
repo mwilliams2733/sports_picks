@@ -234,16 +234,29 @@ def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
     if not home_name or not away_name or not commence:
         return
 
-    # If we can already find this game, nothing to do
-    existing = _find_game_by_teams(session, sport, home_name, away_name)
-    if existing:
-        return
-
     game_date = _parse_date(commence)
 
     # Try to find existing teams by name first
     home_team = session.query(Team).filter(Team.sport == sport, Team.name == home_name).first()
     away_team = session.query(Team).filter(Team.sport == sport, Team.name == away_name).first()
+
+    # If both teams already exist, check for an exact (sport, date, teams)
+    # match BEFORE creating a duplicate — and don't filter by status here.
+    # Once a game grades to 'final', the previous lookup-by-status would miss
+    # it and re-insert a phantom 'scheduled' duplicate on the next Odds tick.
+    if home_team and away_team:
+        existing = (
+            session.query(Game)
+            .filter(
+                Game.sport == sport,
+                Game.date == game_date,
+                Game.home_team_id == home_team.id,
+                Game.away_team_id == away_team.id,
+            )
+            .first()
+        )
+        if existing:
+            return
 
     # Create teams only if they don't exist (primarily for boxing/MMA fighters)
     if not home_team:
