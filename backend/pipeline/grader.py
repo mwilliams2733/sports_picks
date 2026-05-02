@@ -143,3 +143,60 @@ def capture_closing_odds(session, pick_result, game_id: int, pick_type: str, pic
     elif pick_type == "over_under":
         pick_result.line_at_close = closing.over_under
         pick_result.odds_at_close = odds_at_pick
+
+
+def _apply_combat_elo_update(session, game) -> None:
+    """K=24 binary-outcome Elo update for combat sports.
+
+    home_score=1, away_score=0 means home won; reversed means away won.
+    Both = 1 indicates a draw (outcome 0.5 for both).
+    """
+    from backend.analysis.elo import get_k_factor
+    from backend.models import EloRating
+    K = get_k_factor(game.sport)
+
+    home_elo_row = (session.query(EloRating)
+                    .filter(EloRating.team_id == game.home_team_id, EloRating.sport == game.sport)
+                    .first())
+    away_elo_row = (session.query(EloRating)
+                    .filter(EloRating.team_id == game.away_team_id, EloRating.sport == game.sport)
+                    .first())
+    if home_elo_row is None or away_elo_row is None:
+        return  # missing Elo rows; skip rather than crash
+
+    h, a = home_elo_row.rating, away_elo_row.rating
+    expected_home = 1 / (1 + 10 ** ((a - h) / 400))
+    if game.home_score == game.away_score:
+        actual_home = 0.5
+    elif (game.home_score or 0) > (game.away_score or 0):
+        actual_home = 1.0
+    else:
+        actual_home = 0.0
+    delta = K * (actual_home - expected_home)
+    home_elo_row.rating += delta
+    away_elo_row.rating -= delta
+
+
+def grade_completed_games(session) -> None:
+    """Apply post-game updates for all finalized games.
+
+    Currently handles combat-sports Elo updates only. Team-sport Elo is
+    managed by the backtesting/historical path and is not touched here.
+
+    NOTE: This function is not yet wired into the live scheduler. Combat-8
+    (UFCStats event ingest) should call this after committing fight outcomes,
+    or a follow-up task should add a post-grading step in `scheduler._run_window`.
+    Until then, fighter Elo will remain at seed values in production.
+    """
+    from backend.models import Game
+    final_games = (
+        session.query(Game)
+        .filter(Game.status == "final",
+                Game.home_score.isnot(None),
+                Game.away_score.isnot(None))
+        .all()
+    )
+    for game in final_games:
+        if game.sport in ("mma", "boxing"):
+            _apply_combat_elo_update(session, game)
+    session.commit()

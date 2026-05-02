@@ -89,3 +89,88 @@ async def test_run_mlb_window_fetches_pitcher_scores(httpx_mock):
     assert ("BOS", "NYY") in scores
     assert scores[("BOS", "NYY")]["home"] > 0.6  # ace-ish ERA 2.50
     assert scores[("BOS", "NYY")]["away"] < 0.4  # bad outing ERA 5.50
+
+
+@pytest.mark.asyncio
+async def test_ufcstats_weekly_ingest_updates_fight_outcomes(httpx_mock, tmp_path):
+    """Weekly UFCStats run: fetches event HTML, parses fights, upserts Game
+    rows with binary home_score/away_score, creates Team + EloRating rows for
+    new fighters. Grader (separate path) applies Elo updates on next run."""
+    from pathlib import Path
+    from datetime import date as _date
+    from backend.pipeline.scheduler import ingest_recent_ufc_event
+    from backend.database import get_engine, get_session
+    from backend.models import Team, Game, EloRating
+
+    fixture_html = (Path(__file__).parent / "fixtures" / "ufcstats_event.html").read_text(encoding="utf-8")
+    httpx_mock.add_response(
+        url="http://ufcstats.com/event-details/abc123",
+        text=fixture_html,
+    )
+
+    db_path = str(tmp_path / "ufc_ingest.db")
+    summary = await ingest_recent_ufc_event(
+        event_url="http://ufcstats.com/event-details/abc123",
+        event_date=_date(2026, 4, 26),
+        db_path=db_path,
+    )
+
+    # Fixture has 2 fights, 4 unique fighters.
+    assert summary["fights_ingested"] == 2
+    assert summary["fighters_created_or_matched"] == 4
+
+    engine = get_engine(db_path)
+    session = get_session(engine)
+    try:
+        fighters = {t.name for t in session.query(Team).filter(Team.sport == "mma").all()}
+        assert fighters == {"Alex Pereira", "Jamahal Hill", "Charles Oliveira", "Arman Tsarukyan"}
+
+        # Each new fighter gets an EloRating row at 1500 (grader updates later).
+        elo_rows = session.query(EloRating).filter(EloRating.sport == "mma").all()
+        assert len(elo_rows) == 4
+        assert all(er.rating == 1500.0 for er in elo_rows)
+
+        games = session.query(Game).filter(Game.sport == "mma", Game.date == _date(2026, 4, 26)).all()
+        assert len(games) == 2
+        # Both finalized with binary 1/0 scores.
+        for g in games:
+            assert g.status == "final"
+            assert {g.home_score, g.away_score} == {0, 1}
+    finally:
+        session.close()
+
+
+@pytest.mark.asyncio
+async def test_ufcstats_ingest_is_idempotent_on_rerun(httpx_mock, tmp_path):
+    """Running the same event twice should not create duplicate Game rows —
+    second run updates existing rows instead of inserting."""
+    from pathlib import Path
+    from datetime import date as _date
+    from backend.pipeline.scheduler import ingest_recent_ufc_event
+    from backend.database import get_engine, get_session
+    from backend.models import Game
+
+    fixture_html = (Path(__file__).parent / "fixtures" / "ufcstats_event.html").read_text(encoding="utf-8")
+    # Two responses — one per call.
+    httpx_mock.add_response(url="http://ufcstats.com/event-details/abc123", text=fixture_html)
+    httpx_mock.add_response(url="http://ufcstats.com/event-details/abc123", text=fixture_html)
+
+    db_path = str(tmp_path / "ufc_idempotent.db")
+    await ingest_recent_ufc_event(
+        event_url="http://ufcstats.com/event-details/abc123",
+        event_date=_date(2026, 4, 26),
+        db_path=db_path,
+    )
+    await ingest_recent_ufc_event(
+        event_url="http://ufcstats.com/event-details/abc123",
+        event_date=_date(2026, 4, 26),
+        db_path=db_path,
+    )
+
+    engine = get_engine(db_path)
+    session = get_session(engine)
+    try:
+        games = session.query(Game).filter(Game.sport == "mma").all()
+        assert len(games) == 2  # not 4 — second run upserted, didn't duplicate
+    finally:
+        session.close()

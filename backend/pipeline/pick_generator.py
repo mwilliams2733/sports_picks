@@ -2,12 +2,13 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from backend.models import Game, PickModel, StrategyModel, Odds, TeamStat, EloRating
-from backend.data_types import GameData, TeamStats, OddsSnapshot
+from backend.data_types import GameData, TeamStats, OddsSnapshot, FighterStats
 from backend.analysis.variants.ensemble import EnsembleStrategy
 from backend.analysis.variants.recent_form import RecentFormStrategy
 from backend.analysis.variants.value_only import ValueOnlyStrategy
 from backend.analysis.variants.sport_specific import SportSpecificStrategy
 from backend.analysis.variants.prop_value import PropValueStrategy
+from backend.analysis.variants.combat_sports import CombatSportsStrategy
 
 STRATEGY_MAP = {
     "ensemble": EnsembleStrategy,
@@ -15,6 +16,7 @@ STRATEGY_MAP = {
     "value_only": ValueOnlyStrategy,
     "sport_specific": SportSpecificStrategy,
     "prop_value": PropValueStrategy,
+    "combat_sports": CombatSportsStrategy,
 }
 
 def generate_and_store_picks(session: Session, strategy_id: int,
@@ -26,11 +28,20 @@ def generate_and_store_picks(session: Session, strategy_id: int,
     config = json.loads(strat_row.config_json)
     strategy_cls = STRATEGY_MAP.get(strat_row.name)
     if not strategy_cls: return 0
-    strategy = strategy_cls(strat_row.name, config)
     games = session.query(Game).filter(Game.date == target_date, Game.status == "scheduled").all()
     count = 0
     for game in games:
+        # Combat sports always route to CombatSportsStrategy because the team-based
+        # strategies have no signal for individual fighters. For team sports, use
+        # whichever strategy the user configured.
+        if game.sport in ("mma", "boxing"):
+            strategy = CombatSportsStrategy(strat_row.name, config)
+        else:
+            strategy = strategy_cls(strat_row.name, config)
         game_data = _build_game_data(session, game, pitcher_scores=pitcher_scores)
+        if game.sport in ("mma", "boxing"):
+            game_data.home_fighter = _build_fighter_stats(session, game.home_team_id, game.sport, game.date)
+            game_data.away_fighter = _build_fighter_stats(session, game.away_team_id, game.sport, game.date)
         picks = strategy.predict(game_data)
         for pick in picks:
             if pick.confidence >= 1:
@@ -134,6 +145,48 @@ def _build_game_data(session: Session, game,
     return GameData(game_id=game.id, sport=game.sport, date=game.date,
         home_team_id=game.home_team_id, away_team_id=game.away_team_id,
         home_stats=home_stats, away_stats=away_stats, odds=odds, week=game.week)
+
+def _build_fighter_stats(session: Session, fighter_id: int, sport: str, before_date) -> FighterStats:
+    """Build FighterStats from EloRating + last-5-fights history before `before_date`."""
+    elo_row = (session.query(EloRating)
+               .filter(EloRating.team_id == fighter_id, EloRating.sport == sport)
+               .first())
+    elo_rating = elo_row.rating if elo_row else 1500.0
+
+    past_fights = (session.query(Game)
+                   .filter(Game.sport == sport, Game.status == "final",
+                           Game.date < before_date,
+                           ((Game.home_team_id == fighter_id) | (Game.away_team_id == fighter_id)))
+                   .order_by(Game.date.desc())
+                   .limit(5).all())
+    if not past_fights:
+        return FighterStats(elo_rating=elo_rating, recent_form_score=0.5,
+                            opponent_avg_elo=None, fights_count=0, days_since_last_fight=None)
+    wins = 0
+    opponent_elos: list[float] = []
+    for f in past_fights:
+        if f.home_team_id == fighter_id:
+            won = (f.home_score or 0) > (f.away_score or 0)
+            opp_id = f.away_team_id
+        else:
+            won = (f.away_score or 0) > (f.home_score or 0)
+            opp_id = f.home_team_id
+        if won:
+            wins += 1
+        opp_elo = (session.query(EloRating)
+                   .filter(EloRating.team_id == opp_id, EloRating.sport == sport)
+                   .first())
+        if opp_elo:
+            opponent_elos.append(opp_elo.rating)
+    days_since = (before_date - past_fights[0].date).days
+    return FighterStats(
+        elo_rating=elo_rating,
+        recent_form_score=wins / len(past_fights),
+        opponent_avg_elo=sum(opponent_elos) / len(opponent_elos) if opponent_elos else None,
+        fights_count=len(past_fights),
+        days_since_last_fight=days_since,
+    )
+
 
 def _get_team_stats(session: Session, team_id: int, sport: str) -> TeamStats:
     stats_rows = session.query(TeamStat).filter(TeamStat.team_id == team_id).all()

@@ -63,3 +63,30 @@ def test_team_stats_pitcher_skill_score_defaults_to_none():
         pace=100.0, strength_of_schedule=0.5, elo_rating=1500, rest_days=1,
     )
     assert stats.pitcher_skill_score is None
+
+
+def test_fighter_stats_carries_elo_form_and_opponent_quality():
+    from backend.data_types import FighterStats
+    fs = FighterStats(
+        elo_rating=1650.0,
+        recent_form_score=0.78,
+        opponent_avg_elo=1520.0,
+        fights_count=22,
+        days_since_last_fight=120,
+    )
+    assert fs.elo_rating == 1650.0
+    assert fs.recent_form_score == 0.78
+    assert fs.opponent_avg_elo == 1520.0
+    assert fs.fights_count == 22
+    assert fs.days_since_last_fight == 120
+
+
+def test_fighter_stats_handles_unrated_rookie():
+    """A debut fighter has no Elo, no opponents to average — defaults must be sensible."""
+    from backend.data_types import FighterStats
+    fs = FighterStats(elo_rating=1500.0, recent_form_score=0.5,
+                      opponent_avg_elo=None, fights_count=0,
+                      days_since_last_fight=None)
+    assert fs.opponent_avg_elo is None
+    assert fs.fights_count == 0
+    assert fs.days_since_last_fight is None

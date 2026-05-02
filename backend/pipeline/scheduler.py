@@ -54,13 +54,14 @@ def _build_window(games: list[dict]) -> dict:
     }
 
 
-def run_pipeline(config_path: str = "config.yaml"):
-    config = load_config(config_path)
-    engine = get_engine(config["database_path"])
-    migrate_api_usage(engine)
-    migrate_game_start_time(engine)
-    Base.metadata.create_all(engine)
+def configure_scheduler(config: dict, engine) -> BackgroundScheduler:
+    """Build a BackgroundScheduler with the standard cron job set, but DO
+    NOT start it — the caller is responsible for `.start()` and matching
+    `.shutdown()`.
 
+    Used both by the standalone run_pipeline() entry point and by the
+    FastAPI lifespan in api/main.py (when ENABLE_SCHEDULER=1).
+    """
     scheduler = BackgroundScheduler(timezone=ET)
     scheduler.add_job(
         lambda: morning_scout(config, engine, scheduler),
@@ -79,6 +80,17 @@ def run_pipeline(config_path: str = "config.yaml"):
         lambda: run_recalibration(config["database_path"]),
         'cron', hour=3, minute=0, id='recalibration', replace_existing=True,
     )
+    return scheduler
+
+
+def run_pipeline(config_path: str = "config.yaml"):
+    config = load_config(config_path)
+    engine = get_engine(config["database_path"])
+    migrate_api_usage(engine)
+    migrate_game_start_time(engine)
+    Base.metadata.create_all(engine)
+
+    scheduler = configure_scheduler(config, engine)
     scheduler.start()
     logger.info("Scheduler started (morning scout at 8 AM ET, recalibration at 3 AM ET)")
     try:
@@ -301,6 +313,92 @@ async def fetch_pitcher_scores_for_date(target_date) -> dict[tuple[str, str], di
     finally:
         await collector.close()
     return out
+
+
+async def ingest_recent_ufc_event(event_url: str, event_date,
+                                  db_path: str = "sports_picks.db") -> dict:
+    """Fetch a UFCStats event page, parse fights, upsert Team/EloRating/Game rows.
+
+    Idempotent: re-running for the same event updates existing Game rows rather
+    than inserting duplicates. Fighter pairs are matched as an unordered set —
+    {home_team_id, away_team_id} — because UFCStats can flip the corner order
+    between the announce page and the result page.
+
+    The grader (separate path) applies Elo updates when these Game rows are
+    next picked up — this function does NOT mutate Elo directly.
+    """
+    from backend.collectors.ufcstats_scraper import fetch_event_html, parse_event_fights
+    from backend.models import Team, Game, EloRating
+    from sqlalchemy import or_, and_
+
+    engine = get_engine(db_path)
+    Base.metadata.create_all(engine)
+    session = get_session(engine)
+    try:
+        html = await fetch_event_html(event_url)
+        fights = parse_event_fights(html)
+
+        def _upsert_fighter(name: str) -> Team:
+            existing = session.query(Team).filter(Team.sport == "mma", Team.name == name).first()
+            if existing:
+                return existing
+            t = Team(name=name, abbreviation=name[:32], sport="mma")
+            session.add(t); session.flush()
+            session.add(EloRating(team_id=t.id, sport="mma", rating=1500.0))
+            session.flush()
+            return t
+
+        fights_ingested = 0
+        fighters_seen: set[int] = set()
+        for f in fights:
+            a = _upsert_fighter(f["fighter_a_name"])
+            b = _upsert_fighter(f["fighter_b_name"])
+            fighters_seen.update([a.id, b.id])
+            if f["winner"] == "fighter_a":
+                home_score, away_score = 1, 0
+            elif f["winner"] == "fighter_b":
+                home_score, away_score = 0, 1
+            else:  # draw
+                home_score, away_score = 1, 1
+
+            # Match unordered fighter pair so re-ingestion with corner flipped
+            # still finds the same row.
+            existing_game = (
+                session.query(Game)
+                .filter(
+                    Game.sport == "mma",
+                    Game.date == event_date,
+                    or_(
+                        and_(Game.home_team_id == a.id, Game.away_team_id == b.id),
+                        and_(Game.home_team_id == b.id, Game.away_team_id == a.id),
+                    ),
+                )
+                .first()
+            )
+            if existing_game:
+                # Preserve the original corner orientation; flip scores if needed.
+                if existing_game.home_team_id == a.id:
+                    existing_game.home_score = home_score
+                    existing_game.away_score = away_score
+                else:
+                    existing_game.home_score = away_score
+                    existing_game.away_score = home_score
+                existing_game.status = "final"
+            else:
+                session.add(Game(
+                    sport="mma", season=str(event_date.year), date=event_date,
+                    home_team_id=a.id, away_team_id=b.id,
+                    home_score=home_score, away_score=away_score, status="final",
+                ))
+            fights_ingested += 1
+
+        session.commit()
+        return {
+            "fights_ingested": fights_ingested,
+            "fighters_created_or_matched": len(fighters_seen),
+        }
+    finally:
+        session.close()
 
 
 def _remap_pitcher_scores_to_game_ids(session, scores_by_abbr, target_date) -> dict[int, dict[str, float]]:

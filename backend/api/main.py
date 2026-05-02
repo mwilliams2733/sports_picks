@@ -1,11 +1,69 @@
+import logging
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.database import get_engine, get_session
 from backend.models import Base
 
+logger = logging.getLogger(__name__)
+
+# CORS allow-list. Defaults to local dev origins; override via env var in
+# production (comma-separated). The frontend bundle is served by this same
+# FastAPI process in deployment, so cross-origin browser calls only happen
+# in local dev (Vite on :5173 → uvicorn on :8000).
+_DEFAULT_DEV_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+
+def _allowed_origins() -> list[str]:
+    raw = os.environ.get("ALLOWED_ORIGINS")
+    if not raw:
+        return _DEFAULT_DEV_ORIGINS
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 def create_app(db_path: str = "sports_picks.db") -> FastAPI:
-    app = FastAPI(title="Sports Picks API")
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Start the APScheduler cron jobs (morning_scout 8/9/10am ET +
+        # 3am recalibration) when ENABLE_SCHEDULER=1. Default off so the
+        # test suite — which constructs hundreds of in-memory FastAPI
+        # apps — doesn't accidentally spawn cron threads.
+        scheduler = None
+        if os.environ.get("ENABLE_SCHEDULER", "0") == "1":
+            try:
+                from backend.config import load_config
+                from backend.pipeline.scheduler import configure_scheduler
+                config_path = os.environ.get("CONFIG_PATH", "config.yaml")
+                config = load_config(config_path)
+                # Honor whatever DB path the app was created with — the
+                # config.yaml default ("sports_picks.db") may be wrong in
+                # deployment (where DATABASE_PATH=/data/sports_picks.db).
+                config["database_path"] = db_path
+                scheduler = configure_scheduler(config, app.state.engine)
+                scheduler.start()
+                app.state.scheduler = scheduler
+                logger.info("APScheduler started inside FastAPI lifespan")
+            except Exception:
+                logger.exception("Failed to start scheduler — continuing without cron jobs")
+                app.state.scheduler = None
+        else:
+            app.state.scheduler = None
+        try:
+            yield
+        finally:
+            if scheduler is not None and scheduler.running:
+                scheduler.shutdown(wait=False)
+
+    app = FastAPI(title="Sports Picks API", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_allowed_origins(),
+        allow_methods=["*"],
+        allow_headers=["*"],
+        allow_credentials=False,
+    )
     engine = get_engine(db_path)
     from backend.database import migrate_api_usage, migrate_game_start_time, migrate_player_stat_receptions, migrate_elo_history, migrate_parlays, migrate_pick_result_line_at_close, migrate_pick_model_prob
     migrate_api_usage(engine)
@@ -45,7 +103,6 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
     from backend.api.websocket import websocket_endpoint
     app.websocket("/ws")(websocket_endpoint)
 
-    import os
     static_dir = os.path.join(os.path.dirname(__file__), "../../frontend/dist")
     if os.path.exists(static_dir):
         from fastapi.staticfiles import StaticFiles
@@ -70,4 +127,7 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
 
     return app
 
-app = create_app()
+# DATABASE_PATH can be overridden in deployment (e.g. Render's /tmp on free
+# tier, or a mounted disk on paid). Defaults to the project-root SQLite file
+# used in local development.
+app = create_app(os.environ.get("DATABASE_PATH", "sports_picks.db"))
