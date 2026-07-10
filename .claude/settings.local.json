@@ -52,7 +52,26 @@
       "Bash(cd /c/Users/mwill/OneDrive/Documents/mwilliams2733/sports_picks/frontend && npm install 2>&1)",
       "Bash(cd /c/Users/mwill/OneDrive/Documents/mwilliams2733/sports_picks/frontend && npm install react-router-dom recharts 2>&1)",
       "Bash(cd /c/Users/mwill/OneDrive/Documents/mwilliams2733/sports_picks/frontend && npm run build 2>&1)",
-      "Bash(chmod +x /c/Users/mwill/OneDrive/Documents/mwilliams2733/sports_picks/start.sh)"
+      "Bash(chmod +x /c/Users/mwill/OneDrive/Documents/mwilliams2733/sports_picks/start.sh)",
+      "Bash(cp .claude/claude_settings_backup/settings.local.json .claude/settings.local.json)",
+      "Bash(rm -rf .claude/claude_settings_backup)",
+      "Bash(git commit -m ' *)",
+      "Bash(git rev-list *)",
+      "Bash(git push *)",
+      "Bash(git ls-remote *)",
+      "Bash(curl -s -X POST \"http://127.0.0.1:8000/pipeline/run\" -w \"\\\\n[HTTP %{http_code}, %{time_total}s]\\\\n\")",
+      "Bash(curl -s \"http://127.0.0.1:8000/picks/today\")",
+      "Bash(curl -s \"http://127.0.0.1:8000/games/today\")",
+      "Bash(.venv/Scripts/python.exe -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('games:',len\\(d\\)\\); print\\(json.dumps\\(d[:2],indent=2\\)[:800]\\) if d else None\")",
+      "Bash(curl -s \"http://127.0.0.1:8000/backtest/strategies\")",
+      "Bash(.venv/Scripts/python.exe -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(s.get\\('id'\\), s.get\\('strategy_type'\\), 'active=' + str\\(s.get\\('is_active'\\)\\), s.get\\('name'\\)\\) for s in \\(d if isinstance\\(d,list\\) else d.get\\('strategies',[]\\)\\)]\")",
+      "Bash(.venv/Scripts/python.exe -)",
+      "Bash(.venv/Scripts/python.exe _generate_upcoming.py)",
+      "Bash(.venv/Scripts/python.exe -m pytest backend/tests/test_prop_pipeline_dedup.py -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest backend/tests/test_prop_pipeline_dedup.py backend/tests/test_prop_analyzer.py backend/tests/test_props_api_analysis.py backend/tests/test_prop_value_strategy.py -q)",
+      "Bash(.venv/Scripts/python.exe _regen_props.py)",
+      "Bash(.venv/Scripts/python.exe -m pytest backend/tests -q)",
+      "PowerShell(\\(Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned\\) ; \\(& c:\\\\Users\\\\mwill\\\\OneDrive\\\\Documents\\\\mwilliams2733\\\\sports_picks\\\\.venv\\\\Scripts\\\\Activate.ps1\\))"
     ]
   }
 }

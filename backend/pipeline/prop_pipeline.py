@@ -8,8 +8,26 @@ from backend.collectors.player_stats.espn_stats_source import EspnStatsSource
 from backend.collectors.player_stats.balldontlie_source import BallDontLieSource
 from backend.collectors.player_stats.mysportsfeeds_source import MySportsFeedsSource
 from backend.analysis.prop_analyzer import PropAnalyzer
+from backend.analysis.odds_utils import calculate_payout
+from backend.data_types import PropAnalysis
 
 logger = logging.getLogger(__name__)
+
+
+def _dedup_prop_analyses(analyses: list[PropAnalysis]) -> list[PropAnalysis]:
+    """Collapse the same prop offered by multiple bookmakers into one pick.
+
+    A prop is stored once per book, so the same (game, player, market, outcome,
+    line) appears N times with an identical edge (edge ignores odds). Keep only
+    the row with the best price (highest payout) for the bettor.
+    """
+    best: dict[tuple, PropAnalysis] = {}
+    for a in analyses:
+        key = (a.game_id, a.player_name, a.market, a.outcome, a.line)
+        cur = best.get(key)
+        if cur is None or calculate_payout(a.odds) > calculate_payout(cur.odds):
+            best[key] = a
+    return list(best.values())
 
 def build_default_collector() -> PlayerStatsCollector:
     return PlayerStatsCollector({
@@ -114,8 +132,8 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id)
                 except Exception:
                     pass
 
-    picks_generated = 0
     props_analyzed = 0
+    winning: list[PropAnalysis] = []
 
     for prop in props:
         season_avg = session.query(PlayerStat).filter_by(
@@ -150,7 +168,15 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id)
                                     opponent_def_rating=opponent_def,
                                     game_script=game_script)
         props_analyzed += 1
-        if analysis and analysis.confidence >= 1 and strategy_id:
+        if analysis and analysis.confidence >= 1:
+            winning.append(analysis)
+
+    # Collapse the same prop offered by multiple bookmakers into one pick
+    # (best price), then persist. Picks are only stored when a prop strategy
+    # is active (strategy_id set).
+    picks_generated = 0
+    if strategy_id:
+        for analysis in _dedup_prop_analyses(winning):
             pick = PickModel(
                 game_id=analysis.game_id, strategy_id=strategy_id,
                 pick_type="prop",
