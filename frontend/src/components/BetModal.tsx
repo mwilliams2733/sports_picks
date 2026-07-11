@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useUserStore } from '../stores/userStore'
 import { api } from '../api/client'
 import { useQueryClient } from '@tanstack/react-query'
+import { useToast } from './Toast'
 import type { UserProfile } from '../types'
 
 interface BetModalProps {
@@ -23,6 +24,7 @@ export default function BetModal({
 }: BetModalProps) {
   const { currentUserName, setCurrentUserName } = useUserStore()
   const queryClient = useQueryClient()
+  const { toast } = useToast()
   const [stake, setStake] = useState(suggestedStake)
   const [userName, setUserName] = useState('')
   const [userId, setUserId] = useState<number | null>(null)
@@ -50,8 +52,9 @@ export default function BetModal({
       const res = await api.users.create(userName.trim())
       setUserId(res.id)
       setCurrentUserName(userName.trim())
+      toast(`Welcome, ${userName.trim()}!`, 'success')
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : 'Failed to create user')
+      toast(e instanceof Error ? e.message : 'Failed to create user', 'error')
     }
   }
 
@@ -70,8 +73,9 @@ export default function BetModal({
       })
       setResult(res)
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      toast('Bet placed', 'success')
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : 'Failed to place bet')
+      toast(e instanceof Error ? e.message : 'Failed to place bet', 'error')
     } finally {
       setSubmitting(false)
     }
