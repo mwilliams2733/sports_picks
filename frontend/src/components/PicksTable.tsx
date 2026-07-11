@@ -1,5 +1,6 @@
 import type { PickData } from '../types';
 import ConfidenceStars from './ConfidenceStars';
+import { EDGE_TOOLTIP, CONFIDENCE_TOOLTIP } from '../constants/tooltips';
 
 interface Props { picks: PickData[]; showResult?: boolean; onBet?: (pick: PickData) => void; }
 
@@ -40,8 +41,8 @@ export default function PicksTable({ picks, showResult = false, onBet }: Props) 
             <th>Game</th>
             <th>Pick</th>
             <th>Type</th>
-            <th>Edge</th>
-            <th>Confidence</th>
+            <th title={EDGE_TOOLTIP}>Edge</th>
+            <th title={CONFIDENCE_TOOLTIP}>Confidence</th>
             <th>Odds</th>
             {showResult && <th>Result</th>}
             {onBet && <th>Action</th>}

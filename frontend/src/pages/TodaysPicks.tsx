@@ -5,6 +5,7 @@ import { useTodaysPicks } from '../hooks/useTodaysPicks';
 import { useTopProps } from '../hooks/useTopProps';
 import { useHiddenGames } from '../hooks/useHiddenGames';
 import { SPORTS } from '../constants/sports';
+import { EDGE_TOOLTIP, CONFIDENCE_TOOLTIP } from '../constants/tooltips';
 import type { PropData, PickData } from '../types';
 import SummaryBar from '../components/SummaryBar';
 import GameCard from '../components/GameCard';
@@ -186,8 +187,8 @@ export default function TodaysPicks() {
                   <th>Pick</th>
                   <th>Line</th>
                   <th>Projection</th>
-                  <th>Edge</th>
-                  <th>Confidence</th>
+                  <th title={EDGE_TOOLTIP}>Edge</th>
+                  <th title={CONFIDENCE_TOOLTIP}>Confidence</th>
                   <th>Action</th>
                 </tr>
               </thead>

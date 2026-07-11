@@ -1,6 +1,8 @@
+import { CONFIDENCE_TOOLTIP } from '../constants/tooltips';
+
 export default function ConfidenceStars({ rating }: { rating: number }) {
   return (
-    <span className="stars" title={`${rating}/5 confidence`}>
+    <span className="stars" title={`${rating}/5 confidence — ${CONFIDENCE_TOOLTIP}`}>
       {Array.from({ length: 5 }, (_, i) => (
         <span key={i} className={i < rating ? 'star-filled' : 'star-empty'}>
           {i < rating ? '\u2605' : '\u2606'}

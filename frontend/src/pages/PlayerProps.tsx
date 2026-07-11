@@ -6,6 +6,7 @@ import type { PropData } from '../types';
 import ConfidenceStars from '../components/ConfidenceStars';
 import BetModal from '../components/BetModal';
 import { SPORTS } from '../constants/sports';
+import { EDGE_TOOLTIP, CONFIDENCE_TOOLTIP } from '../constants/tooltips';
 
 function formatOdds(odds: number): string {
   return odds > 0 ? `+${odds}` : `${odds}`;
@@ -153,8 +154,8 @@ export default function PlayerProps() {
                 <th>Market</th>
                 <th>Line</th>
                 <th>Projection</th>
-                <th>Edge</th>
-                <th>Confidence</th>
+                <th title={EDGE_TOOLTIP}>Edge</th>
+                <th title={CONFIDENCE_TOOLTIP}>Confidence</th>
                 <th>Odds</th>
                 <th>Action</th>
               </tr>

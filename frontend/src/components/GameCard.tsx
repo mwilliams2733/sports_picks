@@ -1,5 +1,6 @@
 import type { GameOddsData, PickData } from '../types'
 import ConfidenceStars from './ConfidenceStars'
+import { EDGE_TOOLTIP } from '../constants/tooltips'
 
 interface Props {
   game: GameOddsData
@@ -111,7 +112,7 @@ export default function GameCard({ game, picks, onBet, onHide }: Props) {
           <div className="game-card-pick-info">
             <span className="game-card-pick-value">{topPick.pick_value}</span>
             <ConfidenceStars rating={topPick.confidence} />
-            <span className="game-card-edge">+{topPick.edge_pct}%</span>
+            <span className="game-card-edge" title={EDGE_TOOLTIP}>+{topPick.edge_pct}%</span>
           </div>
           <button
             className="btn-bet"

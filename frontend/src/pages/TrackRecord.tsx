@@ -5,6 +5,7 @@ import PerformanceChart from '../components/PerformanceChart';
 import CalibrationChart from '../components/CalibrationChart';
 import ConfidenceStars from '../components/ConfidenceStars';
 import { SPORTS } from '../constants/sports';
+import { CONFIDENCE_TOOLTIP } from '../constants/tooltips';
 
 const RANGES = ['7d', '14d', '30d', '90d', 'all'] as const;
 
@@ -135,7 +136,7 @@ export default function TrackRecord() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Confidence</th>
+                  <th title={CONFIDENCE_TOOLTIP}>Confidence</th>
                   <th>Record</th>
                   <th>Win Rate</th>
                   <th>Profit</th>
@@ -172,8 +173,8 @@ export default function TrackRecord() {
               <th>Sport</th>
               <th>Pick</th>
               <th>Result</th>
-              <th>CLV</th>
-              <th>Confidence</th>
+              <th title="CLV: closing-line value — how much the line moved in your favor between when you picked and game start.">CLV</th>
+              <th title={CONFIDENCE_TOOLTIP}>Confidence</th>
             </tr>
           </thead>
           <tbody>
