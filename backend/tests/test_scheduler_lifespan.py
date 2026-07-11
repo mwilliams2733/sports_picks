@@ -87,6 +87,69 @@ def test_morning_scout_grades_completed_combat_games():
     assert abs(home_elo - 1512.0) < 0.5, f"morning_scout should have graded the MMA game, got {home_elo}"
 
 
+def test_morning_scout_removes_stale_window_jobs_after_recluster(monkeypatch):
+    """If an earlier run today clustered games into 2 windows and a later
+    run (9/10 AM retry) reclusters them into just 1 (e.g. a game got moved
+    closer together), the orphaned window_nba_{today}_1 job must be removed
+    rather than left to linger forever."""
+    from datetime import date as _date, datetime, timezone, timedelta
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from backend.database import get_engine, get_session
+    from backend.models import Base, Team, Game
+    from backend.pipeline import scheduler as scheduler_module
+
+    async def _noop_fetch_games(session, sports, target_date):
+        return None
+
+    monkeypatch.setattr(scheduler_module, "fetch_and_store_games", _noop_fetch_games)
+
+    engine = get_engine(":memory:")
+    Base.metadata.create_all(engine)
+    session = get_session(engine)
+    session.add_all([
+        Team(id=1, name="A", abbreviation="A", sport="nba"),
+        Team(id=2, name="B", abbreviation="B", sport="nba"),
+    ])
+    session.flush()
+
+    today = _date.today()
+    far_future_base = datetime.now(tz=timezone.utc) + timedelta(hours=6)
+    session.add_all([
+        Game(id=1, sport="nba", season="2025-26", date=today,
+             home_team_id=1, away_team_id=2, status="scheduled",
+             start_time=far_future_base),
+        Game(id=2, sport="nba", season="2025-26", date=today,
+             home_team_id=1, away_team_id=2, status="scheduled",
+             start_time=far_future_base + timedelta(hours=3)),
+    ])
+    session.commit()
+    session.close()
+
+    config = {"seasons": {"nba": {"start": "01-01", "end": "12-31"}}, "odds_budget": {}}
+    aps_scheduler = BackgroundScheduler()
+    try:
+        # First pass: games 3 hours apart cluster into 2 separate windows.
+        scheduler_module.morning_scout(config, engine, aps_scheduler)
+        job_ids = {j.id for j in aps_scheduler.get_jobs()}
+        assert f"window_nba_{today}_0" in job_ids
+        assert f"window_nba_{today}_1" in job_ids
+
+        # Recluster: pull game 2 close to game 1 so they fall in one window.
+        verify_session = get_session(engine)
+        game_2 = verify_session.query(Game).filter(Game.id == 2).first()
+        game_2.start_time = far_future_base + timedelta(minutes=10)
+        verify_session.commit()
+        verify_session.close()
+
+        scheduler_module.morning_scout(config, engine, aps_scheduler)
+        job_ids = {j.id for j in aps_scheduler.get_jobs()}
+        assert f"window_nba_{today}_0" in job_ids
+        assert f"window_nba_{today}_1" not in job_ids, "stale window job must be removed"
+    finally:
+        if aps_scheduler.running:
+            aps_scheduler.shutdown(wait=False)
+
+
 def test_create_app_attaches_scheduler_when_enabled(monkeypatch, tmp_path):
     """With ENABLE_SCHEDULER=1, the lifespan starts an APScheduler instance
     and stops it on shutdown. Use TestClient context manager to drive the

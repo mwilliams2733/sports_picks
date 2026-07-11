@@ -151,6 +151,22 @@ def morning_scout(config, engine, scheduler, is_retry=False):
                 continue
             game_dicts = [{"id": g.id, "start_time": g.start_time} for g in games]
             windows = cluster_game_windows(game_dicts)
+
+            # If an earlier run today (8/9/10 AM retries) clustered a
+            # different number/order of windows, drop any window job for
+            # this sport/day that the fresh clustering no longer produces —
+            # otherwise it's orphaned (never fires, never gets cleaned up).
+            window_prefix = f"window_{sport}_{today}_"
+            fresh_job_ids = {f"{window_prefix}{i}" for i in range(len(windows))}
+            stale_job_ids = {j for j in existing_jobs
+                              if j.startswith(window_prefix) and j not in fresh_job_ids}
+            for stale_id in stale_job_ids:
+                try:
+                    scheduler.remove_job(stale_id)
+                    logger.info(f"Removed stale window job {stale_id} (recluster shifted windows)")
+                except Exception:
+                    pass
+
             for i, window in enumerate(windows):
                 job_id = f"window_{sport}_{today}_{i}"
                 if job_id in existing_jobs:
