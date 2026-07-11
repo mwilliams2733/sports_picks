@@ -1,3 +1,5 @@
+import pytest
+
 from backend.analysis.odds_utils import (
     american_to_implied_prob,
     calculate_payout,
@@ -6,6 +8,7 @@ from backend.analysis.odds_utils import (
     parse_pick_line,
     signed_line_clv,
     compute_pick_clv,
+    InvalidOddsError,
 )
 
 def test_american_to_implied_prob_favorite():
@@ -19,6 +22,25 @@ def test_calculate_payout_favorite():
 
 def test_calculate_payout_underdog():
     assert abs(calculate_payout(150) - 1.5) < 0.001
+
+@pytest.mark.parametrize("odds", [0, 50, -50, 99, -99])
+def test_calculate_payout_rejects_invalid_odds(odds):
+    with pytest.raises(InvalidOddsError):
+        calculate_payout(odds)
+
+@pytest.mark.parametrize("odds", [0, 50, -50, 99, -99])
+def test_american_to_implied_prob_rejects_invalid_odds(odds):
+    with pytest.raises(InvalidOddsError):
+        american_to_implied_prob(odds)
+
+def test_calculate_payout_accepts_boundary_odds():
+    # -100 / 100 are the tightest legal American odds (even money)
+    assert abs(calculate_payout(100) - 1.0) < 0.001
+    assert abs(calculate_payout(-100) - 1.0) < 0.001
+
+def test_american_to_implied_prob_accepts_boundary_odds():
+    assert abs(american_to_implied_prob(100) - 0.5) < 0.001
+    assert abs(american_to_implied_prob(-100) - 0.5) < 0.001
 
 def test_remove_vig_standard_line():
     home_raw = american_to_implied_prob(-110)

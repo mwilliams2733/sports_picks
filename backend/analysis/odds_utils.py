@@ -1,11 +1,26 @@
 import re
 
 
+class InvalidOddsError(ValueError):
+    """Raised when an American odds value is 0 or outside the valid range.
+
+    Valid American odds are always <= -100 or >= 100; anything in between
+    (including 0) doesn't correspond to a real price.
+    """
+
+
+def _validate_american_odds(odds: int) -> None:
+    if odds == 0 or -100 < odds < 100:
+        raise InvalidOddsError(f"Invalid American odds: {odds}")
+
+
 def american_to_implied_prob(odds: int) -> float:
+    _validate_american_odds(odds)
     if odds < 0: return abs(odds) / (abs(odds) + 100)
     else: return 100 / (odds + 100)
 
 def calculate_payout(odds: int) -> float:
+    _validate_american_odds(odds)
     if odds < 0: return 100 / abs(odds)
     else: return odds / 100
 

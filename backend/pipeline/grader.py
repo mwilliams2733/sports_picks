@@ -1,5 +1,8 @@
+import logging
 import re
-from backend.analysis.odds_utils import calculate_payout
+from backend.analysis.odds_utils import calculate_payout, InvalidOddsError
+
+logger = logging.getLogger(__name__)
 
 # Lines are parsed from strings like "-3.5"; float arithmetic on top of that
 # (e.g. margin = home_score - away_score + spread) can land a hair off an
@@ -59,7 +62,12 @@ def grade_pick(pick_type: str, pick_value: str, home_score: int, away_score: int
     else:
         return "loss", -1.0
     if won:
-        return "win", calculate_payout(odds_at_pick)
+        try:
+            return "win", calculate_payout(odds_at_pick)
+        except InvalidOddsError:
+            logger.warning("Invalid odds_at_pick=%r for %s pick %r; grading win with 0.0 payout",
+                            odds_at_pick, pick_type, pick_value)
+            return "win", 0.0
     else:
         return "loss", -1.0
 

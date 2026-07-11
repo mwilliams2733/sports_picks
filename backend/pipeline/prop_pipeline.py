@@ -8,7 +8,7 @@ from backend.collectors.player_stats.espn_stats_source import EspnStatsSource
 from backend.collectors.player_stats.balldontlie_source import BallDontLieSource
 from backend.collectors.player_stats.mysportsfeeds_source import MySportsFeedsSource
 from backend.analysis.prop_analyzer import PropAnalyzer
-from backend.analysis.odds_utils import calculate_payout
+from backend.analysis.odds_utils import calculate_payout, InvalidOddsError
 from backend.data_types import PropAnalysis
 
 logger = logging.getLogger(__name__)
@@ -23,9 +23,14 @@ def _dedup_prop_analyses(analyses: list[PropAnalysis]) -> list[PropAnalysis]:
     """
     best: dict[tuple, PropAnalysis] = {}
     for a in analyses:
+        try:
+            payout = calculate_payout(a.odds)
+        except InvalidOddsError:
+            logger.warning("Skipping prop with invalid odds=%r for %s %s", a.odds, a.player_name, a.market)
+            continue
         key = (a.game_id, a.player_name, a.market, a.outcome, a.line)
         cur = best.get(key)
-        if cur is None or calculate_payout(a.odds) > calculate_payout(cur.odds):
+        if cur is None or payout > calculate_payout(cur.odds):
             best[key] = a
     return list(best.values())
 

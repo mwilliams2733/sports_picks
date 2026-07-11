@@ -52,3 +52,14 @@ def test_same_prop_different_games_stay_separate():
     result = _dedup_prop_analyses(analyses)
 
     assert len(result) == 2
+
+
+def test_invalid_odds_are_skipped_not_raised():
+    # A prop with unusable odds (0) must not crash the whole dedup pass; it's
+    # dropped and the remaining valid props still come through.
+    analyses = [_analysis(odds=0), _analysis(odds=-110, player="Someone Else")]
+
+    result = _dedup_prop_analyses(analyses)
+
+    assert len(result) == 1
+    assert result[0].player_name == "Someone Else"
