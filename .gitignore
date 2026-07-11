@@ -12,3 +12,4 @@ config.yaml
 .claude/settings.local.json
 uvicorn.log
 *.egg-info/
+codebase_export.txt
