@@ -12,7 +12,7 @@ from backend.pipeline.full_pipeline import (
 )
 from backend.pipeline.pick_generator import generate_and_store_picks
 from backend.pipeline.prop_pipeline import run_prop_pipeline
-from backend.pipeline.grader import grade_pick, grade_prop_pick, capture_closing_odds
+from backend.pipeline.grader import grade_pick, grade_prop_pick, capture_closing_odds, grade_completed_games
 from backend.collectors.budget import get_credit_summary, DEFAULT_BUDGET
 from backend.models import (
     Base, Game, PickModel, PickResult, StrategyModel,
@@ -117,6 +117,7 @@ def morning_scout(config, engine, scheduler, is_retry=False):
     session = get_session(engine)
     try:
         grade_pending_picks(session)
+        grade_completed_games(session)
         active_sports = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]
         scheduled_sports = [s for s in active_sports if s in ("nba", "nfl")]
         if not scheduled_sports:

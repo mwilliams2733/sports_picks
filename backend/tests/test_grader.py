@@ -70,7 +70,7 @@ def test_combat_grader_updates_fighter_elo_on_decision():
     by exactly K/2 = 12 points (expected 0.5, actual 1.0, delta = K * 0.5 = 12)."""
     from datetime import date as _date
     from backend.database import get_engine, get_session
-    from backend.models import Base, Team, Game, EloRating
+    from backend.models import Base, Team, Game, EloRating, EloHistory
     from backend.pipeline.grader import grade_completed_games
 
     engine = get_engine(":memory:")
@@ -98,6 +98,50 @@ def test_combat_grader_updates_fighter_elo_on_decision():
                 .filter(EloRating.team_id == 2, EloRating.sport == "mma").first()).rating
     assert abs(home_elo - 1512.0) < 0.5, f"Home should gain ~12 Elo, got {home_elo}"
     assert abs(away_elo - 1488.0) < 0.5, f"Away should lose ~12 Elo, got {away_elo}"
+
+    # Mirrors backtesting's audit trail (compute_historical_elo writes
+    # EloHistory too) — one row per fighter for this game.
+    history = session.query(EloHistory).filter(EloHistory.game_id == 1).all()
+    assert len(history) == 2
+    ratings_by_team = {h.team_id: h.rating for h in history}
+    assert abs(ratings_by_team[1] - 1512.0) < 0.5
+    assert abs(ratings_by_team[2] - 1488.0) < 0.5
+
+
+def test_combat_grader_is_idempotent_across_repeated_calls():
+    """grade_completed_games runs once a day from the live scheduler, so a
+    game that's already final must not have its Elo update re-applied on
+    every subsequent call."""
+    from datetime import date as _date
+    from backend.database import get_engine, get_session
+    from backend.models import Base, Team, Game, EloRating, EloHistory
+    from backend.pipeline.grader import grade_completed_games
+
+    engine = get_engine(":memory:")
+    Base.metadata.create_all(engine)
+    session = get_session(engine)
+    home = Team(id=1, name="A", abbreviation="A", sport="mma")
+    away = Team(id=2, name="B", abbreviation="B", sport="mma")
+    session.add_all([home, away])
+    session.flush()
+    session.add_all([
+        EloRating(team_id=1, sport="mma", rating=1500.0),
+        EloRating(team_id=2, sport="mma", rating=1500.0),
+    ])
+    session.add(Game(id=1, sport="mma", season="2026", date=_date(2026, 4, 29),
+                     home_team_id=1, away_team_id=2,
+                     home_score=1, away_score=0, status="final"))
+    session.commit()
+
+    grade_completed_games(session)
+    grade_completed_games(session)
+    grade_completed_games(session)
+
+    home_elo = (session.query(EloRating)
+                .filter(EloRating.team_id == 1, EloRating.sport == "mma").first()).rating
+    assert abs(home_elo - 1512.0) < 0.5, f"Elo must only apply once, got {home_elo}"
+    history = session.query(EloHistory).filter(EloHistory.game_id == 1).all()
+    assert len(history) == 2, "Repeated calls must not duplicate EloHistory rows"
 
 
 def test_combat_grader_handles_draws():

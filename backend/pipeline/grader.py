@@ -164,8 +164,9 @@ def _apply_combat_elo_update(session, game) -> None:
     home_score=1, away_score=0 means home won; reversed means away won.
     Both = 1 indicates a draw (outcome 0.5 for both).
     """
+    from datetime import datetime, timezone
     from backend.analysis.elo import get_k_factor
-    from backend.models import EloRating
+    from backend.models import EloRating, EloHistory
     K = get_k_factor(game.sport)
 
     home_elo_row = (session.query(EloRating)
@@ -188,28 +189,38 @@ def _apply_combat_elo_update(session, game) -> None:
     delta = K * (actual_home - expected_home)
     home_elo_row.rating += delta
     away_elo_row.rating -= delta
+    now = datetime.now(tz=timezone.utc)
+    home_elo_row.updated_at = now
+    away_elo_row.updated_at = now
+
+    session.add_all([
+        EloHistory(team_id=game.home_team_id, game_id=game.id, sport=game.sport,
+                   rating=home_elo_row.rating, created_at=now),
+        EloHistory(team_id=game.away_team_id, game_id=game.id, sport=game.sport,
+                   rating=away_elo_row.rating, created_at=now),
+    ])
 
 
 def grade_completed_games(session) -> None:
-    """Apply post-game updates for all finalized games.
+    """Apply post-game updates for all finalized combat-sports games not yet
+    Elo-graded.
 
-    Currently handles combat-sports Elo updates only. Team-sport Elo is
-    managed by the backtesting/historical path and is not touched here.
-
-    NOTE: This function is not yet wired into the live scheduler. Combat-8
-    (UFCStats event ingest) should call this after committing fight outcomes,
-    or a follow-up task should add a post-grading step in `scheduler._run_window`.
-    Until then, fighter Elo will remain at seed values in production.
+    Team-sport Elo is managed by the backtesting/historical path and is not
+    touched here. Called daily from the live scheduler (`morning_scout`), so
+    games already present in `EloHistory` are skipped to avoid re-applying
+    the same update every run.
     """
-    from backend.models import Game
+    from backend.models import Game, EloHistory
+    already_graded = {gid for (gid,) in session.query(EloHistory.game_id).distinct()}
     final_games = (
         session.query(Game)
         .filter(Game.status == "final",
                 Game.home_score.isnot(None),
-                Game.away_score.isnot(None))
+                Game.away_score.isnot(None),
+                Game.sport.in_(("mma", "boxing")))
         .all()
     )
     for game in final_games:
-        if game.sport in ("mma", "boxing"):
+        if game.id not in already_graded:
             _apply_combat_elo_update(session, game)
     session.commit()
