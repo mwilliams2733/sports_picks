@@ -30,3 +30,16 @@ def test_is_sport_in_season_nba_december():
 def test_is_sport_in_season_nba_august():
     seasons = {"nba": {"start": "10-22", "end": "06-20"}}
     assert is_sport_in_season("nba", seasons, date(2026, 8, 15)) is False
+
+def test_is_sport_in_season_malformed_date_string_returns_false():
+    seasons = {"nba": {"start": "not-a-date", "end": "06-20"}}
+    assert is_sport_in_season("nba", seasons, date(2026, 12, 15)) is False
+
+def test_is_sport_in_season_missing_end_key_returns_false():
+    seasons = {"nba": {"start": "10-22"}}
+    assert is_sport_in_season("nba", seasons, date(2026, 12, 15)) is False
+
+def test_is_sport_in_season_out_of_range_day_returns_false():
+    # Feb 30 doesn't exist -> date() raises ValueError, must be caught.
+    seasons = {"nba": {"start": "02-30", "end": "06-20"}}
+    assert is_sport_in_season("nba", seasons, date(2026, 3, 1)) is False

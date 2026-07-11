@@ -1,9 +1,12 @@
+import logging
 import os
 from datetime import date
 import yaml
 from dotenv import load_dotenv
 
 load_dotenv(override=False)
+
+logger = logging.getLogger(__name__)
 
 def load_config(path: str) -> dict:
     with open(path) as f:
@@ -18,10 +21,14 @@ def is_sport_in_season(sport: str, seasons: dict, today: date | None = None) -> 
     season = seasons.get(sport)
     if not season:
         return False
-    start_month, start_day = map(int, season["start"].split("-"))
-    end_month, end_day = map(int, season["end"].split("-"))
-    start = date(today.year, start_month, start_day)
-    end = date(today.year, end_month, end_day)
+    try:
+        start_month, start_day = map(int, season["start"].split("-"))
+        end_month, end_day = map(int, season["end"].split("-"))
+        start = date(today.year, start_month, start_day)
+        end = date(today.year, end_month, end_day)
+    except (KeyError, ValueError, TypeError, AttributeError) as e:
+        logger.error("Malformed season config for %r (%r): %s", sport, season, e)
+        return False
     if start <= end:
         return start <= today <= end
     else:
