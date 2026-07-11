@@ -257,6 +257,7 @@ class PropAnalyzer:
             is_stale=is_stale,
             game_id=prop.game_id,
             odds=prop.odds,
+            bookmaker=prop.bookmaker,
         )
 
     @staticmethod

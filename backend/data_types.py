@@ -57,6 +57,7 @@ class PropAnalysis:
     is_stale: bool
     game_id: int
     odds: int
+    bookmaker: str
 
 @dataclass
 class GameData:

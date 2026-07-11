@@ -30,7 +30,11 @@ def _dedup_prop_analyses(analyses: list[PropAnalysis]) -> list[PropAnalysis]:
             continue
         key = (a.game_id, a.player_name, a.market, a.outcome, a.line)
         cur = best.get(key)
-        if cur is None or payout > calculate_payout(cur.odds):
+        if cur is None:
+            best[key] = a
+            continue
+        cur_payout = calculate_payout(cur.odds)
+        if payout > cur_payout or (payout == cur_payout and a.bookmaker < cur.bookmaker):
             best[key] = a
     return list(best.values())
 
