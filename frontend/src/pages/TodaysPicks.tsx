@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api } from '../api/client';
 import { useAppStore } from '../stores/appStore';
 import { useTodaysPicks } from '../hooks/useTodaysPicks';
+import { useTopProps } from '../hooks/useTopProps';
 import { useHiddenGames } from '../hooks/useHiddenGames';
 import type { PropData, PickData } from '../types';
 import SummaryBar from '../components/SummaryBar';
@@ -31,8 +31,8 @@ export default function TodaysPicks() {
   };
 
   const { picks, record, games } = useTodaysPicks(sport);
+  const topProps = useTopProps(sport);
   const { hidden: hiddenGames, hide: hideGame, showAll: showAllGames } = useHiddenGames();
-  const [topProps, setTopProps] = useState<PropData[]>([]);
   const [teamFilter, setTeamFilter] = useState('');
   const [betModalOpen, setBetModalOpen] = useState(false);
   const [betModalData, setBetModalData] = useState<{
@@ -69,16 +69,6 @@ export default function TodaysPicks() {
     setBetModalOpen(true);
   };
 
-  const sportParam = sport === 'all' ? undefined : sport;
-
-  useEffect(() => {
-    api.props.today(sportParam).then(allProps => {
-      setTopProps(allProps.filter((p: PropData) => p.confidence !== null && p.confidence >= 3)
-        .sort((a: PropData, b: PropData) => (b.edge_pct ?? 0) - (a.edge_pct ?? 0))
-        .slice(0, 10));
-    }).catch(() => {});
-  }, [sportParam]);
-
   // Reset team filter when sport changes (must be before early returns)
   useEffect(() => { setTeamFilter(''); }, [sport]);
 
@@ -91,6 +81,7 @@ export default function TodaysPicks() {
   const picksData = picks.data ?? [];
   const recordData = record.data ?? null;
   const gamesData = games.data ?? [];
+  const topPropsData = topProps.data ?? [];
 
   // Count games per sport from currently loaded games
   const sportCounts: Record<string, number> = {};
@@ -182,7 +173,7 @@ export default function TodaysPicks() {
         </div>
       )}
 
-      {topProps.length > 0 && (
+      {topPropsData.length > 0 && (
         <div style={{ marginTop: '1.5rem' }}>
           <div className="section-header">
             Top Props <span className="section-divider" />
@@ -202,7 +193,7 @@ export default function TodaysPicks() {
                 </tr>
               </thead>
               <tbody>
-                {topProps.map(p => (
+                {topPropsData.map(p => (
                   <tr key={p.id}>
                     <td className="font-medium text-primary">{p.player_name}</td>
                     <td><span className="badge badge-default">{p.market_label}</span></td>
