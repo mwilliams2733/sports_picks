@@ -310,7 +310,19 @@ const SECTIONS: FAQSection[] = [
 function Accordion({ item }: { item: FAQItem }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className={`faq-item${open ? ' faq-item-open' : ''}`} onClick={() => setOpen(!open)}>
+    <div
+      className={`faq-item${open ? ' faq-item-open' : ''}`}
+      onClick={() => setOpen(!open)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setOpen(!open);
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+    >
       <div className="faq-question">
         <span>{item.question}</span>
         <span className={`faq-chevron${open ? ' faq-chevron-open' : ''}`}>&#9662;</span>

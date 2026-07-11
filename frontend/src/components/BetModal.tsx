@@ -94,9 +94,10 @@ export default function BetModal({
 
         {!currentUserName && !userId ? (
           <div className="modal-body">
-            <p>Enter your name to start paper trading:</p>
+            <label htmlFor="bet-modal-user-name">Enter your name to start paper trading:</label>
             <div className="bet-modal-user-setup">
               <input
+                id="bet-modal-user-name"
                 className="input"
                 placeholder="Your name"
                 value={userName}
@@ -146,10 +147,11 @@ export default function BetModal({
                 </div>
               )}
               <div className="bet-detail-row">
-                <span className="bet-detail-label">Stake</span>
+                <label className="bet-detail-label" htmlFor="bet-modal-stake">Stake</label>
                 <div className="bet-stake-input">
                   <span>$</span>
                   <input
+                    id="bet-modal-stake"
                     type="number"
                     className="input"
                     value={stake}

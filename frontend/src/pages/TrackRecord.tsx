@@ -71,14 +71,14 @@ export default function TrackRecord() {
       <div className="toolbar" style={{ marginBottom: '1rem' }}>
         <div className="tab-group">
           {SPORTS.map(s => (
-            <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => setSport(s)}>
+            <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => setSport(s)} aria-pressed={sport === s}>
               {s.toUpperCase()}
             </button>
           ))}
         </div>
         <div className="range-selector">
           {RANGES.map(r => (
-            <button key={r} className={`range-btn${range === r ? ' active' : ''}`} onClick={() => setRange(r)}>
+            <button key={r} className={`range-btn${range === r ? ' active' : ''}`} onClick={() => setRange(r)} aria-pressed={range === r}>
               {r.toUpperCase()}
             </button>
           ))}

@@ -342,6 +342,11 @@ export default function PaperTrading() {
             key={u.id}
             className={`leaderboard-entry${selectedUser?.id === u.id ? ' selected' : ''}`}
             onClick={() => selectUser(u)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectUser(u); } }}
+            role="button"
+            tabIndex={0}
+            aria-label={`Select ${u.name}`}
+            aria-pressed={selectedUser?.id === u.id}
           >
             <span className="leaderboard-rank">#{i + 1}</span>
             <span className="leaderboard-name">{u.name}</span>
@@ -487,6 +492,16 @@ export default function PaperTrading() {
                             setSelectedPropId(p.id);
                             setPropSearch(`${p.player_name} - ${p.market_label}`);
                           }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setSelectedPropId(p.id);
+                              setPropSearch(`${p.player_name} - ${p.market_label}`);
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`${p.player_name} ${p.market_label}`}
                           style={{
                             padding: '0.5rem 0.75rem',
                             cursor: 'pointer',

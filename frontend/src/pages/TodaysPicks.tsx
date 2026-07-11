@@ -110,7 +110,7 @@ export default function TodaysPicks() {
       <div className="toolbar">
         <div className="tab-group">
           {SPORTS.map(s => (
-            <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => handleSportChange(s)}>
+            <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => handleSportChange(s)} aria-pressed={sport === s}>
               {s.toUpperCase()}
               {s !== 'all' && sportCounts[s] ? ` (${sportCounts[s]})` : ''}
               {s === 'all' && gamesData.length > 0 ? ` (${gamesData.length})` : ''}

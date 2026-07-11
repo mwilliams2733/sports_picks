@@ -101,7 +101,7 @@ export default function PlayerProps() {
       <div className="toolbar">
         <div className="tab-group">
           {SPORTS.map(s => (
-            <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => handleSportChange(s)}>
+            <button key={s} className={`tab${sport === s ? ' active' : ''}`} onClick={() => handleSportChange(s)} aria-pressed={sport === s}>
               {s.toUpperCase()}
             </button>
           ))}
