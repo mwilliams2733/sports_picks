@@ -2,7 +2,19 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import PicksTable from './PicksTable'
-import type { PickData } from '../types'
+import type { PickData, GameOddsData } from '../types'
+
+function makeGame(overrides: Partial<GameOddsData> = {}): GameOddsData {
+  return {
+    id: 100, sport: 'nba', date: '2026-07-10', status: 'scheduled',
+    start_time: new Date(Date.now() + 3600_000).toISOString(),
+    home_team: 'BOS', away_team: 'LAL', home_team_name: 'Boston Celtics', away_team_name: 'LA Lakers',
+    home_score: null, away_score: null, moneyline_home: -150, moneyline_away: 130,
+    spread_home: -3.5, over_under: 220.5, bookmaker: 'draftkings', odds_count: 1,
+    last_meeting: null, home_l10_record: '7-3', away_l10_record: '5-5',
+    ...overrides,
+  }
+}
 
 function makePick(overrides: Partial<PickData> = {}): PickData {
   return {
@@ -59,5 +71,30 @@ describe('PicksTable', () => {
 
     await user.click(screen.getByRole('button', { name: 'Bet This' }))
     expect(onBet).toHaveBeenCalledWith(pick)
+  })
+
+  it('disables betting and shows a LIVE badge once the game has started', () => {
+    const pick = makePick()
+    const startedGame = makeGame({ status: 'scheduled', start_time: new Date(Date.now() - 3600_000).toISOString() })
+    render(<PicksTable picks={[pick]} onBet={vi.fn()} games={[startedGame]} />)
+
+    expect(screen.getByText('LIVE')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Locked' })).toBeDisabled()
+  })
+
+  it('disables betting once the game is final', () => {
+    const pick = makePick()
+    const finalGame = makeGame({ status: 'final' })
+    render(<PicksTable picks={[pick]} onBet={vi.fn()} games={[finalGame]} />)
+
+    expect(screen.getByRole('button', { name: 'Final' })).toBeDisabled()
+  })
+
+  it('still allows betting when the game has not started yet', () => {
+    const pick = makePick()
+    const upcomingGame = makeGame({ status: 'scheduled', start_time: new Date(Date.now() + 3600_000).toISOString() })
+    render(<PicksTable picks={[pick]} onBet={vi.fn()} games={[upcomingGame]} />)
+
+    expect(screen.getByRole('button', { name: 'Bet This' })).not.toBeDisabled()
   })
 })

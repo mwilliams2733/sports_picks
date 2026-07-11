@@ -1,8 +1,15 @@
-import type { PickData } from '../types';
+import type { PickData, GameOddsData } from '../types';
 import ConfidenceStars from './ConfidenceStars';
 import { EDGE_TOOLTIP, CONFIDENCE_TOOLTIP } from '../constants/tooltips';
+import { getGameLockState, lockStateLabel, lockStateTooltip } from '../lib/gameLock';
 
-interface Props { picks: PickData[]; showResult?: boolean; onBet?: (pick: PickData) => void; }
+interface Props {
+  picks: PickData[];
+  showResult?: boolean;
+  onBet?: (pick: PickData) => void;
+  /** When provided, disables betting on picks whose game has started/ended. */
+  games?: GameOddsData[];
+}
 
 function formatOdds(odds: number): string {
   return odds > 0 ? `+${odds}` : `${odds}`;
@@ -24,7 +31,7 @@ function typeBadgeClass(type: string): string {
   return 'badge badge-default';
 }
 
-export default function PicksTable({ picks, showResult = false, onBet }: Props) {
+export default function PicksTable({ picks, showResult = false, onBet, games }: Props) {
   if (picks.length === 0) {
     return (
       <div className="empty-state">
@@ -33,6 +40,7 @@ export default function PicksTable({ picks, showResult = false, onBet }: Props) 
       </div>
     );
   }
+  const gameById = new Map((games ?? []).map(g => [g.id, g]));
   return (
     <div className="table-wrap">
       <table className="table">
@@ -49,7 +57,10 @@ export default function PicksTable({ picks, showResult = false, onBet }: Props) 
           </tr>
         </thead>
         <tbody>
-          {picks.map(pick => (
+          {picks.map(pick => {
+            const game = gameById.get(pick.game_id);
+            const lockState = game ? getGameLockState(game.status, game.start_time) : 'open';
+            return (
             <tr key={pick.id} style={{ opacity: pick.confidence <= 1 ? 0.45 : 1 }}>
               <td>
                 <span className="badge badge-default" style={{ marginRight: '0.5rem' }}>
@@ -58,6 +69,11 @@ export default function PicksTable({ picks, showResult = false, onBet }: Props) 
                 <span className="font-medium text-primary">
                   {pick.matchup || `Game #${pick.game_id}`}
                 </span>
+                {lockState === 'locked' && (
+                  <span className="badge badge-yellow" style={{ marginLeft: '0.5rem' }} title={lockStateTooltip(lockState)}>
+                    LIVE
+                  </span>
+                )}
               </td>
               <td className="text-green font-bold">{pick.pick_value}</td>
               <td><span className={typeBadgeClass(pick.pick_type)}>{typeLabel(pick.pick_type)}</span></td>
@@ -78,13 +94,19 @@ export default function PicksTable({ picks, showResult = false, onBet }: Props) 
               )}
               {onBet && (
                 <td>
-                  <button className="btn-bet" onClick={() => onBet(pick)}>
-                    Bet This
+                  <button
+                    className="btn-bet"
+                    disabled={lockState !== 'open'}
+                    title={lockStateTooltip(lockState)}
+                    onClick={() => onBet(pick)}
+                  >
+                    {lockStateLabel(lockState)}
                   </button>
                 </td>
               )}
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

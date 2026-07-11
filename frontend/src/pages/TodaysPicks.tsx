@@ -6,6 +6,7 @@ import { useTopProps } from '../hooks/useTopProps';
 import { useHiddenGames } from '../hooks/useHiddenGames';
 import { SPORTS } from '../constants/sports';
 import { EDGE_TOOLTIP, CONFIDENCE_TOOLTIP } from '../constants/tooltips';
+import { getGameLockState, lockStateLabel, lockStateTooltip } from '../lib/gameLock';
 import type { PropData, PickData } from '../types';
 import SummaryBar from '../components/SummaryBar';
 import GameCard from '../components/GameCard';
@@ -169,7 +170,7 @@ export default function TodaysPicks() {
           <div className="section-header">
             AI Picks <span className="section-divider" />
           </div>
-          <PicksTable picks={filteredPicks} onBet={handleBetPick} />
+          <PicksTable picks={filteredPicks} onBet={handleBetPick} games={gamesData} />
         </div>
       )}
 
@@ -193,7 +194,10 @@ export default function TodaysPicks() {
                 </tr>
               </thead>
               <tbody>
-                {topPropsData.map(p => (
+                {topPropsData.map(p => {
+                  const game = gamesData.find(g => g.id === p.game_id);
+                  const lockState = game ? getGameLockState(game.status, game.start_time) : 'open';
+                  return (
                   <tr key={p.id}>
                     <td className="font-medium text-primary">{p.player_name}</td>
                     <td><span className="badge badge-default">{p.market_label}</span></td>
@@ -203,12 +207,18 @@ export default function TodaysPicks() {
                     <td className="mono text-green">{p.edge_pct?.toFixed(1)}%</td>
                     <td><ConfidenceStars rating={p.confidence ?? 0} /></td>
                     <td>
-                      <button className="btn-bet" onClick={() => handleBetProp(p)}>
-                        Bet This
+                      <button
+                        className="btn-bet"
+                        disabled={lockState !== 'open'}
+                        title={lockStateTooltip(lockState)}
+                        onClick={() => handleBetProp(p)}
+                      >
+                        {lockStateLabel(lockState)}
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

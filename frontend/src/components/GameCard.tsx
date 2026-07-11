@@ -1,6 +1,7 @@
 import type { GameOddsData, PickData } from '../types'
 import ConfidenceStars from './ConfidenceStars'
 import { EDGE_TOOLTIP } from '../constants/tooltips'
+import { getGameLockState, lockStateLabel, lockStateTooltip } from '../lib/gameLock'
 
 interface Props {
   game: GameOddsData
@@ -25,6 +26,7 @@ function formatMeetingDate(iso: string): string {
 export default function GameCard({ game, picks, onBet, onHide }: Props) {
   const gamePicks = picks.filter(p => p.game_id === game.id)
   const topPick = gamePicks.length > 0 ? gamePicks.reduce((a, b) => (a.confidence > b.confidence ? a : b)) : null
+  const lockState = getGameLockState(game.status, game.start_time)
 
   // For "BOS won 114-98" we need the higher score first regardless of which
   // corner the team was in during the prior meeting.
@@ -48,6 +50,9 @@ export default function GameCard({ game, picks, onBet, onHide }: Props) {
         <span className="game-card-status">
           {game.status === 'final' ? `Final: ${game.home_score}-${game.away_score}` : game.status}
         </span>
+        {lockState === 'locked' && (
+          <span className="badge badge-yellow" title={lockStateTooltip(lockState)}>LIVE</span>
+        )}
         {onHide && (
           <button
             className="game-card-hide"
@@ -116,6 +121,8 @@ export default function GameCard({ game, picks, onBet, onHide }: Props) {
           </div>
           <button
             className="btn-bet"
+            disabled={lockState !== 'open'}
+            title={lockStateTooltip(lockState)}
             onClick={() => onBet({
               pickValue: topPick.pick_value,
               pickType: topPick.pick_type,
@@ -124,7 +131,7 @@ export default function GameCard({ game, picks, onBet, onHide }: Props) {
               edgePct: topPick.edge_pct,
             })}
           >
-            Bet This
+            {lockStateLabel(lockState)}
           </button>
         </div>
       )}
