@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from '../api/client';
+import { api, getErrorMessage } from '../api/client';
 import type { DailyData, RunAllResult, VariantResult } from '../types';
 import PerformanceChart from '../components/PerformanceChart';
 import { useToast } from '../components/Toast';
@@ -68,8 +68,8 @@ export default function Backtesting() {
       setSelectedRunIndex(-1);
       const variantCount = Object.keys(res.variants).length;
       toast(`Backtest complete: ${variantCount} variants tested across ${res.games_count} games`, 'success');
-    } catch (e: any) {
-      toast(`Backtest error: ${e.message}`, 'error');
+    } catch (e) {
+      toast(`Backtest error: ${getErrorMessage(e)}`, 'error');
     } finally {
       setRunning(false);
     }
@@ -81,8 +81,8 @@ export default function Backtesting() {
       const result = await api.pipeline.run();
       setPipelineLastRun(new Date().toLocaleString());
       toast(`Pipeline: ${result.games_stored} games, ${result.odds_stored} odds, ${result.props_stored} props`, 'success');
-    } catch (e: any) {
-      toast(`Pipeline error: ${e.message}`, 'error');
+    } catch (e) {
+      toast(`Pipeline error: ${getErrorMessage(e)}`, 'error');
     } finally {
       setPipelineRunning(false);
     }

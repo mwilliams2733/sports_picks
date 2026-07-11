@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from '../api/client';
+import { api, getErrorMessage } from '../api/client';
 import type { UserProfile } from '../types';
 import { useToast } from '../components/Toast';
 
@@ -24,8 +24,8 @@ export default function Admin() {
       setUsers(prev => prev.filter(u => u.id !== userId));
       setConfirmDelete(null);
       toast(`Removed ${userName}`, 'success');
-    } catch (e: any) {
-      toast(`Error: ${e.message}`, 'error');
+    } catch (e) {
+      toast(`Error: ${getErrorMessage(e)}`, 'error');
     }
   };
 

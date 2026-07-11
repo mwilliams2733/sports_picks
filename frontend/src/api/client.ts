@@ -2,9 +2,38 @@ import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropDa
 
 const BASE = '';
 
+export class ApiError extends Error {
+  status: number;
+  body: unknown;
+
+  constructor(status: number, body: unknown) {
+    const detail = typeof body === 'object' && body !== null && 'detail' in body
+      ? String((body as { detail: unknown }).detail)
+      : undefined;
+    super(detail || `API error: ${status}`);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
+export function getErrorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : 'Unknown error';
+}
+
+async function throwApiError(res: Response): Promise<never> {
+  let body: unknown = undefined;
+  try {
+    body = await res.json();
+  } catch {
+    // response body wasn't JSON (or was empty) — fall back to status-only message
+  }
+  throw new ApiError(res.status, body);
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) return throwApiError(res);
   return res.json();
 }
 
@@ -14,7 +43,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) return throwApiError(res);
   return res.json();
 }
 
@@ -24,19 +53,19 @@ async function put<T>(path: string, body: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) return throwApiError(res);
   return res.json();
 }
 
 async function patch<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { method: 'PATCH' });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) return throwApiError(res);
   return res.json();
 }
 
 async function del<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) return throwApiError(res);
   return res.json();
 }
 

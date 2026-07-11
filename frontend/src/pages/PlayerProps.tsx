@@ -11,11 +11,17 @@ function formatOdds(odds: number): string {
   return odds > 0 ? `+${odds}` : `${odds}`;
 }
 
+type SortKey = 'edge' | 'confidence' | 'name';
+const SORT_KEYS: SortKey[] = ['edge', 'confidence', 'name'];
+function isSortKey(value: string): value is SortKey {
+  return (SORT_KEYS as string[]).includes(value);
+}
+
 export default function PlayerProps() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { sport, setSport } = useAppStore();
   const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState<'edge' | 'confidence' | 'name'>('edge');
+  const [sortBy, setSortBy] = useState<SortKey>('edge');
   const [minConfidence, setMinConfidence] = useState(0);
   const [teamFilter, setTeamFilter] = useState('');
   const [marketFilter, setMarketFilter] = useState('');
@@ -121,7 +127,7 @@ export default function PlayerProps() {
             {sportMarkets.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
           </select>
         )}
-        <select className="select" value={sortBy} onChange={e => setSortBy(e.target.value as any)}>
+        <select className="select" value={sortBy} onChange={e => { if (isSortKey(e.target.value)) setSortBy(e.target.value); }}>
           <option value="edge">Sort: Edge %</option>
           <option value="confidence">Sort: Confidence</option>
           <option value="name">Sort: Player Name</option>

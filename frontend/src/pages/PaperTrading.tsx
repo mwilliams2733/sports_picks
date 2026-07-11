@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { api } from '../api/client';
+import { api, getErrorMessage } from '../api/client';
 import { useLeaderboard } from '../hooks/useLeaderboard';
 import { useUserStore } from '../stores/userStore';
 import { useFeedStore } from '../stores/feedStore';
@@ -86,8 +86,8 @@ export default function PaperTrading() {
       setNewName('');
       toast('User created!', 'success');
       queryClient.invalidateQueries({ queryKey: ['users'] });
-    } catch (e: any) {
-      toast(e.message, 'error');
+    } catch (e) {
+      toast(getErrorMessage(e), 'error');
     }
   };
 
@@ -117,8 +117,8 @@ export default function PaperTrading() {
         selectUser(selectedUser);
         setSelectedPropId('');
         setPropSearch('');
-      } catch (e: any) {
-        toast(e.message, 'error');
+      } catch (e) {
+        toast(getErrorMessage(e), 'error');
       }
     } else {
       // Game pick (moneyline, spread, over/under)
@@ -138,8 +138,8 @@ export default function PaperTrading() {
         queryClient.invalidateQueries({ queryKey: ['users'] });
         selectUser(selectedUser);
         setPickValue('');
-      } catch (e: any) {
-        toast(e.message, 'error');
+      } catch (e) {
+        toast(getErrorMessage(e), 'error');
       }
     }
   };
@@ -207,8 +207,8 @@ export default function PaperTrading() {
       queryClient.invalidateQueries({ queryKey: ['users'] });
       selectUser(selectedUser);
       setParlayLegs([]);
-    } catch (e: any) {
-      toast(e.message, 'error');
+    } catch (e) {
+      toast(getErrorMessage(e), 'error');
     }
   };
 
