@@ -1,4 +1,4 @@
-from backend.pipeline.grader import grade_pick
+from backend.pipeline.grader import grade_pick, grade_prop_pick
 from backend.analysis.odds_utils import calculate_payout
 
 def test_grade_moneyline_home_win():
@@ -30,6 +30,39 @@ def test_grade_over_hit():
 def test_grade_under_hit():
     result, payout = grade_pick("over_under", "Under 218.5", 100, 105, -110)
     assert result == "win"
+
+def test_grade_spread_exact_push():
+    # HOME -3, margin = home - away - 3 = 103 - 100 - 3 = 0 exactly
+    result, payout = grade_pick("spread", "HOME -3", 103, 100, -110)
+    assert result == "push"
+    assert payout == 0.0
+
+def test_grade_spread_near_zero_push():
+    # Simulates float drift from upstream parsing/arithmetic landing just off
+    # zero (e.g. "-3.0000000001" instead of an exact "-3") — must still push.
+    result, payout = grade_pick("spread", "HOME -3.0000000001", 103, 100, -110)
+    assert result == "push"
+
+def test_grade_over_under_exact_push():
+    result, payout = grade_pick("over_under", "Over 215", 110, 105, -110)
+    assert result == "push"
+    assert payout == 0.0
+
+def test_grade_over_under_near_zero_push():
+    result, payout = grade_pick("over_under", "Over 215.0000000001", 110, 105, -110)
+    assert result == "push"
+
+def test_grade_prop_exact_push():
+    from types import SimpleNamespace
+    player_stat = SimpleNamespace(points=25.5)
+    result = grade_prop_pick("LeBron James Over 25.5 Points", "player_points", player_stat)
+    assert result == ("push", 0.0)
+
+def test_grade_prop_near_zero_push():
+    from types import SimpleNamespace
+    player_stat = SimpleNamespace(points=25.5000000001)
+    result = grade_prop_pick("LeBron James Over 25.5 Points", "player_points", player_stat)
+    assert result == ("push", 0.0)
 
 
 def test_combat_grader_updates_fighter_elo_on_decision():

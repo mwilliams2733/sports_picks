@@ -1,6 +1,11 @@
 import re
 from backend.analysis.odds_utils import calculate_payout
 
+# Lines are parsed from strings like "-3.5"; float arithmetic on top of that
+# (e.g. margin = home_score - away_score + spread) can land a hair off an
+# exact push, so pushes are detected within this tolerance rather than `==`.
+_PUSH_EPSILON = 0.001
+
 # Map prop market keys to PlayerStat field names
 MARKET_STAT_MAP = {
     "player_points": ["points"],
@@ -38,14 +43,14 @@ def grade_pick(pick_type: str, pick_value: str, home_score: int, away_score: int
             margin = home_score - away_score + spread
         else:
             margin = away_score - home_score + spread
-        if margin == 0:
+        if abs(margin) < _PUSH_EPSILON:
             return "push", 0.0
         won = margin > 0
     elif pick_type == "over_under":
         match = re.search(r"(\d+\.?\d*)", pick_value)
         total_line = float(match.group(1)) if match else 0.0
         actual_total = home_score + away_score
-        if actual_total == total_line:
+        if abs(actual_total - total_line) < _PUSH_EPSILON:
             return "push", 0.0
         if "Over" in pick_value:
             won = actual_total > total_line
@@ -96,7 +101,7 @@ def grade_prop_pick(pick_value: str, market: str, player_stat) -> tuple[str, flo
         else:
             return "loss", -1.0
 
-    if actual == line:
+    if abs(actual - line) < _PUSH_EPSILON:
         return "push", 0.0
     if direction == "Over":
         won = actual > line
