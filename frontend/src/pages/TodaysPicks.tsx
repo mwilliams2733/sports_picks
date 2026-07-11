@@ -4,6 +4,7 @@ import { useAppStore } from '../stores/appStore';
 import { useTodaysPicks } from '../hooks/useTodaysPicks';
 import { useTopProps } from '../hooks/useTopProps';
 import { useHiddenGames } from '../hooks/useHiddenGames';
+import { SPORTS } from '../constants/sports';
 import type { PropData, PickData } from '../types';
 import SummaryBar from '../components/SummaryBar';
 import GameCard from '../components/GameCard';
@@ -11,8 +12,6 @@ import PicksTable from '../components/PicksTable';
 import ConfidenceStars from '../components/ConfidenceStars';
 import BetModal from '../components/BetModal';
 import CreditUsage from '../components/CreditUsage';
-
-const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'mlb', 'boxing', 'mma'] as const;
 
 export default function TodaysPicks() {
   const [searchParams, setSearchParams] = useSearchParams();
