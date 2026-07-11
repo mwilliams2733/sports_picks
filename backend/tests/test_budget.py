@@ -62,6 +62,25 @@ def test_record_api_call_creates_row():
     assert rows[0].requests_remaining == 19999
 
 
+def test_created_at_survives_sqlite_roundtrip_and_still_filters_correctly():
+    """ApiUsage.created_at is a plain (non-timezone) DateTime column, so it
+    comes back naive after a SQLite round trip even though every write is
+    UTC-aware. Confirm this doesn't break check_budget's monthly/daily
+    filters: SQLAlchemy's SQLite dialect serializes both the stored column
+    and the aware Python-side filter bound identically, so the comparison
+    stays a consistent UTC-vs-UTC string comparison rather than mismatching."""
+    session = make_session()
+    record_api_call(session, "odds", "nba", requests_remaining=100)
+
+    row = session.query(ApiUsage).first()
+    assert row.created_at.tzinfo is None, "expected SQLite round-trip to strip tzinfo"
+
+    budget = {"monthly_limit": 20000, "daily_target": 600, "reserve": 2000}
+    summary = get_credit_summary(session, budget)
+    assert summary["monthly_used"] == 1
+    assert summary["daily_used"] == 1
+
+
 def test_get_credit_summary():
     session = make_session()
     budget = {"monthly_limit": 20000, "daily_target": 600, "reserve": 2000}

@@ -25,19 +25,31 @@ ET = ZoneInfo("America/New_York")
 LEAD_TIME = timedelta(hours=2)
 
 
+def _as_utc(dt: datetime) -> datetime:
+    """Normalize a possibly-naive datetime to UTC-aware.
+
+    Game.start_time is a plain (non-timezone) DateTime column, so values
+    written as UTC-aware come back naive after a round trip through SQLite.
+    Every write path in this app uses UTC, so a naive value here is treated
+    as UTC rather than left to raise a naive/aware TypeError at compare time.
+    """
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
 def cluster_game_windows(games: list[dict], gap_minutes: int = 30) -> list[dict]:
     if not games:
         return []
-    sorted_games = sorted(games, key=lambda g: g["start_time"])
+    sorted_games = sorted(games, key=lambda g: _as_utc(g["start_time"]))
     gap = timedelta(minutes=gap_minutes)
     windows = []
     current = [sorted_games[0]]
-    window_anchor = sorted_games[0]["start_time"]
+    window_anchor = _as_utc(sorted_games[0]["start_time"])
     for g in sorted_games[1:]:
-        if g["start_time"] - window_anchor > gap:
+        start = _as_utc(g["start_time"])
+        if start - window_anchor > gap:
             windows.append(_build_window(current))
             current = [g]
-            window_anchor = g["start_time"]
+            window_anchor = start
         else:
             current.append(g)
     windows.append(_build_window(current))
@@ -45,12 +57,13 @@ def cluster_game_windows(games: list[dict], gap_minutes: int = 30) -> list[dict]
 
 
 def _build_window(games: list[dict]) -> dict:
-    earliest = min(g["start_time"] for g in games)
+    starts = [_as_utc(g["start_time"]) for g in games]
+    earliest = min(starts)
     return {
         "games": games,
         "run_at": earliest - LEAD_TIME,
         "window_start": earliest,
-        "window_end": max(g["start_time"] for g in games),
+        "window_end": max(starts),
     }
 
 
