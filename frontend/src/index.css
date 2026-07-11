@@ -1481,8 +1481,10 @@ body {
 
 .game-card-header {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   align-items: center;
+  gap: 0.4rem;
 }
 
 .game-card-status {
