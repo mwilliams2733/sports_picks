@@ -7,6 +7,12 @@ from backend.data_types import GameData, Pick
 class ValueOnlyStrategy(Strategy):
     """Variant B: Only picks when implied probability edge exceeds a high threshold."""
 
+    # _model_probability and _count_agreeing read exactly three signals:
+    # point_diff ("recent_form"), elo_rating ("rating_gap") and
+    # offensive_rating - defensive_rating ("net_rating"). Rest days, schedule
+    # fatigue, lookahead spots and pitcher scores are never read.
+    FACTOR_CODES = frozenset({"rating_gap", "recent_form", "net_rating"})
+
     def predict(self, game: GameData) -> list[Pick]:
         if not game.odds:
             return []

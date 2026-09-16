@@ -17,6 +17,25 @@ logger = logging.getLogger(__name__)
 class EnsembleStrategy(Strategy):
     _calibrated: CalibratedModel | None = None
 
+    # _calibrated_probability applies is_schedule_fatigued / is_lookahead_spot
+    # adjustments directly, over a base probability that reads point_diff
+    # ("recent_form"), elo_rating ("rating_gap") and off-def net
+    # ("net_rating") — via LightGBM's extract_features, the logistic
+    # CalibratedModel, or _fallback_probability. Pitcher scores are never
+    # read on any of those paths.
+    #
+    # rest_advantage is deliberately EXCLUDED: rest_days only reaches the
+    # model through extract_features, i.e. only when a LightGBM or logistic
+    # model is actually trained. _fallback_probability (the untrained path,
+    # and the one that runs on a cold database) ignores rest entirely, so
+    # claiming rest decided the pick would be a fabrication whenever the
+    # fallback is in play, and nothing at render time can tell the reader
+    # which path ran.
+    FACTOR_CODES = frozenset({
+        "rating_gap", "recent_form", "net_rating",
+        "schedule_fatigue", "lookahead_spot",
+    })
+
     def __init__(self, name: str, config: dict, thresholds: dict | None = None):
         super().__init__(name, config, thresholds)
         self._lgbm_model: LightGBMModel | None = None

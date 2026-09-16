@@ -8,6 +8,12 @@ from backend.data_types import GameData, Pick
 class RecentFormStrategy(Strategy):
     """Variant A: Heavily weights recent game performance over season averages."""
 
+    # _model_probability reads last_n_record, home_record, away_record and
+    # point_diff only. Of those, point_diff is the sole signal with a factor
+    # code ("recent_form"); win-pct/venue splits have no code. Elo, net
+    # rating, rest, fatigue, lookahead and pitcher are never read here.
+    FACTOR_CODES = frozenset({"recent_form"})
+
     def predict(self, game: GameData) -> list[Pick]:
         if not game.odds:
             return []

@@ -52,8 +52,21 @@ def test_rating_gap_favors_the_stronger_side():
     assert gap[0].side == "home", "home has the higher elo in this fixture"
 
 
-def test_fatigue_factor_points_at_the_fatigued_team():
+def test_value_only_does_not_claim_fatigue_it_never_read():
+    """ValueOnlyStrategy reads point_diff, elo and net rating only."""
     s = ValueOnlyStrategy("value_only", {"min_edge": 0.1})
+    picks = s.predict(_game())
+    ml = [p for p in picks if p.pick_type == "moneyline"][0]
+    assert not [f for f in ml.factors if f.code == "schedule_fatigue"], (
+        "away team is fatigued in this fixture, but ValueOnlyStrategy never "
+        "reads is_schedule_fatigued — saying so would be a fabrication"
+    )
+
+
+def test_fatigue_factor_points_at_the_fatigued_team():
+    # SportSpecificStrategy genuinely applies the fatigue adjustment.
+    from backend.analysis.variants.sport_specific import SportSpecificStrategy
+    s = SportSpecificStrategy("sport_specific", {"min_edge": 0.1})
     picks = s.predict(_game())
     ml = [p for p in picks if p.pick_type == "moneyline"][0]
     fatigue = [f for f in ml.factors if f.code == "schedule_fatigue"]

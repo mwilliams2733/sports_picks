@@ -2,6 +2,18 @@ from abc import ABC, abstractmethod
 from backend.data_types import GameData, Pick, PickFactor
 
 class Strategy(ABC):
+    #: The factor codes this strategy is allowed to emit — i.e. the signals it
+    #: genuinely consumes when computing a probability. `_build_factors` can
+    #: derive all seven codes from TeamStats, but a variant that never reads
+    #: (say) rest days must not tell a reader that rest decided its pick.
+    #: These sentences are emailed to third parties as the reasoning behind a
+    #: bet, so an unused code is a fabrication, not a rounding error.
+    #: Subclasses MUST narrow this to what their own probability model reads.
+    FACTOR_CODES: frozenset[str] = frozenset({
+        "rating_gap", "recent_form", "net_rating", "schedule_fatigue",
+        "lookahead_spot", "rest_advantage", "pitcher_edge",
+    })
+
     def __init__(self, name: str, config: dict, thresholds: dict | None = None):
         self.name = name
         self.config = config
@@ -18,9 +30,10 @@ class Strategy(ABC):
     def _build_factors(self, game: "GameData", side: str) -> list["PickFactor"]:
         """Derive the factors that favor `side` ("home" or "away").
 
-        Only emits a factor when the underlying signal is actually present
-        and actually favors that side — a factor the model did not use must
-        never appear in a rationale.
+        Only emits a factor when the underlying signal is actually present,
+        actually favors that side, AND is listed in this strategy's
+        FACTOR_CODES — a factor the model did not use must never appear in a
+        rationale.
         """
         from backend.data_types import PickFactor
 
@@ -66,4 +79,5 @@ class Strategy(ABC):
             if s:
                 factors.append(PickFactor(code="pitcher_edge", side=side, strength=s))
 
-        return factors
+        allowed = type(self).FACTOR_CODES
+        return [f for f in factors if f.code in allowed]
