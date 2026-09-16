@@ -7,7 +7,7 @@
 > in `plans/README.md`.
 >
 > **Drift check (run first)**:
-> `git diff --stat 943cf25..HEAD -- backend/api/users.py backend/api/main.py backend/api/websocket.py`
+> `git diff --stat 05099e9..HEAD -- backend/api/users.py backend/api/main.py backend/api/websocket.py`
 > If any in-scope file changed since this plan was written, compare the
 > "Current state" excerpts against the live code before proceeding; on a
 > mismatch, treat it as a STOP condition.
@@ -22,11 +22,19 @@
   Inverting it is now MANDATORY, not conditional.
 - **Category**: bug
 - **Planned at**: commit `5c2e0d0`, 2026-09-16
-- **Refreshed at**: commit `943cf25`, 2026-09-16 — plans 001/002/003/005/006
+- **Refreshed at (2nd)**: commit `05099e9`, 2026-09-16 — the daily-digest
+  feature merged since. `backend/api/main.py` changed: its seven individual
+  `migrate_*` calls were consolidated into one `run_migrations(engine)` and the
+  `Base` import dropped, so the file is 8 lines shorter and line numbers below
+  have shifted. **The `lifespan` function this plan edits is untouched**
+  (verified by diff), and `users.py` / `websocket.py` are byte-identical. The
+  router include is now at `main.py:93`, `lifespan` at `:27`, its `yield` at
+  `:53`. Baseline suite is now **481 passed**.
+- **Refreshed at (1st)**: commit `943cf25`, 2026-09-16 — plans 001/002/003/005/006
   merged. **None of this plan's in-scope source files changed** (`users.py`,
   `main.py`, `websocket.py` are byte-identical to `5c2e0d0`), so every excerpt
   below is still accurate. What changed: `backend/tests/test_api_users.py` now
-  exists, and the baseline suite is **409 passed**, not 360.
+  exists, and the baseline suite is **481 passed**, not 360.
 
 ## Why this matters
 
@@ -57,7 +65,7 @@ nothing.
 
 ### Route registration order in `backend/api/users.py`
 
-The router is mounted at prefix `/users` (`backend/api/main.py:101`:
+The router is mounted at prefix `/users` (`backend/api/main.py:93`:
 `app.include_router(users_router, prefix="/users", tags=["users"])`).
 
 Registration order within the file:
