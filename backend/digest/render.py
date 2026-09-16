@@ -5,6 +5,7 @@ reliably across Gmail, Outlook and Apple Mail. No external CSS, no web
 fonts, no JavaScript. A plain-text alternative is always produced.
 """
 from datetime import date
+from html import escape as _escape
 
 from backend.digest.selector import DigestSection
 
@@ -51,14 +52,14 @@ def render_digest(sections: list[DigestSection], target_date: date):
         for p in section.picks:
             rationale_html = (
                 f'<div style="{_FONT}font-size:13px;color:#6b7280;padding-top:3px;">'
-                f'{p.rationale}</div>' if p.rationale else ""
+                f'{_escape(p.rationale)}</div>' if p.rationale else ""
             )
             rows.append(
                 f'<tr><td style="padding:10px 0;border-bottom:1px solid #e5e7eb;">'
                 f'<div style="{_FONT}font-size:15px;font-weight:600;color:#111827;">'
-                f'{p.pick_value} <span style="font-weight:400;color:#6b7280;">({p.odds})</span></div>'
+                f'{_escape(p.pick_value)} <span style="font-weight:400;color:#6b7280;">({p.odds})</span></div>'
                 f'<div style="{_FONT}font-size:13px;color:#374151;padding-top:2px;">'
-                f'{p.matchup} &nbsp;·&nbsp; {_stars(p.confidence)} &nbsp;·&nbsp; +{p.edge_pct}%</div>'
+                f'{_escape(p.matchup)} &nbsp;·&nbsp; {_stars(p.confidence)} &nbsp;·&nbsp; +{p.edge_pct}%</div>'
                 f'{rationale_html}</td></tr>'
             )
             text_lines.append(f"  {p.pick_value} ({p.odds}) — {p.matchup} — {_stars(p.confidence)} +{p.edge_pct}%")
@@ -75,7 +76,7 @@ def render_digest(sections: list[DigestSection], target_date: date):
                 rows.append(
                     f'<tr><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;">'
                     f'<div style="{_FONT}font-size:14px;color:#111827;">'
-                    f'{p.pick_value} <span style="color:#6b7280;">({p.odds})</span></div></td></tr>'
+                    f'{_escape(p.pick_value)} <span style="color:#6b7280;">({p.odds})</span></div></td></tr>'
                 )
                 text_lines.append(f"    {p.pick_value} ({p.odds})")
         text_lines.append("")

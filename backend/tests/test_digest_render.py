@@ -53,3 +53,39 @@ def test_empty_sections_render_empty_subject_marker():
     assert subject == ""
     assert html == ""
     assert text == ""
+
+
+def test_html_escapes_ampersand_in_matchup():
+    section = DigestSection(
+        sport="ncaaf",
+        picks=[DigestPick(sport="ncaaf", matchup="Texas A&M @ LSU", pick_value="HOME ML",
+                          odds=-120, confidence=4, edge_pct=5.0, rationale="")],
+        props=[],
+    )
+    _, html, _ = render_digest([section], date(2026, 9, 20))
+    assert "Texas A&amp;M" in html
+    assert "Texas A&M" not in html
+
+
+def test_text_leaves_ampersand_in_matchup_unescaped():
+    section = DigestSection(
+        sport="ncaaf",
+        picks=[DigestPick(sport="ncaaf", matchup="Texas A&M @ LSU", pick_value="HOME ML",
+                          odds=-120, confidence=4, edge_pct=5.0, rationale="")],
+        props=[],
+    )
+    _, _, text = render_digest([section], date(2026, 9, 20))
+    assert "Texas A&M" in text
+    assert "A&amp;M" not in text
+
+
+def test_html_escapes_angle_bracket_in_pick_value():
+    section = DigestSection(
+        sport="nba",
+        picks=[],
+        props=[DigestPick(sport="nba", matchup="Lakers @ Celtics",
+                          pick_value="Smith <1.5 Rebounds",
+                          odds=-115, confidence=0, edge_pct=0.0, rationale="")],
+    )
+    _, html, _ = render_digest([section], date(2026, 9, 20))
+    assert "&lt;1.5 Rebounds" in html
