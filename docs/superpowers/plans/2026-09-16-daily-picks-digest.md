@@ -80,6 +80,15 @@ Pure functions only. No persistence, no strategy changes yet.
 `side` is one of `"home"`, `"away"`, `"over"`, `"under"`.
 `strength` is one of `"slight"`, `"moderate"`, `"strong"`.
 
+> **`side` always means THE SIDE THE FACTOR FAVORS** — never "the side the
+> factor is about". This matters for the two negative factors:
+> `schedule_fatigue` and `lookahead_spot` favor the side that is *not*
+> affected, so their templates name `{other}`. A factor emitted with
+> `side="home"` for `schedule_fatigue` means the **away** team is the tired
+> one, and the rendered sentence names the away team. Getting this backwards
+> names the wrong team in an email to real readers, so both Task 1's
+> renderer and Task 3's `_build_factors` must follow this rule.
+
 > **Deliberate divergence from the spec's factor table.** The spec listed
 > `home_advantage` and `model_consensus`; this plan drops both and adds
 > `net_rating` and `rest_advantage` instead. Reason: reading
@@ -106,8 +115,11 @@ def test_render_rating_gap_home_strong():
     assert render_factor(f, "Chiefs", "Bills") == "Rating gap strongly favors Chiefs"
 
 
-def test_render_schedule_fatigue_away():
-    f = PickFactor(code="schedule_fatigue", side="away", strength="moderate")
+def test_render_schedule_fatigue_names_the_tired_team_not_the_favored_one():
+    # `side` is always THE SIDE THE FACTOR FAVORS. schedule_fatigue favors the
+    # rested team, so side="home" means the AWAY team is the tired one, and
+    # the template names that away team.
+    f = PickFactor(code="schedule_fatigue", side="home", strength="moderate")
     assert render_factor(f, "Chiefs", "Bills") == "Bills on a compressed schedule"
 
 
@@ -117,9 +129,11 @@ def test_unknown_code_renders_empty_not_raises():
 
 
 def test_render_rationale_joins_two_strongest():
+    # All three favor the home side (Chiefs), which is what a real pick looks
+    # like — factors for one pick all point the same way.
     factors = [
         PickFactor(code="rating_gap", side="home", strength="strong"),
-        PickFactor(code="schedule_fatigue", side="away", strength="moderate"),
+        PickFactor(code="schedule_fatigue", side="home", strength="moderate"),
         PickFactor(code="recent_form", side="home", strength="slight"),
     ]
     out = render_rationale(factors, "Chiefs", "Bills", limit=2)
