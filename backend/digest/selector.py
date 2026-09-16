@@ -60,6 +60,38 @@ def _rationale_for(session, pick: PickModel, game: Game) -> str:
                             away.name if away else "Away")
 
 
+def _dedupe_latest(picks: list[PickModel]) -> list[PickModel]:
+    """Collapse repeated picks to the most recently created row.
+
+    `_run_window` runs once per game window per sport per day and regenerates
+    picks for ALL of today's games each time, and `generate_and_store_picks`
+    inserts unconditionally (there is no unique constraint on `picks`). Three
+    NBA windows therefore leave three identical "HOME ML" rows per game. Left
+    alone, the digest's "top 5" is the same one or two picks repeated.
+
+    Identity is (game_id, pick_type, pick_value). `created_at` is nullable in
+    practice (rows written before the default, or by raw SQL), so a missing
+    timestamp sorts oldest and never displaces a real one. `id` breaks ties,
+    since it is monotonic for inserts into the same table.
+    """
+    latest: dict[tuple, PickModel] = {}
+    for p in picks:
+        key = (p.game_id, p.pick_type, p.pick_value)
+        incumbent = latest.get(key)
+        if incumbent is None or _recency(p) > _recency(incumbent):
+            latest[key] = p
+    return list(latest.values())
+
+
+def _recency(pick: PickModel) -> tuple:
+    created = pick.created_at
+    if created is None:
+        return (datetime.min, pick.id or 0)
+    # Rows can come back naive or aware depending on how they were written;
+    # comparing the two raises TypeError mid-sort.
+    return (created.replace(tzinfo=None), pick.id or 0)
+
+
 def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5):
     """Return one DigestSection per active sport that has something to show."""
     sections: list[DigestSection] = []
@@ -88,6 +120,8 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5)
                     PickModel.pick_type != "prop")
             .all()
         )
+
+        picks = _dedupe_latest(picks)
 
         def _pick_sort_key(p):
             # start_time is nullable, and stored rows may be naive or aware.
@@ -121,6 +155,7 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5)
                     PickModel.pick_type == "prop")
             .all()
         )
+        props = _dedupe_latest(props)
         props.sort(key=_pick_sort_key)
         digest_props = [
             DigestPick(

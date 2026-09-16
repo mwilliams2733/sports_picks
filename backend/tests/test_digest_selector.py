@@ -1,4 +1,5 @@
-from datetime import date
+from datetime import date, datetime, timezone
+
 
 from backend.database import get_engine, get_session
 from backend.models import Base, Team, Game, StrategyModel, PickModel
@@ -157,3 +158,78 @@ def test_rationale_json_wellformed_list_still_renders():
     )
     sections = select_digest(s, d, ["nfl"], SEASONS)
     assert sections[0].picks[0].rationale != ""
+
+
+def _dup_setup(session, d, pick_type, pick_value):
+    session.add_all([
+        Team(id=1, name="H1", abbreviation="H1", sport="nfl"),
+        Team(id=2, name="A1", abbreviation="A1", sport="nfl"),
+    ])
+    session.flush()
+    session.add(Game(id=1, sport="nfl", season="2026", date=d,
+                     home_team_id=1, away_team_id=2, status="scheduled"))
+    session.flush()
+    # _run_window regenerates picks for ALL of today's games once per window,
+    # and generate_and_store_picks inserts unconditionally — so the same pick
+    # lands once per window with a later created_at each time.
+    session.add(PickModel(game_id=1, strategy_id=1, pick_type=pick_type,
+                          pick_value=pick_value, confidence=4, edge_pct=6.0,
+                          odds_at_pick=-110,
+                          created_at=datetime(2026, 11, 1, 13, 0)))
+    session.add(PickModel(game_id=1, strategy_id=1, pick_type=pick_type,
+                          pick_value=pick_value, confidence=4, edge_pct=9.9,
+                          odds_at_pick=-125,
+                          created_at=datetime(2026, 11, 1, 18, 0)))
+    session.commit()
+
+
+def test_repeated_game_pick_appears_once_and_is_the_newest():
+    s = _session()
+    d = date(2026, 11, 1)
+    _dup_setup(s, d, "moneyline", "HOME ML")
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    picks = sections[0].picks
+    assert len(picks) == 1, f"three windows must not yield {len(picks)} identical rows"
+    assert picks[0].edge_pct == 9.9, "must keep the most recent created_at"
+    assert picks[0].odds == -125
+
+
+def test_repeated_prop_appears_once_and_is_the_newest():
+    s = _session()
+    d = date(2026, 11, 1)
+    _dup_setup(s, d, "prop", "Mahomes Over 275.5 Pass Yards")
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    props = sections[0].props
+    assert len(props) == 1
+    assert props[0].edge_pct == 9.9
+    assert props[0].odds == -125
+
+
+def test_dedup_keys_on_pick_value_not_just_the_game():
+    """Different picks on the same game must both survive."""
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk(s, "nfl", 1, 1, 2, d, [(5, 9.0), (4, 8.0)])
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    assert len(sections[0].picks) == 2
+
+
+def test_dedup_tolerates_a_missing_or_naive_created_at():
+    """picks.created_at is NOT NULL in the current schema, but the column was
+    added by migration and rows can come back naive or aware depending on how
+    they were written. _dedupe_latest must not raise on either."""
+    from backend.digest.selector import _dedupe_latest
+
+    old = PickModel(id=1, game_id=1, strategy_id=1, pick_type="moneyline",
+                    pick_value="HOME ML", confidence=4, edge_pct=1.0,
+                    created_at=None)
+    naive = PickModel(id=2, game_id=1, strategy_id=1, pick_type="moneyline",
+                      pick_value="HOME ML", confidence=4, edge_pct=6.0,
+                      created_at=datetime(2026, 11, 1, 13, 0))
+    aware = PickModel(id=3, game_id=1, strategy_id=1, pick_type="moneyline",
+                      pick_value="HOME ML", confidence=4, edge_pct=9.9,
+                      created_at=datetime(2026, 11, 1, 18, 0, tzinfo=timezone.utc))
+
+    kept = _dedupe_latest([old, naive, aware])
+    assert len(kept) == 1
+    assert kept[0].edge_pct == 9.9, "the newest row wins; a NULL never does"
