@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from backend.pipeline.pick_generator import generate_and_store_picks
 from backend.models import Base, Game, Team, StrategyModel, PickModel
+from backend.analysis.variants.value_only import ValueOnlyStrategy
 
 def test_generate_picks_stores_to_db(db_engine, db_session):
     Base.metadata.create_all(db_engine)
@@ -69,6 +70,54 @@ def test_build_game_data_omits_pitcher_score_for_non_mlb():
     assert gd.home_stats.pitcher_skill_score is None  # ignored for non-MLB
     assert gd.away_stats.pitcher_skill_score is None
     session.close()
+
+
+def test_one_bad_game_does_not_discard_the_batch(db_engine, db_session, monkeypatch):
+    """A strategy.predict() exception on one game must not lose picks from
+    the other games in the same run. Before this guard, an unhandled
+    exception from predict() propagated past session.commit(), discarding
+    every pick generated in the loop so far."""
+    from backend.models import Odds
+
+    def _seed_game(game_id: int, home_id: int, away_id: int):
+        home = Team(id=home_id, name=f"H{home_id}", abbreviation=f"H{home_id}", sport="nba")
+        away = Team(id=away_id, name=f"A{away_id}", abbreviation=f"A{away_id}", sport="nba")
+        db_session.add_all([home, away])
+        db_session.flush()
+        g = Game(id=game_id, sport="nba", season="2026", date=date(2026, 3, 1),
+                  home_team_id=home_id, away_team_id=away_id, status="scheduled")
+        db_session.add(g)
+        db_session.flush()
+        db_session.add(Odds(game_id=game_id, bookmaker="dk", moneyline_home=-150, moneyline_away=130,
+            spread_home=0.0, spread_away=0.0, over_under=0.0,
+            timestamp=datetime(2026, 3, 1, 18, 0)))
+
+    Base.metadata.create_all(db_engine)
+    _seed_game(1, 1, 2)
+    _seed_game(2, 3, 4)
+    _seed_game(3, 5, 6)
+    s = StrategyModel(id=1, name="value_only", config_json='{"min_edge": 0.1}', is_active=True)
+    db_session.add(s)
+    db_session.commit()
+
+    real_predict = ValueOnlyStrategy.predict
+
+    def _predict_raising_on_game_2(self, game):
+        if game.game_id == 2:
+            raise ValueError("simulated bad game (e.g. invalid odds)")
+        return real_predict(self, game)
+
+    monkeypatch.setattr(ValueOnlyStrategy, "predict", _predict_raising_on_game_2)
+
+    count = generate_and_store_picks(db_session, strategy_id=1, target_date=date(2026, 3, 1))
+
+    picks = db_session.query(PickModel).all()
+    game_ids_with_picks = {p.game_id for p in picks}
+    assert 2 not in game_ids_with_picks, "the failing game should not have produced a pick"
+    assert 1 in game_ids_with_picks or 3 in game_ids_with_picks, (
+        "games 1 and 3 should still have produced picks despite game 2 raising"
+    )
+    assert count == len(picks)
 
 
 def test_pick_generator_routes_mma_games_to_combat_strategy():

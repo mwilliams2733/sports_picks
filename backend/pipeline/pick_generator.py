@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from backend.models import Game, PickModel, StrategyModel, Odds, TeamStat, EloRating
@@ -10,6 +11,8 @@ from backend.analysis.variants.sport_specific import SportSpecificStrategy
 from backend.analysis.variants.prop_value import PropValueStrategy
 from backend.analysis.variants.combat_sports import CombatSportsStrategy
 from backend.analysis.confidence import get_thresholds
+
+logger = logging.getLogger(__name__)
 
 STRATEGY_MAP = {
     "ensemble": EnsembleStrategy,
@@ -33,29 +36,33 @@ def generate_and_store_picks(session: Session, strategy_id: int,
     count = 0
     thresholds_by_sport: dict[str, dict] = {}
     for game in games:
-        if game.sport not in thresholds_by_sport:
-            thresholds_by_sport[game.sport] = get_thresholds(session, game.sport)
-        sport_thresholds = thresholds_by_sport[game.sport]
-        # Combat sports always route to CombatSportsStrategy because the team-based
-        # strategies have no signal for individual fighters. For team sports, use
-        # whichever strategy the user configured.
-        if game.sport in ("mma", "boxing"):
-            strategy = CombatSportsStrategy(strat_row.name, config, sport_thresholds)
-        else:
-            strategy = strategy_cls(strat_row.name, config, sport_thresholds)
-        game_data = _build_game_data(session, game, pitcher_scores=pitcher_scores)
-        if game.sport in ("mma", "boxing"):
-            game_data.home_fighter = _build_fighter_stats(session, game.home_team_id, game.sport, game.date)
-            game_data.away_fighter = _build_fighter_stats(session, game.away_team_id, game.sport, game.date)
-        picks = strategy.predict(game_data)
-        for pick in picks:
-            if pick.confidence >= 1:
-                db_pick = PickModel(game_id=game.id, strategy_id=strategy_id,
-                    pick_type=pick.pick_type, pick_value=pick.pick_value,
-                    confidence=pick.confidence, edge_pct=pick.edge_pct,
-                    odds_at_pick=pick.odds_at_pick, created_at=datetime.now(tz=timezone.utc))
-                session.add(db_pick)
-                count += 1
+        try:
+            if game.sport not in thresholds_by_sport:
+                thresholds_by_sport[game.sport] = get_thresholds(session, game.sport)
+            sport_thresholds = thresholds_by_sport[game.sport]
+            # Combat sports always route to CombatSportsStrategy because the team-based
+            # strategies have no signal for individual fighters. For team sports, use
+            # whichever strategy the user configured.
+            if game.sport in ("mma", "boxing"):
+                strategy = CombatSportsStrategy(strat_row.name, config, sport_thresholds)
+            else:
+                strategy = strategy_cls(strat_row.name, config, sport_thresholds)
+            game_data = _build_game_data(session, game, pitcher_scores=pitcher_scores)
+            if game.sport in ("mma", "boxing"):
+                game_data.home_fighter = _build_fighter_stats(session, game.home_team_id, game.sport, game.date)
+                game_data.away_fighter = _build_fighter_stats(session, game.away_team_id, game.sport, game.date)
+            picks = strategy.predict(game_data)
+            for pick in picks:
+                if pick.confidence >= 1:
+                    db_pick = PickModel(game_id=game.id, strategy_id=strategy_id,
+                        pick_type=pick.pick_type, pick_value=pick.pick_value,
+                        confidence=pick.confidence, edge_pct=pick.edge_pct,
+                        odds_at_pick=pick.odds_at_pick, created_at=datetime.now(tz=timezone.utc))
+                    session.add(db_pick)
+                    count += 1
+        except Exception:
+            logger.exception("Pick generation failed for game %s", game.id)
+            continue
     session.commit()
     return count
 

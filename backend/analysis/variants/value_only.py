@@ -1,6 +1,6 @@
 from backend.analysis.strategy import Strategy
 from backend.analysis.confidence import calculate_confidence
-from backend.analysis.odds_utils import american_to_implied_prob
+from backend.analysis.odds_utils import american_to_implied_prob, remove_vig
 from backend.data_types import GameData, Pick
 
 
@@ -22,8 +22,9 @@ class ValueOnlyStrategy(Strategy):
             return []
 
         if avg_odds["moneyline_home"] is not None:
-            implied_home = american_to_implied_prob(avg_odds["moneyline_home"])
-            implied_away = american_to_implied_prob(avg_odds["moneyline_away"])
+            raw_home = american_to_implied_prob(avg_odds["moneyline_home"])
+            raw_away = american_to_implied_prob(avg_odds["moneyline_away"])
+            implied_home, implied_away = remove_vig(raw_home, raw_away)
             home_edge = (home_prob - implied_home) * 100
             away_edge = (away_prob - implied_away) * 100
 
@@ -77,15 +78,3 @@ class ValueOnlyStrategy(Strategy):
             if aws.elo_rating > hs.elo_rating: count += 1
             if (aws.offensive_rating - aws.defensive_rating) > (hs.offensive_rating - hs.defensive_rating): count += 1
         return count
-
-    def _average_odds(self, game: GameData) -> dict | None:
-        if not game.odds:
-            return None
-        ml_home = [o.moneyline_home for o in game.odds if o.moneyline_home is not None]
-        ml_away = [o.moneyline_away for o in game.odds if o.moneyline_away is not None]
-        if not ml_home:
-            return None
-        return {
-            "moneyline_home": int(sum(ml_home) / len(ml_home)),
-            "moneyline_away": int(sum(ml_away) / len(ml_away)),
-        }

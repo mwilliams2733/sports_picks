@@ -259,30 +259,6 @@ class EnsembleStrategy(Strategy):
                 weights["rating"] * rating_score + weights["hca"] * get_home_win_rate(game.sport))
         return max(0.01, min(0.99, prob))
 
-    def _average_odds(self, game: GameData) -> dict | None:
-        if not game.odds: return None
-        ml_home = [o.moneyline_home for o in game.odds if o.moneyline_home is not None]
-        ml_away = [o.moneyline_away for o in game.odds if o.moneyline_away is not None]
-        if not ml_home: return None
-        result = {
-            "moneyline_home": int(sum(ml_home) / len(ml_home)),
-            "moneyline_away": int(sum(ml_away) / len(ml_away)),
-        }
-        sp_home = [o.spread_home for o in game.odds if o.spread_home is not None]
-        sp_away = [o.spread_away for o in game.odds if o.spread_away is not None]
-        if sp_home:
-            result["spread_home"] = round(sum(sp_home) / len(sp_home), 1)
-            result["spread_away"] = round(sum(sp_away) / len(sp_away), 1)
-        else:
-            result["spread_home"] = None
-            result["spread_away"] = None
-        ou = [o.over_under for o in game.odds if o.over_under is not None]
-        if ou:
-            result["over_under"] = round(sum(ou) / len(ou), 1)
-        else:
-            result["over_under"] = None
-        return result
-
     def _predicted_point_diff(self, game: GameData) -> float:
         """Predict home margin of victory using model components."""
         hs, aws = game.home_stats, game.away_stats
