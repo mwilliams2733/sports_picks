@@ -668,7 +668,7 @@ Temporarily remove the `factors=` argument from the `"HOME ML"` construction in 
 - [ ] **Step 9: Run the full suite**
 
 Run: `.venv/Scripts/python.exe -m pytest backend/tests -q`
-Expected: `412 passed`, 0 failed
+Expected: `411 passed`, 0 failed
 
 - [ ] **Step 10: Commit**
 
@@ -1012,7 +1012,7 @@ Change `picks[:max_per_sport]` to pad the list to `max_per_sport` with duplicate
 - [ ] **Step 6: Run the full suite**
 
 Run: `.venv/Scripts/python.exe -m pytest backend/tests -q`
-Expected: `419 passed`, 0 failed
+Expected: `418 passed`, 0 failed
 
 - [ ] **Step 7: Commit**
 
@@ -1217,7 +1217,7 @@ Expected: PASS, 6 passed
 - [ ] **Step 5: Run the full suite**
 
 Run: `.venv/Scripts/python.exe -m pytest backend/tests -q`
-Expected: `425 passed`, 0 failed
+Expected: `424 passed`, 0 failed
 
 - [ ] **Step 6: Commit**
 
@@ -1527,7 +1527,7 @@ def test_digest_job_registered_when_enabled():
 - [ ] **Step 9: Run the full suite**
 
 Run: `.venv/Scripts/python.exe -m pytest backend/tests -q`
-Expected: `432 passed`, 0 failed
+Expected: `431 passed`, 0 failed
 
 - [ ] **Step 10: Manual dry-run check**
 
