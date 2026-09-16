@@ -21,7 +21,7 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 004 | Make the activity feed work (route order + WS dispatch) | P1 | M | 001 — merged | TODO — refreshed against `943cf25`, ready to dispatch |
 | 005 | Scrub the API key from logs, restore the budget alarm | P1 | S | — | **MERGED** into `master` as `b62358e` |
 | 006 | Per-sport, push-aware, newest-first recalibration | P1 | S | — | **MERGED** into `master` as `0e1f13f` |
-| 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | TODO — written against `54d38c4` |
+| 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | **DONE** — branch `advisor/007-calibration-report`, commit `cdc8011`. Hit its own STOP condition and found a data defect underneath (see below) |
 
 Suite after five merges (001, 002, 003, 005, 006): **409 passed** (360 baseline + 21 + 6 + 8), 0 failed.
 Plan 004 was written against `5c2e0d0` and has been refreshed against `943cf25`:
@@ -100,6 +100,28 @@ They are real; they were deprioritized for this batch, not dismissed.
   before (which ignored the DB entirely), but the pipeline wants per-sport
   analyzers. Guarded against empty days by the early return at
   `prop_pipeline.py:63`. Worth its own small plan.
+
+**ROOT CAUSE FOUND BY PLAN 007 — the model has essentially no training data:**
+- **Nothing in the production pipeline ever writes a `TeamStat` row.** Every one
+  of the ~20 non-test references to `TeamStat` in `backend/` is a READ
+  (`calibrated_model.py`, `ensemble.py`, `pick_generator.py`, `prop_pipeline.py`,
+  `props.py`, `opponent_adjustments.py`). The table is defined and queried and
+  populated by nothing. Verified: `team_stats` holds 330 rows spanning **exactly
+  one** `game_id` (1014), out of 1058 final games.
+- **`elo_history` is completely empty** (0 rows), so there is no point-in-time
+  Elo. `grader.py:197` writes it, but only where its Elo-update path runs.
+- Consequence: `CalibratedModel` trains on 1058 games where 4 of 5 features are
+  identically 0.0 in 1057 of them. Its coefficients come from a single row, and
+  at serve time it is handed real values — a train/serve skew of about ±5 logits.
+  **That is the mechanism behind the 99% predictions**, not a tuning problem.
+- **`pick_generator._get_team_stats` (line 208) filters on `team_id` only, not
+  `game_id`.** So the handful of teams that appear in game 1014 get that game's
+  stats applied to *every* game they play, while every other team gets defaults
+  (point_diff 0, ratings 100/100). This is also why some generated picks carried
+  `recent_form` / `net_rating` factors and others did not.
+- **Fix the data before any shrinkage, ranking-key or `min_edge` change.**
+  Calibration cannot be meaningfully measured until the features exist: only 20
+  NBA final games fall after game 1014, so there is no out-of-sample window.
 
 **Model / data correctness:**
 - LightGBM is trained nightly, four times, on identical unfiltered cross-sport
