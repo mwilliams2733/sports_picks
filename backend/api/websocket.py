@@ -18,7 +18,8 @@ class ConnectionManager:
         logger.info("WebSocket connected. Active: %d", len(self.active_connections))
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
         logger.info("WebSocket disconnected. Active: %d", len(self.active_connections))
 
     async def broadcast(self, event_type: str, payload: dict):
@@ -53,4 +54,6 @@ async def websocket_endpoint(websocket: WebSocket):
             except json.JSONDecodeError:
                 pass
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket)

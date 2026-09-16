@@ -3,6 +3,7 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from backend.api.main import create_app
+from backend.api.websocket import ConnectionManager
 from backend.database import get_session
 from backend.models import Base, Team, Game
 
@@ -69,3 +70,30 @@ def test_pick_placed_broadcasts_frame():
             frame = ws.receive_json()
             assert frame["type"] == "pick_placed"
             assert "alice" in frame["data"]["message"]
+
+
+def test_disconnect_is_idempotent():
+    """Calling disconnect twice on the same socket must not raise."""
+    manager = ConnectionManager()
+
+    class FakeSocket:
+        pass
+
+    fake = FakeSocket()
+    manager.active_connections.append(fake)
+    manager.disconnect(fake)
+    manager.disconnect(fake)  # must not raise ValueError
+    assert fake not in manager.active_connections
+
+
+def test_connection_removed_after_close():
+    app = create_app(":memory:")
+    with TestClient(app) as client:
+        Base.metadata.create_all(client.app.state.engine)
+
+        from backend.api.websocket import manager
+
+        with client.websocket_connect("/ws"):
+            assert len(manager.active_connections) == 1
+
+        assert len(manager.active_connections) == 0
