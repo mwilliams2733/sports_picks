@@ -6,7 +6,7 @@ emit spread or total picks (those don't apply to combat sports).
 from __future__ import annotations
 from backend.analysis.strategy import Strategy
 from backend.analysis.confidence import calculate_confidence
-from backend.analysis.odds_utils import american_to_implied_prob
+from backend.analysis.odds_utils import american_to_implied_prob, remove_vig
 from backend.data_types import GameData, Pick
 
 
@@ -39,8 +39,9 @@ class CombatSportsStrategy(Strategy):
 
         min_edge = self.config.get("min_edge", 5.0)
         picks: list[Pick] = []
-        implied_home = american_to_implied_prob(avg_odds["moneyline_home"])
-        implied_away = american_to_implied_prob(avg_odds["moneyline_away"])
+        raw_home = american_to_implied_prob(avg_odds["moneyline_home"])
+        raw_away = american_to_implied_prob(avg_odds["moneyline_away"])
+        implied_home, implied_away = remove_vig(raw_home, raw_away)
         home_edge = (home_prob - implied_home) * 100
         away_edge = (away_prob - implied_away) * 100
 

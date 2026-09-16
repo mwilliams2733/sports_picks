@@ -1,5 +1,14 @@
 """Tests for distribution-based edge calculations in EnsembleStrategy."""
+from datetime import date
+
+import pytest
+
 from backend.analysis.variants.ensemble import EnsembleStrategy
+from backend.analysis.variants.value_only import ValueOnlyStrategy
+from backend.analysis.variants.sport_specific import SportSpecificStrategy
+from backend.analysis.variants.recent_form import RecentFormStrategy
+from backend.analysis.variants.combat_sports import CombatSportsStrategy
+from backend.data_types import GameData, TeamStats, OddsSnapshot, FighterStats
 
 
 def test_spread_cover_probability_home():
@@ -51,3 +60,73 @@ def test_edge_uses_vig_adjusted_prob():
     edge_with_vig = (model_prob - raw_implied) * 100
     edge_no_vig = (model_prob - no_vig) * 100
     assert edge_no_vig > edge_with_vig
+
+
+def _team_stats() -> TeamStats:
+    return TeamStats(
+        point_diff=0.0, home_record=(0, 0), away_record=(0, 0),
+        last_n_record=(0, 0), offensive_rating=100.0, defensive_rating=100.0,
+        pace=100.0, strength_of_schedule=0.5, elo_rating=1500.0, rest_days=1,
+    )
+
+
+def _game_with_pickem_odds(sport: str = "nba") -> GameData:
+    """Two books at -110/-110 -- a symmetric, vig-heavy quote."""
+    odds = [
+        OddsSnapshot(bookmaker="book1", moneyline_home=-110, moneyline_away=-110,
+                     spread_home=None, spread_away=None, over_under=None),
+        OddsSnapshot(bookmaker="book2", moneyline_home=-110, moneyline_away=-110,
+                     spread_home=None, spread_away=None, over_under=None),
+    ]
+    return GameData(
+        game_id=1, sport=sport, date=date(2026, 3, 13),
+        home_team_id=1, away_team_id=2,
+        home_stats=_team_stats(), away_stats=_team_stats(), odds=odds,
+    )
+
+
+def test_all_variants_agree_on_devigged_edge(monkeypatch):
+    """Design doc §1f: "Update all edge calculations across strategy variants."
+
+    Before plan 003, ensemble already de-vigged (this file's own
+    test_edge_uses_vig_adjusted_prob documented that the four other variants
+    did not, and so disagreed with ensemble for identical inputs). After
+    plan 003 all five variants share Strategy._average_odds and call
+    remove_vig identically, so a model that believes the *true* (de-vigged)
+    fair probability is exactly 0.5 must show ~0 edge in every variant --
+    not the ~+2.4 that a naive "matches the raw -110 price" model would
+    show against the still-vig-laden raw implied probability.
+    """
+    fair_prob = 0.5  # no_vig_implied_prob("home", -110, -110)
+    # A very negative min_edge guarantees a pick is emitted regardless of
+    # the (near-zero) edge sign, so we can read edge_pct off the Pick.
+    config = {"min_edge": -100.0}
+
+    monkeypatch.setattr(EnsembleStrategy, "_calibrated_probability", lambda self, game: fair_prob)
+    monkeypatch.setattr(ValueOnlyStrategy, "_model_probability", lambda self, game: fair_prob)
+    monkeypatch.setattr(SportSpecificStrategy, "_model_probability", lambda self, game: fair_prob)
+    monkeypatch.setattr(RecentFormStrategy, "_model_probability", lambda self, game, lookback: fair_prob)
+    monkeypatch.setattr(CombatSportsStrategy, "_model_probability", lambda self, home, away: fair_prob)
+
+    game = _game_with_pickem_odds()
+    for strategy in (
+        EnsembleStrategy(name="ensemble", config=config),
+        ValueOnlyStrategy(name="value_only", config=config),
+        SportSpecificStrategy(name="sport_specific", config=config),
+        RecentFormStrategy(name="recent_form", config=config),
+    ):
+        picks = strategy.predict(game)
+        assert len(picks) == 1, f"{strategy.name} produced {len(picks)} picks"
+        assert picks[0].edge_pct == pytest.approx(0.0, abs=0.5), strategy.name
+
+    combat_game = _game_with_pickem_odds(sport="mma")
+    combat_game.home_fighter = FighterStats(elo_rating=1500, recent_form_score=0.5,
+                                             opponent_avg_elo=1500, fights_count=10,
+                                             days_since_last_fight=90)
+    combat_game.away_fighter = FighterStats(elo_rating=1500, recent_form_score=0.5,
+                                             opponent_avg_elo=1500, fights_count=10,
+                                             days_since_last_fight=90)
+    combat_strategy = CombatSportsStrategy(name="combat_sports", config=config)
+    combat_picks = combat_strategy.predict(combat_game)
+    assert len(combat_picks) == 1
+    assert combat_picks[0].edge_pct == pytest.approx(0.0, abs=0.5)
