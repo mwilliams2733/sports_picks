@@ -172,15 +172,3 @@ class SportSpecificStrategy(Strategy):
             if game.sport == "mlb" and hs.pitcher_skill_score is not None and aws.pitcher_skill_score is not None:
                 if aws.pitcher_skill_score > hs.pitcher_skill_score: count += 1
         return count
-
-    def _average_odds(self, game: GameData) -> dict | None:
-        if not game.odds:
-            return None
-        ml_home = [o.moneyline_home for o in game.odds if o.moneyline_home is not None]
-        ml_away = [o.moneyline_away for o in game.odds if o.moneyline_away is not None]
-        if not ml_home:
-            return None
-        return {
-            "moneyline_home": int(sum(ml_home) / len(ml_home)),
-            "moneyline_away": int(sum(ml_away) / len(ml_away)),
-        }

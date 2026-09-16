@@ -101,15 +101,3 @@ class RecentFormStrategy(Strategy):
             + (momentum_weight / total_weight) * momentum_score
         )
         return max(0.01, min(0.99, prob))
-
-    def _average_odds(self, game: GameData) -> dict | None:
-        if not game.odds:
-            return None
-        ml_home = [o.moneyline_home for o in game.odds if o.moneyline_home is not None]
-        ml_away = [o.moneyline_away for o in game.odds if o.moneyline_away is not None]
-        if not ml_home:
-            return None
-        return {
-            "moneyline_home": int(sum(ml_home) / len(ml_home)),
-            "moneyline_away": int(sum(ml_away) / len(ml_away)),
-        }

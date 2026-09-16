@@ -33,7 +33,7 @@ class CombatSportsStrategy(Strategy):
         home_prob = self._model_probability(home_fighter, away_fighter)
         away_prob = 1.0 - home_prob
 
-        avg_odds = self._average_h2h_odds(game)
+        avg_odds = self._average_odds(game)
         if avg_odds is None:
             return []
 
@@ -84,13 +84,3 @@ class CombatSportsStrategy(Strategy):
         else:
             prob = 0.78 * elo_term + 0.22 * form_term
         return max(0.05, min(0.95, prob))
-
-    def _average_h2h_odds(self, game) -> dict | None:
-        ml_home = [o.moneyline_home for o in game.odds if o.moneyline_home is not None]
-        ml_away = [o.moneyline_away for o in game.odds if o.moneyline_away is not None]
-        if not ml_home or not ml_away:
-            return None
-        return {
-            "moneyline_home": int(sum(ml_home) / len(ml_home)),
-            "moneyline_away": int(sum(ml_away) / len(ml_away)),
-        }
