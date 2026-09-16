@@ -811,6 +811,32 @@ def test_matchup_reads_away_at_home():
     _mk(s, "nfl", 1, 1, 2, d, [(5, 9.0)])
     sections = select_digest(s, d, ["nfl"], SEASONS)
     assert sections[0].picks[0].matchup == "A1 @ H1"
+
+
+def test_prop_picks_never_rank_against_game_picks():
+    # prop_pipeline writes analyzed props into the SAME picks table with
+    # pick_type="prop". A prop's edge_pct is (prob - 0.5) * 200 and ignores
+    # the prop's price, so it is not comparable to a game pick's de-vigged
+    # edge. A juiced prop with a huge nominal edge must not appear in — let
+    # alone top — the game-pick list.
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk(s, "nfl", 1, 1, 2, d, [(3, 4.0)])
+    s.add(PickModel(game_id=1, strategy_id=1, pick_type="prop",
+                    pick_value="Mahomes Over 275.5 Pass Yards",
+                    confidence=5, edge_pct=40.0, odds_at_pick=-300))
+    s.commit()
+
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    game_values = [p.pick_value for p in sections[0].picks]
+    assert "Mahomes Over 275.5 Pass Yards" not in game_values
+    assert game_values == ["P1-0"]
+
+    prop_values = [p.pick_value for p in sections[0].props]
+    assert prop_values == ["Mahomes Over 275.5 Pass Yards"]
+    assert sections[0].props[0].confidence == 5, (
+        "props carry real confidence from PickModel, not a placeholder 0"
+    )
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -837,7 +863,7 @@ from datetime import datetime
 from backend.config import is_sport_in_season
 from backend.data_types import PickFactor
 from backend.analysis.rationale import render_rationale
-from backend.models import Game, PickModel, PlayerProp, Team
+from backend.models import Game, PickModel, Team
 
 
 @dataclass(frozen=True)
@@ -901,9 +927,16 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5)
             continue
         games_by_id = {g.id: g for g in games}
 
+        # `prop_pipeline` writes its analyzed props into this SAME picks table
+        # with pick_type="prop". They must never be ranked against game picks:
+        # a prop's edge_pct is (prob - 0.5) * 200, which ignores the prop's
+        # price, while a game pick's edge is measured against the de-vigged
+        # market. Mixing them floats juiced props above better game picks.
         picks = (
             session.query(PickModel)
-            .filter(PickModel.game_id.in_(list(games_by_id)), PickModel.confidence >= 1)
+            .filter(PickModel.game_id.in_(list(games_by_id)),
+                    PickModel.confidence >= 1,
+                    PickModel.pick_type != "prop")
             .all()
         )
         def _pick_sort_key(p):
@@ -930,23 +963,26 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5)
             for p in picks[:max_per_sport]
         ]
 
+        # Props come from the same table but are ranked among themselves only.
         props = (
-            session.query(PlayerProp)
-            .filter(PlayerProp.game_id.in_(list(games_by_id)))
+            session.query(PickModel)
+            .filter(PickModel.game_id.in_(list(games_by_id)),
+                    PickModel.confidence >= 1,
+                    PickModel.pick_type == "prop")
             .all()
         )
-        props.sort(key=lambda pr: (pr.player_name or "", pr.id or 0))
+        props.sort(key=_pick_sort_key)
         digest_props = [
             DigestPick(
                 sport=sport,
-                matchup=_matchup(session, games_by_id[pr.game_id]),
-                pick_value=f"{pr.player_name} {pr.outcome} {pr.line} ({pr.market})",
-                odds=pr.odds,
-                confidence=0,
-                edge_pct=0.0,
-                rationale="",
+                matchup=_matchup(session, games_by_id[p.game_id]),
+                pick_value=p.pick_value,
+                odds=p.odds_at_pick or -110,
+                confidence=p.confidence,
+                edge_pct=round(p.edge_pct or 0.0, 1),
+                rationale=_rationale_for(session, p, games_by_id[p.game_id]),
             )
-            for pr in props[:max_per_sport]
+            for p in props[:max_per_sport]
         ]
 
         if not digest_picks and not digest_props:
@@ -956,16 +992,18 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5)
     return sections
 ```
 
-> **Note on props ranking:** `PlayerProp` rows carry no confidence or edge —
-> those live on the analyzed output, not the raw prop. This task sorts props
-> deterministically by player name so the selector is complete and testable.
-> Wiring real prop confidence is deliberately deferred; see "Deferred" at the
-> end of this plan.
+> **Note on props ranking (corrected during execution):** an earlier draft of
+> this plan read props from the raw `PlayerProp` table and claimed they carry
+> no confidence or edge. That was wrong. `prop_pipeline.py` persists its
+> *analyzed* props into the `picks` table as `PickModel` rows with
+> `pick_type="prop"`, carrying real `confidence` and `edge_pct`. So props are
+> read from `PickModel` and ranked by quality — but strictly among themselves,
+> never against game picks.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/Scripts/python.exe -m pytest backend/tests/test_digest_selector.py -q`
-Expected: PASS, 6 passed
+Expected: PASS, 7 passed
 
 - [ ] **Step 5: Prove the never-pad guard is real**
 
@@ -974,7 +1012,7 @@ Change `picks[:max_per_sport]` to pad the list to `max_per_sport` with duplicate
 - [ ] **Step 6: Run the full suite**
 
 Run: `.venv/Scripts/python.exe -m pytest backend/tests -q`
-Expected: `418 passed`, 0 failed
+Expected: `419 passed`, 0 failed
 
 - [ ] **Step 7: Commit**
 
@@ -1179,7 +1217,7 @@ Expected: PASS, 6 passed
 - [ ] **Step 5: Run the full suite**
 
 Run: `.venv/Scripts/python.exe -m pytest backend/tests -q`
-Expected: `424 passed`, 0 failed
+Expected: `425 passed`, 0 failed
 
 - [ ] **Step 6: Commit**
 
@@ -1489,7 +1527,7 @@ def test_digest_job_registered_when_enabled():
 - [ ] **Step 9: Run the full suite**
 
 Run: `.venv/Scripts/python.exe -m pytest backend/tests -q`
-Expected: `431 passed`, 0 failed
+Expected: `432 passed`, 0 failed
 
 - [ ] **Step 10: Manual dry-run check**
 
@@ -1514,7 +1552,7 @@ git commit -m "feat(digest): send the daily digest on an 11:00 ET schedule"
 
 Recorded so they are not rediscovered as bugs:
 
-- **Real prop ranking.** `PlayerProp` rows carry no confidence or edge — those exist only on `PropAnalysis`, which is not persisted per prop. Task 4 sorts props deterministically by player name. Ranking props by quality requires persisting analyzed prop output first.
+- ~~**Real prop ranking.**~~ Resolved during execution: analyzed props ARE persisted, as `PickModel` rows with `pick_type="prop"`, so Task 4 ranks them by confidence and edge like game picks — separately, never merged.
 - **Merging props into the main ranking.** Blocked on prop edge becoming price-aware; prop `edge_pct` is `(prob - 0.5) * 200` and ignores the prop's price, so it is not comparable to a game pick's de-vigged edge.
 - **Factors on spread and total picks.** Task 3 emits factors for moneyline picks only.
 - **Fighter-specific factors** for boxing/MMA.
