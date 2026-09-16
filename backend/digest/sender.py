@@ -30,9 +30,13 @@ def send_email(subject, html, text, sender, recipients,
     Never raises: a digest failure must not propagate into the scheduler.
     """
     if dry_run_path:
-        with open(dry_run_path, "w", encoding="utf-8") as fh:
-            fh.write(html)
-        logger.info("Digest dry run written to %s (nothing sent)", dry_run_path)
+        try:
+            with open(dry_run_path, "w", encoding="utf-8") as fh:
+                fh.write(html)
+            logger.info("Digest dry run written to %s (nothing sent)", dry_run_path)
+        except OSError as e:
+            logger.warning("Digest dry run write failed: %s: %s",
+                           type(e).__name__, _scrub(str(e), api_key))
         return False
 
     if not api_key:
@@ -40,6 +44,12 @@ def send_email(subject, html, text, sender, recipients,
         return False
     if not recipients:
         logger.warning("No digest recipients configured; nothing sent")
+        return False
+    if not isinstance(recipients, (list, tuple)):
+        logger.warning(
+            "digest.recipients must be a list, got %s; nothing sent",
+            type(recipients).__name__,
+        )
         return False
 
     try:

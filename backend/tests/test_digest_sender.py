@@ -80,3 +80,38 @@ def test_digest_job_registered_when_enabled():
                                 get_engine(":memory:"))
     job = sched.get_job("daily_digest")
     assert job is not None
+
+
+def test_dry_run_bad_path_does_not_raise(monkeypatch):
+    calls = []
+    monkeypatch.setattr("backend.digest.sender.httpx.post",
+                        lambda *a, **k: calls.append(a) or None)
+    bad_path = "/no/such/directory/digest.html"
+    sent = send_email("subj", "<p>hi</p>", "hi", "a@b.c", ["d@e.f"],
+                      api_key=None, dry_run_path=bad_path)
+    assert sent is False
+    assert calls == [], "dry run must not call the network"
+
+
+def test_send_email_rejects_scalar_recipients(monkeypatch):
+    calls = []
+    monkeypatch.setattr("backend.digest.sender.httpx.post",
+                        lambda *a, **k: calls.append(a) or None)
+    sent = send_email("subj", "<p>hi</p>", "hi", "a@b.c", "a@b.c",
+                      api_key="FAKEKEY123")
+    assert sent is False
+    assert calls == [], "a bare string recipient must not reach the network"
+
+
+def test_job_never_raises_when_get_session_fails(monkeypatch):
+    from backend.database import get_engine
+    engine = get_engine(":memory:")
+
+    def _raise(*a, **k):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr("backend.digest.job.get_session", _raise)
+    result = send_daily_digest({"seasons": {}, "digest": {"enabled": True}},
+                               engine, target_date=date(2026, 11, 1))
+    assert result["sent"] is False
+    assert "error" in result

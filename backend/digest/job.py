@@ -26,8 +26,9 @@ def send_daily_digest(config: dict, engine, target_date=None) -> dict:
         from datetime import datetime
         target_date = datetime.now(tz=ET).date()
 
-    session = get_session(engine)
+    session = None
     try:
+        session = get_session(engine)
         sections = select_digest(
             session,
             target_date,
@@ -60,4 +61,5 @@ def send_daily_digest(config: dict, engine, target_date=None) -> dict:
         result["error"] = type(e).__name__
         return result
     finally:
-        session.close()
+        if session is not None:
+            session.close()
