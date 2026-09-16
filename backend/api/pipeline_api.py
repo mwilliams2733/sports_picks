@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import date
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -10,6 +11,7 @@ from backend.pipeline.full_pipeline import (
 from backend.pipeline.pick_generator import generate_and_store_picks
 from backend.pipeline.prop_pipeline import run_prop_pipeline
 from backend.collectors.budget import get_credit_summary, DEFAULT_BUDGET
+from backend.collectors.odds_api import redact_api_key
 from backend.exceptions import BudgetExhaustedError
 from backend.models import StrategyModel
 
@@ -119,10 +121,14 @@ async def trigger_pipeline(
             content={"status": "budget_exhausted", "message": str(e), **summary},
         )
     except Exception as e:
-        logger.error(f"Pipeline error: {e}", exc_info=True)
+        error_id = uuid.uuid4().hex[:12]
+        logger.error(
+            "Pipeline error [%s]: %s: %s",
+            error_id, type(e).__name__, redact_api_key(str(e)),
+        )
         return JSONResponse(
             status_code=500,
-            content={"status": "error", "message": str(e)},
+            content={"status": "error", "message": "Pipeline run failed", "error_id": error_id},
         )
     finally:
         session.close()

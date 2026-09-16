@@ -1,4 +1,19 @@
+import re
 import httpx
+
+_APIKEY_RE = re.compile(r"(apiKey=)[^&\s'\"]+", re.IGNORECASE)
+
+
+def redact_api_key(text: str) -> str:
+    """Replace any apiKey query-parameter value with a placeholder.
+
+    The Odds API only accepts its key as a query parameter, so the key ends up
+    inside httpx exception strings (which embed the request URL). Any text
+    derived from such an exception must pass through here before being logged
+    or returned.
+    """
+    return _APIKEY_RE.sub(r"\1<redacted>", text)
+
 
 SPORT_KEYS = {
     "nba": "basketball_nba",

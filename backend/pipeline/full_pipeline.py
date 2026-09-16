@@ -3,7 +3,7 @@ import logging
 from datetime import date, datetime, timezone
 from sqlalchemy.orm import Session
 from backend.collectors.espn import ESPNCollector
-from backend.collectors.odds_api import OddsAPICollector
+from backend.collectors.odds_api import OddsAPICollector, redact_api_key
 from backend.collectors.budget import check_budget, record_api_call, BudgetStatus
 from backend.exceptions import BudgetExhaustedError
 from backend.models import Team, Game, Odds, PlayerProp
@@ -26,7 +26,7 @@ async def fetch_and_store_games(session: Session, sports: list[str], target_date
                 total += stored
                 logger.info(f"Stored {stored} {sport} games for {target_date}")
             except Exception as e:
-                logger.warning(f"ESPN fetch failed for {sport}: {e}")
+                logger.warning("ESPN fetch failed for %s: %s: %s", sport, type(e).__name__, e)
     finally:
         await espn.close()
     return total
@@ -49,6 +49,9 @@ async def fetch_and_store_odds(session: Session, sports: list[str], api_key: str
                         from backend.collectors.budget import get_credit_summary
                         summary = get_credit_summary(session, budget)
                         raise BudgetExhaustedError(summary["monthly_used"], budget["monthly_limit"], summary["daily_used"])
+                    if status == BudgetStatus.RESERVE_EXHAUSTED:
+                        logger.warning(f"Budget reserve exhausted, stopping odds fetch for {sport}")
+                        break
                 odds_data = await collector.fetch_odds(sport)
                 record_api_call(session, "odds", sport, collector.requests_remaining)
                 # For each event, ensure a game exists (creates from Odds API if needed)
@@ -57,8 +60,13 @@ async def fetch_and_store_odds(session: Session, sports: list[str], api_key: str
                 stored = _store_odds(session, sport, odds_data)
                 total += stored
                 logger.info(f"Stored odds for {stored} {sport} events (remaining: {collector.requests_remaining})")
+            except BudgetExhaustedError:
+                raise
             except Exception as e:
-                logger.warning(f"Odds API fetch failed for {sport}: {e}")
+                logger.warning(
+                    "Odds API fetch failed for %s: %s: %s",
+                    sport, type(e).__name__, redact_api_key(str(e)),
+                )
     finally:
         await collector.close()
     return total
@@ -112,8 +120,13 @@ async def fetch_and_store_props(session: Session, sports: list[str], api_key: st
                     stored = _store_props(session, game.id, props)
                     total += stored
                 logger.info(f"Stored {total} props for {sport}")
+            except BudgetExhaustedError:
+                raise
             except Exception as e:
-                logger.warning(f"Props fetch failed for {sport}: {e}")
+                logger.warning(
+                    "Props fetch failed for %s: %s: %s",
+                    sport, type(e).__name__, redact_api_key(str(e)),
+                )
     finally:
         await collector.close()
     return total
