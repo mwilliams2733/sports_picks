@@ -105,7 +105,7 @@ class CalibratedModel:
             session.query(Game)
             .filter(
                 and_(
-                    Game.status == "completed",
+                    Game.status == "final",
                     Game.home_score.isnot(None),
                     Game.away_score.isnot(None),
                 )
@@ -115,7 +115,7 @@ class CalibratedModel:
 
         if len(completed_games) < MIN_TRAINING_GAMES:
             logger.info(
-                "Only %d completed games found (need %d). Skipping calibration.",
+                "Only %d final games found (need %d). Skipping calibration.",
                 len(completed_games),
                 MIN_TRAINING_GAMES,
             )
