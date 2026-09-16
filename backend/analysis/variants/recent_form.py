@@ -37,7 +37,8 @@ class RecentFormStrategy(Strategy):
                     model_probability=round(home_prob, 4),
                     implied_probability=round(implied_home, 4),
                     odds_at_pick=avg_odds["moneyline_home"],
-                    suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction)))
+                    suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction),
+                    factors=self._build_factors(game, "home")))
             elif away_edge >= min_edge:
                 picks.append(Pick(
                     game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
@@ -46,7 +47,8 @@ class RecentFormStrategy(Strategy):
                     model_probability=round(away_prob, 4),
                     implied_probability=round(implied_away, 4),
                     odds_at_pick=avg_odds["moneyline_away"],
-                    suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction)))
+                    suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction),
+                    factors=self._build_factors(game, "away")))
         return picks
 
     def _model_probability(self, game: GameData, lookback: int) -> float:

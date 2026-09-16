@@ -45,7 +45,8 @@ class SportSpecificStrategy(Strategy):
                     edge_pct=round(home_edge, 1),
                     model_probability=round(home_prob, 4),
                     implied_probability=round(implied_home, 4),
-                    odds_at_pick=avg_odds["moneyline_home"]))
+                    odds_at_pick=avg_odds["moneyline_home"],
+                    factors=self._build_factors(game, "home")))
             elif away_edge >= min_edge:
                 models = self._count_agreeing(game, "away")
                 picks.append(Pick(
@@ -54,7 +55,8 @@ class SportSpecificStrategy(Strategy):
                     edge_pct=round(away_edge, 1),
                     model_probability=round(away_prob, 4),
                     implied_probability=round(implied_away, 4),
-                    odds_at_pick=avg_odds["moneyline_away"]))
+                    odds_at_pick=avg_odds["moneyline_away"],
+                    factors=self._build_factors(game, "away")))
         return picks
 
     def _model_probability(self, game: GameData) -> float:

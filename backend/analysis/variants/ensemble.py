@@ -44,14 +44,16 @@ class EnsembleStrategy(Strategy):
                     confidence=calculate_confidence(home_edge, models, self.thresholds), edge_pct=round(home_edge, 1),
                     model_probability=round(home_prob, 4), implied_probability=round(implied_home, 4),
                     odds_at_pick=avg_odds["moneyline_home"],
-                    suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction)))
+                    suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction),
+                    factors=self._build_factors(game, "home")))
             elif away_edge >= min_edge:
                 models = self._count_agreeing_models(game, "away")
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
                     confidence=calculate_confidence(away_edge, models, self.thresholds), edge_pct=round(away_edge, 1),
                     model_probability=round(away_prob, 4), implied_probability=round(implied_away, 4),
                     odds_at_pick=avg_odds["moneyline_away"],
-                    suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction)))
+                    suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction),
+                    factors=self._build_factors(game, "away")))
 
         # Spread picks — distribution-based: P(cover) via normal CDF
         if avg_odds.get("spread_home") is not None:

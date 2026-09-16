@@ -47,12 +47,11 @@ def test_pick_persists_rationale_and_model_prob():
     assert pick.model_prob is not None, "model_prob must be persisted"
     assert 0.0 < pick.model_prob < 1.0
 
-    # Task 2 only guarantees the column round-trips valid JSON. Strategies do
-    # not emit factors until Task 3, so the list may legitimately be empty
-    # here; Task 3 adds the assertion that it is non-empty.
     assert pick.rationale_json is not None, "rationale_json must be persisted"
     factors = json.loads(pick.rationale_json)
-    assert isinstance(factors, list)
+    assert isinstance(factors, list) and len(factors) >= 1, (
+        "strategies must emit at least one factor for a moneyline pick"
+    )
     for f in factors:
         assert set(f) == {"code", "side", "strength"}
         assert f["side"] in ("home", "away", "over", "under")
