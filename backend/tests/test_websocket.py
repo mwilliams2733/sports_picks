@@ -1,3 +1,5 @@
+import queue
+import threading
 from datetime import date
 
 from fastapi.testclient import TestClient
@@ -6,6 +8,42 @@ from backend.api.main import create_app
 from backend.api.websocket import ConnectionManager
 from backend.database import get_session
 from backend.models import Base, Team, Game
+
+# Starlette's WebSocketTestSession.receive() has no internal timeout, so a
+# regressed broadcast dispatch would otherwise hang this test (and the whole
+# pytest run) forever instead of failing. Bound the wait explicitly.
+#
+# We can't use concurrent.futures.ThreadPoolExecutor for this: its atexit
+# hook joins every worker thread of every pool at interpreter shutdown
+# regardless of shutdown(wait=False), so a thread still blocked inside
+# receive_json() would hang process exit even after future.result(timeout=)
+# raised. A plain daemon thread has no such join-on-exit behavior.
+_RECEIVE_TIMEOUT_S = 5
+
+
+def _receive_json_with_timeout(ws, timeout=_RECEIVE_TIMEOUT_S):
+    """Call ws.receive_json() on a daemon thread so a hung dispatch fails
+    cleanly instead of blocking the test (or the interpreter) forever."""
+    result: queue.Queue = queue.Queue(maxsize=1)
+
+    def _worker():
+        try:
+            result.put(("ok", ws.receive_json()))
+        except Exception as exc:  # pragma: no cover - defensive
+            result.put(("error", exc))
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    try:
+        kind, value = result.get(timeout=timeout)
+    except queue.Empty:
+        raise AssertionError(
+            f"no pick_placed frame arrived within {timeout}s — "
+            "the broadcast dispatch is not reaching the event loop"
+        )
+    if kind == "error":
+        raise value
+    return value
 
 
 def _seed_scheduled_game(client):
@@ -48,6 +86,12 @@ def test_pick_placed_broadcasts_frame():
     used elsewhere in this repo's tests) because only the context-manager
     form runs the app's lifespan/startup, which is what populates
     ``app.state.loop`` — the loop `_log_feed_event` dispatches onto.
+
+    The frame is read via ``_receive_json_with_timeout`` rather than
+    ``ws.receive_json()`` directly: Starlette's test WebSocket has no
+    internal receive timeout, so if the dispatch ever regresses back to
+    silently no-op'ing, this test must fail within a few seconds, not hang
+    the run forever.
     """
     app = create_app(":memory:")
     with TestClient(app) as client:
@@ -67,7 +111,7 @@ def test_pick_placed_broadcasts_frame():
             )
             assert response.status_code == 200
 
-            frame = ws.receive_json()
+            frame = _receive_json_with_timeout(ws)
             assert frame["type"] == "pick_placed"
             assert "alice" in frame["data"]["message"]
 
