@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.config import load_config, is_sport_in_season
-from backend.database import get_engine, get_session, migrate_api_usage, migrate_game_start_time
+from backend.database import get_engine, get_session, run_migrations
 from backend.pipeline.full_pipeline import (
     fetch_and_store_games, fetch_and_store_odds, fetch_and_store_props, ALL_SPORTS,
 )
@@ -109,9 +109,9 @@ def configure_scheduler(config: dict, engine) -> BackgroundScheduler:
 def run_pipeline(config_path: str = "config.yaml"):
     config = load_config(config_path)
     engine = get_engine(config["database_path"])
-    migrate_api_usage(engine)
-    migrate_game_start_time(engine)
-    Base.metadata.create_all(engine)
+    # Shares backend.database.run_migrations with create_app so this
+    # standalone process can never fall behind the web app's schema.
+    run_migrations(engine)
 
     scheduler = configure_scheduler(config, engine)
     scheduler.start()
