@@ -26,17 +26,40 @@ def _label(sport: str) -> str:
     return SPORT_LABELS.get(sport, sport.upper())
 
 
+def _count_phrase(n_picks: int, n_props: int, n_sports: int) -> str:
+    """Describe what the body actually contains.
+
+    Props live in their own per-sport block and were previously left out of
+    the count entirely, so a props-only sport produced "0 across 1 sports"
+    over a body full of props. Picks and props are counted separately rather
+    than summed, because they are different things to a reader — but neither
+    may be silently dropped.
+    """
+    parts = []
+    if n_picks:
+        parts.append(f"{n_picks} pick{'' if n_picks == 1 else 's'}")
+    if n_props:
+        parts.append(f"{n_props} prop{'' if n_props == 1 else 's'}")
+    if not parts:
+        parts.append("0 picks")
+    return f"{', '.join(parts)} across {n_sports} sport{'' if n_sports == 1 else 's'}"
+
+
 def render_digest(sections: list[DigestSection], target_date: date):
     """Return (subject, html, text). All three are "" when there is nothing
     to send — the caller must not send an empty digest."""
     if not sections:
         return "", "", ""
 
-    total = sum(len(s.picks) for s in sections)
+    total_picks = sum(len(s.picks) for s in sections)
+    total_props = sum(len(s.props) for s in sections)
     # NOTE: %-d is not portable (fails on Windows). Use %d and strip the
     # leading zero, which works on every platform.
     pretty = target_date.strftime("%a %b %d").replace(" 0", " ")
-    subject = f"Top picks — {pretty} ({total} across {len(sections)} sports)"
+    # One phrase, used for both the subject and the header, so the two can
+    # never disagree with each other or with the body.
+    count_phrase = _count_phrase(total_picks, total_props, len(sections))
+    subject = f"Top picks — {pretty} ({count_phrase})"
 
     rows = []
     text_lines = [f"TOP PICKS — {pretty}", ""]
@@ -73,12 +96,21 @@ def render_digest(sections: list[DigestSection], target_date: date):
             )
             text_lines.append("  Player props:")
             for p in section.props:
+                # No edge_pct here on purpose: a prop's edge is
+                # (prob - 0.5) * 200 and ignores the prop's price, while a
+                # game pick's edge is measured against the de-vigged market.
+                # Rendering both as "+X%" invites exactly the cross-scale
+                # comparison the selector's two-query separation prevents.
                 rows.append(
                     f'<tr><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;">'
                     f'<div style="{_FONT}font-size:14px;color:#111827;">'
-                    f'{_escape(p.pick_value)} <span style="color:#6b7280;">({p.odds})</span></div></td></tr>'
+                    f'{_escape(p.pick_value)} <span style="color:#6b7280;">({p.odds})</span></div>'
+                    f'<div style="{_FONT}font-size:12px;color:#6b7280;padding-top:2px;">'
+                    f'{_escape(p.matchup)} &nbsp;·&nbsp; {_stars(p.confidence)}</div></td></tr>'
                 )
-                text_lines.append(f"    {p.pick_value} ({p.odds})")
+                text_lines.append(
+                    f"    {p.pick_value} ({p.odds}) — {p.matchup} — {_stars(p.confidence)}"
+                )
         text_lines.append("")
 
     html = (
@@ -90,7 +122,7 @@ def render_digest(sections: list[DigestSection], target_date: date):
         f'<tr><td style="{_FONT}font-size:18px;font-weight:700;color:#111827;'
         f'padding-bottom:2px;">Top picks — {pretty}</td></tr>'
         f'<tr><td style="{_FONT}font-size:13px;color:#6b7280;padding-bottom:6px;">'
-        f'{total} picks across {len(sections)} sports</td></tr>'
+        f'{count_phrase}</td></tr>'
         + "".join(rows)
         + f'<tr><td style="{_FONT}font-size:11px;color:#9ca3af;padding-top:18px;">'
         f'Model output for research, not betting advice.</td></tr>'
