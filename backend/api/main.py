@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -49,6 +50,7 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
                 app.state.scheduler = None
         else:
             app.state.scheduler = None
+        app.state.loop = asyncio.get_running_loop()
         try:
             yield
         finally:
@@ -63,6 +65,7 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
         allow_headers=["*"],
         allow_credentials=False,
     )
+    app.state.loop = None
     engine = get_engine(db_path)
     from backend.database import run_migrations
     run_migrations(engine)
