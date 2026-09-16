@@ -113,3 +113,18 @@ def migrate_pick_model_prob(engine):
         if "model_prob" not in columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE picks ADD COLUMN model_prob FLOAT"))
+
+def migrate_pick_rationale(engine):
+    """Add rationale_json column to picks if missing.
+
+    Stores the structured PickFactor list that explains why a pick was made,
+    so the daily digest can render a rationale without re-deriving (and
+    possibly contradicting) the reasoning the strategy actually used.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "picks" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("picks")]
+        if "rationale_json" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE picks ADD COLUMN rationale_json TEXT"))

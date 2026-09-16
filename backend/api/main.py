@@ -65,7 +65,7 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
         allow_credentials=False,
     )
     engine = get_engine(db_path)
-    from backend.database import migrate_api_usage, migrate_game_start_time, migrate_player_stat_receptions, migrate_elo_history, migrate_parlays, migrate_pick_result_line_at_close, migrate_pick_model_prob
+    from backend.database import migrate_api_usage, migrate_game_start_time, migrate_player_stat_receptions, migrate_elo_history, migrate_parlays, migrate_pick_result_line_at_close, migrate_pick_model_prob, migrate_pick_rationale
     migrate_api_usage(engine)
     migrate_game_start_time(engine)
     migrate_player_stat_receptions(engine)
@@ -73,6 +73,7 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
     migrate_parlays(engine)
     migrate_pick_result_line_at_close(engine)
     migrate_pick_model_prob(engine)
+    migrate_pick_rationale(engine)
     Base.metadata.create_all(engine)
 
     @app.get("/health")
