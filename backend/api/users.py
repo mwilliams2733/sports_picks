@@ -1,5 +1,5 @@
 from datetime import datetime, timezone, date, timedelta
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func
 from backend.database import get_session
@@ -112,6 +112,31 @@ def create_user(request: Request, body: CreateUserRequest):
         session.add(user)
         session.commit()
         return {"id": user.id, "name": user.name, "starting_balance": user.starting_balance}
+    finally:
+        session.close()
+
+
+@router.get("/feed")
+def get_activity_feed(request: Request, limit: int = Query(50, ge=1, le=200)):
+    """Get recent activity feed events."""
+    session = get_session(request.app.state.engine)
+    try:
+        events = (
+            session.query(ActivityFeed)
+            .order_by(ActivityFeed.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": e.id,
+                "user_id": e.user_id,
+                "event_type": e.event_type,
+                "payload": json.loads(e.payload),
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in events
+        ]
     finally:
         session.close()
 
@@ -631,26 +656,3 @@ def get_user_stats(request: Request, user_id: int):
         session.close()
 
 
-@router.get("/feed")
-def get_activity_feed(request: Request, limit: int = 50):
-    """Get recent activity feed events."""
-    session = get_session(request.app.state.engine)
-    try:
-        events = (
-            session.query(ActivityFeed)
-            .order_by(ActivityFeed.created_at.desc())
-            .limit(limit)
-            .all()
-        )
-        return [
-            {
-                "id": e.id,
-                "user_id": e.user_id,
-                "event_type": e.event_type,
-                "payload": json.loads(e.payload),
-                "created_at": e.created_at.isoformat() if e.created_at else None,
-            }
-            for e in events
-        ]
-    finally:
-        session.close()

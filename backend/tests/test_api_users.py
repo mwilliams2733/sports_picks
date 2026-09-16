@@ -487,14 +487,34 @@ def test_user_stats_shape():
 
 
 def test_feed_route_is_shadowed():
-    # CHARACTERIZATION (known bug, see plans/README.md): GET /users/{user_id}
-    # is registered before GET /users/feed (users.py:136 vs :634), and FastAPI
-    # matches path routes in registration order, so "/users/feed" matches
-    # {user_id}="feed" first, and int-parsing "feed" as user_id fails
-    # validation. After plan 004 reorders the routes, this must become 200
-    # returning a list.
     app = create_app(":memory:")
     client = TestClient(app)
     Base.metadata.create_all(client.app.state.engine)
     response = client.get("/users/feed")
+    assert response.status_code == 200
+
+
+def test_feed_route_not_shadowed():
+    app = create_app(":memory:")
+    client = TestClient(app)
+    Base.metadata.create_all(client.app.state.engine)
+    response = client.get("/users/feed")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+def test_feed_limit_is_capped():
+    app = create_app(":memory:")
+    client = TestClient(app)
+    Base.metadata.create_all(client.app.state.engine)
+    response = client.get("/users/feed?limit=99999")
     assert response.status_code == 422
+
+
+def test_get_user_by_id_still_works():
+    app = create_app(":memory:")
+    client = TestClient(app)
+    Base.metadata.create_all(client.app.state.engine)
+    user_id = _make_user(client)
+    response = client.get(f"/users/{user_id}")
+    assert response.status_code == 200
