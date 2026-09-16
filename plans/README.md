@@ -21,7 +21,7 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 004 | Make the activity feed work (route order + WS dispatch) | P1 | M | 001 — merged | TODO — refreshed against `943cf25`, ready to dispatch |
 | 005 | Scrub the API key from logs, restore the budget alarm | P1 | S | — | **MERGED** into `master` as `b62358e` |
 | 006 | Per-sport, push-aware, newest-first recalibration | P1 | S | — | **MERGED** into `master` as `0e1f13f` |
-| 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | TODO — written against `54d38c4` |
+| 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | **DONE** on `advisor/007-calibration-report` — report built; measurement blocked by a data defect (see plan notes) |
 
 Suite after five merges (001, 002, 003, 005, 006): **409 passed** (360 baseline + 21 + 6 + 8), 0 failed.
 Plan 004 was written against `5c2e0d0` and has been refreshed against `943cf25`:
