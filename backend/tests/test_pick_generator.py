@@ -198,3 +198,96 @@ def test_pick_generator_routes_mma_to_combat_even_when_strategy_is_sport_specifi
     # If routing failed (i.e., it ran SportSpecificStrategy on empty TeamStats), no picks would generate.
     assert n >= 1 or len(picks) >= 1, "Combat dispatch must work even with non-combat strategy name"
     assert all(p.pick_type == "moneyline" for p in picks)
+
+
+def test_recalibrated_threshold_changes_confidence_tier():
+    """Part B load-bearing test: a CalibrationHistory row must reach
+    calculate_confidence through pick_generator -> Strategy.thresholds, and
+    demonstrably move the tier of a generated pick.
+
+    Two structurally identical games (same team stats, elo, odds) are run
+    through the same "value_only" strategy on different dates, so each gets
+    its own pick without interference. The first run happens before any
+    CalibrationHistory rows exist (baseline tier, from DEFAULT_THRESHOLDS).
+    The second run happens after inserting a CalibrationHistory row that
+    lowers the threshold for the tier just above the baseline down to (at
+    most) the observed edge_pct, which -- if and only if the wiring works --
+    must bump the second game's pick to that higher tier.
+    """
+    from backend.database import get_engine, get_session
+    from backend.models import Base, Team, Game, TeamStat, EloRating, Odds, StrategyModel, PickModel, CalibrationHistory
+    from backend.pipeline.pick_generator import generate_and_store_picks
+    from backend.analysis.confidence import DEFAULT_THRESHOLDS
+    from datetime import date as _date, datetime as _datetime, timezone as _timezone
+
+    engine = get_engine(":memory:")
+    Base.metadata.create_all(engine)
+    session = get_session(engine)
+
+    def _seed_game(game_id: int, home_id: int, away_id: int, game_date):
+        home = Team(id=home_id, name=f"H{home_id}", abbreviation=f"H{home_id}", sport="nba")
+        away = Team(id=away_id, name=f"A{away_id}", abbreviation=f"A{away_id}", sport="nba")
+        session.add_all([home, away])
+        session.flush()
+        game = Game(id=game_id, sport="nba", season="2026", date=game_date,
+                    home_team_id=home_id, away_team_id=away_id, status="scheduled")
+        session.add(game)
+        session.flush()
+        session.add_all([
+            TeamStat(team_id=home_id, game_id=game_id, stat_type="point_diff", value=2.0),
+            TeamStat(team_id=away_id, game_id=game_id, stat_type="point_diff", value=0.0),
+            TeamStat(team_id=home_id, game_id=game_id, stat_type="offensive_rating", value=103.0),
+            TeamStat(team_id=home_id, game_id=game_id, stat_type="defensive_rating", value=100.0),
+            TeamStat(team_id=away_id, game_id=game_id, stat_type="offensive_rating", value=100.0),
+            TeamStat(team_id=away_id, game_id=game_id, stat_type="defensive_rating", value=100.0),
+            EloRating(team_id=home_id, sport="nba", rating=1530.0),
+            EloRating(team_id=away_id, sport="nba", rating=1500.0),
+            Odds(game_id=game_id, bookmaker="dk", moneyline_home=-110, moneyline_away=-110,
+                 spread_home=0.0, spread_away=0.0, over_under=0.0,
+                 timestamp=_datetime(2026, 3, 1, 18, 0, tzinfo=_timezone.utc)),
+        ])
+
+    date1 = _date(2026, 3, 1)
+    date2 = _date(2026, 3, 2)
+    _seed_game(1, 1, 2, date1)
+    _seed_game(2, 3, 4, date2)
+    session.add(StrategyModel(id=1, name="value_only", config_json='{"min_edge": 0.1}', is_active=True))
+    session.commit()
+
+    # Baseline run: no CalibrationHistory rows -> DEFAULT_THRESHOLDS apply.
+    n1 = generate_and_store_picks(session, strategy_id=1, target_date=date1)
+    assert n1 >= 1
+    pick1 = session.query(PickModel).filter(PickModel.game_id == 1).first()
+    assert pick1 is not None
+    tier_before = pick1.confidence
+    edge = pick1.edge_pct
+
+    higher_tiers = sorted(t for t in DEFAULT_THRESHOLDS if t > tier_before)
+    assert higher_tiers, (
+        f"test setup produced edge_pct={edge} at the top tier ({tier_before}); "
+        "cannot demonstrate an increase"
+    )
+    target_tier = higher_tiers[0]
+
+    # pick1.edge_pct is rounded to 1 decimal for storage; the underlying edge
+    # calculate_confidence actually compares against is unrounded, so use a
+    # threshold a bit below the displayed value to guarantee the comparison
+    # still holds regardless of rounding direction.
+    session.add(CalibrationHistory(
+        date=date1, sport="nba", confidence_tier=target_tier,
+        predicted_win_rate=0.6, actual_win_rate=0.6, sample_size=50,
+        old_threshold=DEFAULT_THRESHOLDS[target_tier], new_threshold=edge - 0.1,
+    ))
+    session.commit()
+
+    # Second run: identical inputs, but the recalibrated threshold is now in play.
+    n2 = generate_and_store_picks(session, strategy_id=1, target_date=date2)
+    assert n2 >= 1
+    pick2 = session.query(PickModel).filter(PickModel.game_id == 2).first()
+    assert pick2 is not None
+
+    assert pick2.confidence == target_tier
+    assert pick2.confidence > tier_before, (
+        "Inserting a CalibrationHistory row did not change the resulting pick's "
+        "confidence tier -- thresholds are not reaching calculate_confidence."
+    )

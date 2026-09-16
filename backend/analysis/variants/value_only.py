@@ -32,7 +32,7 @@ class ValueOnlyStrategy(Strategy):
                 models = self._count_agreeing_signals(game, "home")
                 picks.append(Pick(
                     game_id=game.game_id, pick_type="moneyline", pick_value="HOME ML",
-                    confidence=calculate_confidence(home_edge, models),
+                    confidence=calculate_confidence(home_edge, models, self.thresholds),
                     edge_pct=round(home_edge, 1),
                     model_probability=round(home_prob, 4),
                     implied_probability=round(implied_home, 4),
@@ -41,7 +41,7 @@ class ValueOnlyStrategy(Strategy):
                 models = self._count_agreeing_signals(game, "away")
                 picks.append(Pick(
                     game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
-                    confidence=calculate_confidence(away_edge, models),
+                    confidence=calculate_confidence(away_edge, models, self.thresholds),
                     edge_pct=round(away_edge, 1),
                     model_probability=round(away_prob, 4),
                     implied_probability=round(implied_away, 4),

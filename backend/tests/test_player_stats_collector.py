@@ -115,6 +115,30 @@ def test_store_stats_upsert(db_session):
     assert db_session.query(PlayerStat).first().points == 22.0
 
 
+def test_store_stats_persists_receptions(db_session):
+    """receptions must be persisted on insert -- it maps player_receptions
+    props and both prop_analyzer.py and grader.py depend on it existing."""
+    collector = PlayerStatsCollector({})
+    team = db_session.query(Team).first()
+    stats = [{"player_name": "Player A", "receptions": 7.0}]
+    count = collector.store_stats(db_session, stats, "season_avg", team.id, "nfl", "source_a")
+    assert count == 1
+    row = db_session.query(PlayerStat).first()
+    assert row.receptions == 7.0
+
+
+def test_store_stats_updates_receptions(db_session):
+    """receptions must also flow through the update (upsert) branch."""
+    collector = PlayerStatsCollector({})
+    team = db_session.query(Team).first()
+    stats = [{"player_name": "Player A", "receptions": 5.0}]
+    collector.store_stats(db_session, stats, "season_avg", team.id, "nfl", "source_a")
+    stats2 = [{"player_name": "Player A", "receptions": 9.0}]
+    collector.store_stats(db_session, stats2, "season_avg", team.id, "nfl", "source_a")
+    assert db_session.query(PlayerStat).count() == 1
+    assert db_session.query(PlayerStat).first().receptions == 9.0
+
+
 def test_normalize_name():
     collector = PlayerStatsCollector({})
     assert collector._normalize_name("LeBron James") == "LeBron James"
