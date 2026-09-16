@@ -27,16 +27,15 @@ class Recalibrator:
         """
         cutoff = date.today() - timedelta(days=days)
 
-        # Get current thresholds
+        # Get current thresholds: newest row per tier wins, defaults fill gaps
         thresholds = dict(DEFAULT_THRESHOLDS)
-        latest = (
+        history = (
             self.session.query(CalibrationHistory)
             .filter(CalibrationHistory.sport == self.sport)
-            .order_by(CalibrationHistory.date.desc())
-            .limit(5)
+            .order_by(CalibrationHistory.date.asc())
             .all()
         )
-        for row in latest:
+        for row in history:
             thresholds[row.confidence_tier] = row.new_threshold
 
         adjustments = {}

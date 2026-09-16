@@ -10,13 +10,13 @@ def get_thresholds(session=None, sport: str = "nba") -> dict:
     rows = (
         session.query(CalibrationHistory)
         .filter(CalibrationHistory.sport == sport)
-        .order_by(CalibrationHistory.date.desc())
-        .limit(5)
+        .order_by(CalibrationHistory.date.asc())
         .all()
     )
-    if not rows:
-        return DEFAULT_THRESHOLDS
-    return {row.confidence_tier: row.new_threshold for row in rows}
+    thresholds = dict(DEFAULT_THRESHOLDS)
+    for row in rows:
+        thresholds[row.confidence_tier] = row.new_threshold
+    return thresholds
 
 
 def calculate_confidence(

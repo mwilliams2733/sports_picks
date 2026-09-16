@@ -12,13 +12,13 @@ def get_prop_thresholds(session=None, sport: str = "nba") -> dict:
             CalibrationHistory.sport == sport,
             CalibrationHistory.confidence_tier >= 100,
         )
-        .order_by(CalibrationHistory.date.desc())
-        .limit(5)
+        .order_by(CalibrationHistory.date.asc())
         .all()
     )
-    if not rows:
-        return DEFAULT_PROP_THRESHOLDS
-    return {row.confidence_tier - 100: row.new_threshold for row in rows}
+    thresholds = dict(DEFAULT_PROP_THRESHOLDS)
+    for row in rows:
+        thresholds[row.confidence_tier - 100] = row.new_threshold
+    return thresholds
 
 
 def calculate_prop_confidence(edge_pct: float, thresholds: dict | None = None) -> int:

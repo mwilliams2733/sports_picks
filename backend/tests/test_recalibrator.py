@@ -126,3 +126,24 @@ def test_pushes_excluded_from_win_rate():
     assert len(rows) == 1
     assert rows[0].actual_win_rate == 1.0
     assert rows[0].sample_size == 21
+
+
+def test_newest_threshold_wins():
+    session, t1, t2, strat = _setup_db()
+    session.add(CalibrationHistory(
+        date=date(2026, 1, 1), sport="nba", confidence_tier=5,
+        predicted_win_rate=0.70, actual_win_rate=0.60,
+        sample_size=20, old_threshold=12.0, new_threshold=9.0,
+    ))
+    session.add(CalibrationHistory(
+        date=date(2026, 3, 1), sport="nba", confidence_tier=5,
+        predicted_win_rate=0.70, actual_win_rate=0.60,
+        sample_size=20, old_threshold=12.0, new_threshold=7.0,
+    ))
+    session.commit()
+    # 25 picks that deviate enough to trigger an adjustment and record old_threshold
+    _add_picks(session, t1, t2, strat, confidence=5, wins=11, losses=14)
+    recal = Recalibrator(session, sport="nba")
+    adjustments = recal.run(days=90)
+    assert 5 in adjustments
+    assert adjustments[5]["old_threshold"] == 7.0
