@@ -85,10 +85,12 @@ class PropAnalyzer:
         season_weight: float = 0.4,
         recent_weight: float = 0.6,
         min_edge: float = 5.0,
+        thresholds: dict | None = None,
     ):
         self.season_weight = season_weight
         self.recent_weight = recent_weight
         self.min_edge = min_edge
+        self.thresholds = thresholds
 
     def analyze(
         self,
@@ -214,7 +216,7 @@ class PropAnalyzer:
                 return None
 
             # Higher exceedance probability boosts confidence
-            confidence = calculate_prop_confidence(edge_pct)
+            confidence = calculate_prop_confidence(edge_pct, self.thresholds)
 
         else:
             # Fallback: simple average-based comparison
@@ -231,7 +233,7 @@ class PropAnalyzer:
             if edge_pct < self.min_edge:
                 return None
 
-            confidence = calculate_prop_confidence(edge_pct)
+            confidence = calculate_prop_confidence(edge_pct, self.thresholds)
 
         # Determine source/stale from season_avg or first recent game
         source = "unknown"

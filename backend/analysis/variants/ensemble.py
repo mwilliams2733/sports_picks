@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 class EnsembleStrategy(Strategy):
     _calibrated: CalibratedModel | None = None
 
-    def __init__(self, name: str, config: dict):
-        super().__init__(name, config)
+    def __init__(self, name: str, config: dict, thresholds: dict | None = None):
+        super().__init__(name, config, thresholds)
         self._lgbm_model: LightGBMModel | None = None
 
     def predict(self, game: GameData) -> list[Pick]:
@@ -41,14 +41,14 @@ class EnsembleStrategy(Strategy):
             if home_edge >= min_edge:
                 models = self._count_agreeing_models(game, "home")
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="HOME ML",
-                    confidence=calculate_confidence(home_edge, models), edge_pct=round(home_edge, 1),
+                    confidence=calculate_confidence(home_edge, models, self.thresholds), edge_pct=round(home_edge, 1),
                     model_probability=round(home_prob, 4), implied_probability=round(implied_home, 4),
                     odds_at_pick=avg_odds["moneyline_home"],
                     suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction)))
             elif away_edge >= min_edge:
                 models = self._count_agreeing_models(game, "away")
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
-                    confidence=calculate_confidence(away_edge, models), edge_pct=round(away_edge, 1),
+                    confidence=calculate_confidence(away_edge, models, self.thresholds), edge_pct=round(away_edge, 1),
                     model_probability=round(away_prob, 4), implied_probability=round(implied_away, 4),
                     odds_at_pick=avg_odds["moneyline_away"],
                     suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction)))
@@ -69,7 +69,7 @@ class EnsembleStrategy(Strategy):
                 pick_value = f"HOME {spread_home:+g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="spread",
                     pick_value=pick_value,
-                    confidence=calculate_confidence(home_spread_edge, models),
+                    confidence=calculate_confidence(home_spread_edge, models, self.thresholds),
                     edge_pct=round(home_spread_edge, 1),
                     model_probability=round(home_cover_prob, 4),
                     implied_probability=spread_fair,
@@ -81,7 +81,7 @@ class EnsembleStrategy(Strategy):
                 pick_value = f"AWAY +{spread_away:g}" if spread_away >= 0 else f"AWAY {spread_away:g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="spread",
                     pick_value=pick_value,
-                    confidence=calculate_confidence(away_spread_edge, models),
+                    confidence=calculate_confidence(away_spread_edge, models, self.thresholds),
                     edge_pct=round(away_spread_edge, 1),
                     model_probability=round(away_cover_prob, 4),
                     implied_probability=spread_fair,
@@ -102,7 +102,7 @@ class EnsembleStrategy(Strategy):
                 pick_value = f"Over {ou_line:g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="over_under",
                     pick_value=pick_value,
-                    confidence=calculate_confidence(over_edge, models),
+                    confidence=calculate_confidence(over_edge, models, self.thresholds),
                     edge_pct=round(over_edge, 1),
                     model_probability=round(over_prob, 4),
                     implied_probability=ou_fair,
@@ -113,7 +113,7 @@ class EnsembleStrategy(Strategy):
                 pick_value = f"Under {ou_line:g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="over_under",
                     pick_value=pick_value,
-                    confidence=calculate_confidence(under_edge, models),
+                    confidence=calculate_confidence(under_edge, models, self.thresholds),
                     edge_pct=round(under_edge, 1),
                     model_probability=round(under_prob, 4),
                     implied_probability=ou_fair,

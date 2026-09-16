@@ -9,6 +9,7 @@ from backend.analysis.variants.value_only import ValueOnlyStrategy
 from backend.analysis.variants.sport_specific import SportSpecificStrategy
 from backend.analysis.variants.prop_value import PropValueStrategy
 from backend.analysis.variants.combat_sports import CombatSportsStrategy
+from backend.analysis.confidence import get_thresholds
 
 STRATEGY_MAP = {
     "ensemble": EnsembleStrategy,
@@ -30,14 +31,18 @@ def generate_and_store_picks(session: Session, strategy_id: int,
     if not strategy_cls: return 0
     games = session.query(Game).filter(Game.date == target_date, Game.status == "scheduled").all()
     count = 0
+    thresholds_by_sport: dict[str, dict] = {}
     for game in games:
+        if game.sport not in thresholds_by_sport:
+            thresholds_by_sport[game.sport] = get_thresholds(session, game.sport)
+        sport_thresholds = thresholds_by_sport[game.sport]
         # Combat sports always route to CombatSportsStrategy because the team-based
         # strategies have no signal for individual fighters. For team sports, use
         # whichever strategy the user configured.
         if game.sport in ("mma", "boxing"):
-            strategy = CombatSportsStrategy(strat_row.name, config)
+            strategy = CombatSportsStrategy(strat_row.name, config, sport_thresholds)
         else:
-            strategy = strategy_cls(strat_row.name, config)
+            strategy = strategy_cls(strat_row.name, config, sport_thresholds)
         game_data = _build_game_data(session, game, pitcher_scores=pitcher_scores)
         if game.sport in ("mma", "boxing"):
             game_data.home_fighter = _build_fighter_stats(session, game.home_team_id, game.sport, game.date)

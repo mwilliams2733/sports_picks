@@ -8,6 +8,7 @@ from backend.collectors.player_stats.espn_stats_source import EspnStatsSource
 from backend.collectors.player_stats.balldontlie_source import BallDontLieSource
 from backend.collectors.player_stats.mysportsfeeds_source import MySportsFeedsSource
 from backend.analysis.prop_analyzer import PropAnalyzer
+from backend.analysis.prop_confidence import get_prop_thresholds
 from backend.analysis.odds_utils import calculate_payout, InvalidOddsError
 from backend.data_types import PropAnalysis
 
@@ -109,6 +110,11 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id)
                 "recent_weight": cfg.get("recent_weight", 0.6),
                 "min_edge": cfg.get("min_edge", 5.0),
             }
+    # One PropAnalyzer serves every game for this target_date, which may span
+    # multiple sports; thresholds are keyed by sport, so use the first game's
+    # sport as representative (matches this pipeline's existing single-analyzer
+    # design rather than introducing per-sport analyzers here).
+    analyzer_kwargs["thresholds"] = get_prop_thresholds(session, games[0].sport)
     analyzer = PropAnalyzer(**analyzer_kwargs)
 
     # Generate game predictions for game script correlation
