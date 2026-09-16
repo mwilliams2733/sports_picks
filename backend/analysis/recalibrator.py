@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from backend.analysis.confidence import DEFAULT_THRESHOLDS
-from backend.models import CalibrationHistory, PickModel, PickResult
+from backend.models import CalibrationHistory, Game, PickModel, PickResult
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,9 @@ class Recalibrator:
             picks_with_results = (
                 self.session.query(PickModel, PickResult)
                 .join(PickResult, PickResult.pick_id == PickModel.id)
+                .join(Game, PickModel.game_id == Game.id)
                 .filter(
+                    Game.sport == self.sport,
                     PickModel.confidence == tier,
                     PickModel.created_at >= cutoff,
                 )
