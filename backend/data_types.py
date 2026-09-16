@@ -30,6 +30,18 @@ class OddsSnapshot:
     spread_away: float
     over_under: float
 
+@dataclass(frozen=True)
+class PickFactor:
+    """One reason a strategy favored a side.
+
+    Only emit a factor when the strategy actually computed the underlying
+    signal — these strings are shown to readers as the reasoning behind a
+    pick, so a factor that was not used is a fabrication.
+    """
+    code: str      # see backend/analysis/rationale.py FACTOR_TEMPLATES
+    side: str      # "home" | "away" | "over" | "under"
+    strength: str  # "slight" | "moderate" | "strong"
+
 @dataclass
 class Pick:
     game_id: int
@@ -41,6 +53,7 @@ class Pick:
     implied_probability: float
     odds_at_pick: int
     suggested_unit_size: float = 1.0
+    factors: list[PickFactor] = field(default_factory=list)
 
 @dataclass
 class PropAnalysis:
