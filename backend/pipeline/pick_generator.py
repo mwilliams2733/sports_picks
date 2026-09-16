@@ -1,5 +1,6 @@
 import json
 import logging
+from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from backend.models import Game, PickModel, StrategyModel, Odds, TeamStat, EloRating
@@ -57,7 +58,10 @@ def generate_and_store_picks(session: Session, strategy_id: int,
                     db_pick = PickModel(game_id=game.id, strategy_id=strategy_id,
                         pick_type=pick.pick_type, pick_value=pick.pick_value,
                         confidence=pick.confidence, edge_pct=pick.edge_pct,
-                        odds_at_pick=pick.odds_at_pick, created_at=datetime.now(tz=timezone.utc))
+                        odds_at_pick=pick.odds_at_pick,
+                        model_prob=pick.model_probability,
+                        rationale_json=json.dumps([asdict(f) for f in pick.factors]),
+                        created_at=datetime.now(tz=timezone.utc))
                     session.add(db_pick)
                     count += 1
         except Exception:

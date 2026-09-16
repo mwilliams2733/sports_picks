@@ -8,6 +8,12 @@ from backend.data_types import GameData, Pick
 class RecentFormStrategy(Strategy):
     """Variant A: Heavily weights recent game performance over season averages."""
 
+    # _model_probability reads last_n_record, home_record, away_record and
+    # point_diff only. Of those, point_diff is the sole signal with a factor
+    # code ("recent_form"); win-pct/venue splits have no code. Elo, net
+    # rating, rest, fatigue, lookahead and pitcher are never read here.
+    FACTOR_CODES = frozenset({"recent_form"})
+
     def predict(self, game: GameData) -> list[Pick]:
         if not game.odds:
             return []
@@ -38,7 +44,8 @@ class RecentFormStrategy(Strategy):
                     model_probability=round(home_prob, 4),
                     implied_probability=round(implied_home, 4),
                     odds_at_pick=avg_odds["moneyline_home"],
-                    suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction)))
+                    suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction),
+                    factors=self._build_factors(game, "home")))
             elif away_edge >= min_edge:
                 picks.append(Pick(
                     game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
@@ -47,7 +54,8 @@ class RecentFormStrategy(Strategy):
                     model_probability=round(away_prob, 4),
                     implied_probability=round(implied_away, 4),
                     odds_at_pick=avg_odds["moneyline_away"],
-                    suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction)))
+                    suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction),
+                    factors=self._build_factors(game, "away")))
         return picks
 
     def _model_probability(self, game: GameData, lookback: int) -> float:

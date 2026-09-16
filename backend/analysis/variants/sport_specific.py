@@ -18,6 +18,19 @@ SPORT_WEIGHTS = {
 class SportSpecificStrategy(Strategy):
     """Variant D: Independently tuned weights per sport."""
 
+    # The one variant that genuinely reads all seven. _model_probability uses
+    # point_diff ("recent_form"), elo_rating ("rating_gap"), off-def net
+    # ("net_rating"), _rest_advantage(hs.rest_days, aws.rest_days) for NBA
+    # ("rest_advantage"), _pitcher_score(pitcher_skill_score) for MLB
+    # ("pitcher_edge"), and is_schedule_fatigued / is_lookahead_spot for every
+    # sport. rest_advantage and pitcher_edge are sport-conditional in the
+    # model; _build_factors already gates pitcher_edge on a non-None
+    # pitcher_skill_score, which only the MLB path populates.
+    FACTOR_CODES = frozenset({
+        "rating_gap", "recent_form", "net_rating", "schedule_fatigue",
+        "lookahead_spot", "rest_advantage", "pitcher_edge",
+    })
+
     def predict(self, game: GameData) -> list[Pick]:
         if not game.odds:
             return []
@@ -46,7 +59,8 @@ class SportSpecificStrategy(Strategy):
                     edge_pct=round(home_edge, 1),
                     model_probability=round(home_prob, 4),
                     implied_probability=round(implied_home, 4),
-                    odds_at_pick=avg_odds["moneyline_home"]))
+                    odds_at_pick=avg_odds["moneyline_home"],
+                    factors=self._build_factors(game, "home")))
             elif away_edge >= min_edge:
                 models = self._count_agreeing(game, "away")
                 picks.append(Pick(
@@ -55,7 +69,8 @@ class SportSpecificStrategy(Strategy):
                     edge_pct=round(away_edge, 1),
                     model_probability=round(away_prob, 4),
                     implied_probability=round(implied_away, 4),
-                    odds_at_pick=avg_odds["moneyline_away"]))
+                    odds_at_pick=avg_odds["moneyline_away"],
+                    factors=self._build_factors(game, "away")))
         return picks
 
     def _model_probability(self, game: GameData) -> float:

@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.database import get_engine, get_session
-from backend.models import Base
 
 logger = logging.getLogger(__name__)
 
@@ -65,15 +64,8 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
         allow_credentials=False,
     )
     engine = get_engine(db_path)
-    from backend.database import migrate_api_usage, migrate_game_start_time, migrate_player_stat_receptions, migrate_elo_history, migrate_parlays, migrate_pick_result_line_at_close, migrate_pick_model_prob
-    migrate_api_usage(engine)
-    migrate_game_start_time(engine)
-    migrate_player_stat_receptions(engine)
-    migrate_elo_history(engine)
-    migrate_parlays(engine)
-    migrate_pick_result_line_at_close(engine)
-    migrate_pick_model_prob(engine)
-    Base.metadata.create_all(engine)
+    from backend.database import run_migrations
+    run_migrations(engine)
 
     @app.get("/health")
     def health():

@@ -13,6 +13,16 @@ from backend.data_types import GameData, Pick
 class CombatSportsStrategy(Strategy):
     """Variant E: combat-sports Elo + recent-form blend, h2h only."""
 
+    # _model_probability reads game.home_fighter / game.away_fighter — fighter
+    # Elo, recent_form_score and opponent_avg_elo. _build_factors derives all
+    # of its codes from game.home_stats / game.away_stats (TeamStats), which
+    # this strategy never consults. So NO base factor code corresponds to a
+    # signal this strategy computed; emitting one (e.g. "rating_gap" off a
+    # TeamStats elo it did not use) would be a fabrication. Today those
+    # TeamStats default identically for both fighters so the diffs are 0 and
+    # nothing fires — but that is an accident of the fixture, not a guarantee.
+    FACTOR_CODES = frozenset()
+
     def predict(self, game: GameData) -> list[Pick]:
         if not game.odds:
             return []
@@ -52,7 +62,8 @@ class CombatSportsStrategy(Strategy):
                 edge_pct=round(home_edge, 1),
                 model_probability=round(home_prob, 4),
                 implied_probability=round(implied_home, 4),
-                odds_at_pick=avg_odds["moneyline_home"]))
+                odds_at_pick=avg_odds["moneyline_home"],
+                factors=self._build_factors(game, "home")))
         elif away_edge >= min_edge:
             picks.append(Pick(
                 game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
@@ -60,7 +71,8 @@ class CombatSportsStrategy(Strategy):
                 edge_pct=round(away_edge, 1),
                 model_probability=round(away_prob, 4),
                 implied_probability=round(implied_away, 4),
-                odds_at_pick=avg_odds["moneyline_away"]))
+                odds_at_pick=avg_odds["moneyline_away"],
+                factors=self._build_factors(game, "away")))
         return picks
 
     def _model_probability(self, home, away) -> float:

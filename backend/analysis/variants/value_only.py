@@ -7,6 +7,12 @@ from backend.data_types import GameData, Pick
 class ValueOnlyStrategy(Strategy):
     """Variant B: Only picks when implied probability edge exceeds a high threshold."""
 
+    # _model_probability and _count_agreeing read exactly three signals:
+    # point_diff ("recent_form"), elo_rating ("rating_gap") and
+    # offensive_rating - defensive_rating ("net_rating"). Rest days, schedule
+    # fatigue, lookahead spots and pitcher scores are never read.
+    FACTOR_CODES = frozenset({"rating_gap", "recent_form", "net_rating"})
+
     def predict(self, game: GameData) -> list[Pick]:
         if not game.odds:
             return []
@@ -37,7 +43,8 @@ class ValueOnlyStrategy(Strategy):
                     edge_pct=round(home_edge, 1),
                     model_probability=round(home_prob, 4),
                     implied_probability=round(implied_home, 4),
-                    odds_at_pick=avg_odds["moneyline_home"]))
+                    odds_at_pick=avg_odds["moneyline_home"],
+                    factors=self._build_factors(game, "home")))
             elif away_edge >= min_edge:
                 models = self._count_agreeing_signals(game, "away")
                 picks.append(Pick(
@@ -46,7 +53,8 @@ class ValueOnlyStrategy(Strategy):
                     edge_pct=round(away_edge, 1),
                     model_probability=round(away_prob, 4),
                     implied_probability=round(implied_away, 4),
-                    odds_at_pick=avg_odds["moneyline_away"]))
+                    odds_at_pick=avg_odds["moneyline_away"],
+                    factors=self._build_factors(game, "away")))
         return picks
 
     def _model_probability(self, game: GameData) -> float:

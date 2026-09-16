@@ -17,6 +17,25 @@ logger = logging.getLogger(__name__)
 class EnsembleStrategy(Strategy):
     _calibrated: CalibratedModel | None = None
 
+    # _calibrated_probability applies is_schedule_fatigued / is_lookahead_spot
+    # adjustments directly, over a base probability that reads point_diff
+    # ("recent_form"), elo_rating ("rating_gap") and off-def net
+    # ("net_rating") — via LightGBM's extract_features, the logistic
+    # CalibratedModel, or _fallback_probability. Pitcher scores are never
+    # read on any of those paths.
+    #
+    # rest_advantage is deliberately EXCLUDED: rest_days only reaches the
+    # model through extract_features, i.e. only when a LightGBM or logistic
+    # model is actually trained. _fallback_probability (the untrained path,
+    # and the one that runs on a cold database) ignores rest entirely, so
+    # claiming rest decided the pick would be a fabrication whenever the
+    # fallback is in play, and nothing at render time can tell the reader
+    # which path ran.
+    FACTOR_CODES = frozenset({
+        "rating_gap", "recent_form", "net_rating",
+        "schedule_fatigue", "lookahead_spot",
+    })
+
     def __init__(self, name: str, config: dict, thresholds: dict | None = None):
         super().__init__(name, config, thresholds)
         self._lgbm_model: LightGBMModel | None = None
@@ -44,14 +63,16 @@ class EnsembleStrategy(Strategy):
                     confidence=calculate_confidence(home_edge, models, self.thresholds), edge_pct=round(home_edge, 1),
                     model_probability=round(home_prob, 4), implied_probability=round(implied_home, 4),
                     odds_at_pick=avg_odds["moneyline_home"],
-                    suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction)))
+                    suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction),
+                    factors=self._build_factors(game, "home")))
             elif away_edge >= min_edge:
                 models = self._count_agreeing_models(game, "away")
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
                     confidence=calculate_confidence(away_edge, models, self.thresholds), edge_pct=round(away_edge, 1),
                     model_probability=round(away_prob, 4), implied_probability=round(implied_away, 4),
                     odds_at_pick=avg_odds["moneyline_away"],
-                    suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction)))
+                    suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction),
+                    factors=self._build_factors(game, "away")))
 
         # Spread picks — distribution-based: P(cover) via normal CDF
         if avg_odds.get("spread_home") is not None:

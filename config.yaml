@@ -27,3 +27,11 @@ odds_budget:
   monthly_limit: 20000
   daily_target: 600
   reserve: 2000
+
+digest:
+  enabled: false          # must be explicitly turned on; dry-run until then
+  send_hour_et: 11
+  sports: ["ncaaf", "nfl", "nba", "mlb"]
+  max_per_sport: 5
+  from: "picks@example.com"
+  recipients: []

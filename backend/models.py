@@ -110,6 +110,7 @@ class PickModel(Base):
     edge_pct = Column(Float, nullable=False)
     odds_at_pick = Column(Integer, nullable=True)
     model_prob = Column(Float, nullable=True)
+    rationale_json = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
     game = relationship("Game")
 

@@ -113,3 +113,49 @@ def migrate_pick_model_prob(engine):
         if "model_prob" not in columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE picks ADD COLUMN model_prob FLOAT"))
+
+def migrate_pick_rationale(engine):
+    """Add rationale_json column to picks if missing.
+
+    Stores the structured PickFactor list that explains why a pick was made,
+    so the daily digest can render a rationale without re-deriving (and
+    possibly contradicting) the reasoning the strategy actually used.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "picks" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("picks")]
+        if "rationale_json" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE picks ADD COLUMN rationale_json TEXT"))
+
+
+# The single source of truth for which schema migrations run, and in what
+# order. Every process that opens the database — the FastAPI app AND the
+# standalone pipeline scheduler — calls this instead of listing migrations
+# itself, so a new migration cannot land in one entry point and be forgotten
+# in the other. (It was: the scheduler ran only two of eight, so a
+# pre-existing DB had no picks.rationale_json and every pick insert failed.)
+MIGRATIONS = (
+    migrate_api_usage,
+    migrate_game_start_time,
+    migrate_player_stat_receptions,
+    migrate_elo_history,
+    migrate_parlays,
+    migrate_pick_result_line_at_close,
+    migrate_pick_model_prob,
+    migrate_pick_rationale,
+)
+
+
+def run_migrations(engine) -> None:
+    """Apply every schema migration, then create any still-missing tables.
+
+    Idempotent: each migration checks for its own column/table first, and
+    `create_all` only creates what does not exist. Safe to call on every
+    process start.
+    """
+    from backend.models import Base
+    for migration in MIGRATIONS:
+        migration(engine)
+    Base.metadata.create_all(engine)
