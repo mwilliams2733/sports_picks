@@ -9,6 +9,16 @@ from backend.models import PlayerStat
 logger = logging.getLogger(__name__)
 STALENESS_HOURS = 24
 
+# Single source of truth for the nullable stat columns on PlayerStat. Both the
+# update path and the insert path derive from this tuple so they can never
+# drift apart again (a new PlayerStat column must be added here AND on the
+# model).
+_STAT_FIELDS = (
+    "minutes", "points", "rebounds", "assists", "threes",
+    "steals", "blocks", "turnovers", "pass_yards",
+    "rush_yards", "rec_yards", "receptions", "touchdowns",
+)
+
 
 class PlayerStatsCollector:
     def __init__(self, fallback_chains: dict[str, list[PlayerStatsSource]]):
@@ -63,9 +73,7 @@ class PlayerStatsCollector:
             ).first()
 
             if existing:
-                for field in ["minutes", "points", "rebounds", "assists", "threes",
-                              "steals", "blocks", "turnovers", "pass_yards",
-                              "rush_yards", "rec_yards", "touchdowns"]:
+                for field in _STAT_FIELDS:
                     val = s.get(field)
                     if val is not None:
                         setattr(existing, field, float(val))
@@ -76,12 +84,7 @@ class PlayerStatsCollector:
                 row = PlayerStat(
                     player_name=name, team_id=team_id, sport=sport,
                     stat_type=stat_type, game_date=game_date,
-                    minutes=s.get("minutes"), points=s.get("points"),
-                    rebounds=s.get("rebounds"), assists=s.get("assists"),
-                    threes=s.get("threes"), steals=s.get("steals"),
-                    blocks=s.get("blocks"), turnovers=s.get("turnovers"),
-                    pass_yards=s.get("pass_yards"), rush_yards=s.get("rush_yards"),
-                    rec_yards=s.get("rec_yards"), touchdowns=s.get("touchdowns"),
+                    **{f: s.get(f) for f in _STAT_FIELDS},
                     source=source, fetched_at=now, is_stale=is_stale,
                 )
                 session.add(row)
