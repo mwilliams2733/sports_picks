@@ -21,6 +21,7 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 004 | Make the activity feed work (route order + WS dispatch) | P1 | M | 001 — merged | TODO — refreshed against `943cf25`, ready to dispatch |
 | 005 | Scrub the API key from logs, restore the budget alarm | P1 | S | — | **MERGED** into `master` as `b62358e` |
 | 006 | Per-sport, push-aware, newest-first recalibration | P1 | S | — | **MERGED** into `master` as `0e1f13f` |
+| 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | TODO — written against `54d38c4` |
 
 Suite after five merges (001, 002, 003, 005, 006): **409 passed** (360 baseline + 21 + 6 + 8), 0 failed.
 Plan 004 was written against `5c2e0d0` and has been refreshed against `943cf25`:
@@ -37,11 +38,10 @@ REJECTED (one-line rationale).
   call sites; 003 changes the edge math and deletes the duplicated
   `_average_odds`. Landing 002 first avoids a messy conflict. Either order is
   *correct*, this is purely about merge pain.
-- **004 after 001 (soft).** Plan 001 writes
-  `test_feed_route_is_shadowed` asserting the current broken `422`, marked
-  `# CHARACTERIZATION`. Plan 004 fixes the route and must **invert** that
-  assertion. If 004 runs first, skip the inversion step and say so in the
-  report.
+- **004 after 001 — now settled.** 001 is merged, so
+  `test_feed_route_is_shadowed` exists and asserts the current broken `422`.
+  Plan 004 fixes the route and **must invert that assertion**; the conditional
+  "skip it if 001 hasn't landed" no longer applies.
 - **001 blocks the not-yet-written parlay/bankroll plans.** Those rewrite the
   balance formula in `backend/api/users.py`, which currently has zero test
   coverage. Do not start them before 001 is DONE.
@@ -115,6 +115,15 @@ They are real; they were deprioritized for this batch, not dismissed.
   `snapshots[-1]` is least- vs most-recently-updated book, not a time series.
 - Prop "edge" ignores the prop's price entirely (`(prob - 0.5) * 200`), so 55%
   is a "10% edge" whether priced +120 or -300.
+- **The model is badly overconfident at the tails, and ranking by `edge_pct`
+  therefore selects for model error.** Measured on real generated picks: the
+  model claims 99.0% where the de-vigged market says 84.5%, and 90.4% where the
+  market says 71.4%. Two of five sat at the `min(0.99, ...)` clamp. Plan 007
+  measures this properly before anything is retuned.
+- **LightGBM never runs at prediction time.** `_calibrated_probability` prefers
+  it for NBA, but `_lgbm_model` is `None` on every freshly constructed strategy
+  and `pick_generator` builds one per game. Confirmed empirically. It is trained
+  nightly by `recalibration_job` and discarded.
 - `grade_prop_pick` ignores Over/Under for `player_anytime_td`: an "Under 0.5
   TDs" pick is graded a **win** when the player scores. Small fix, real money.
 - Season labels are always `YYYY-(YYYY+1)`, and three code paths write three
