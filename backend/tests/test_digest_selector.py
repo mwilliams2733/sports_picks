@@ -106,3 +106,54 @@ def test_prop_picks_never_rank_against_game_picks():
     assert sections[0].props[0].confidence == 5, (
         "props carry real confidence from PickModel, not a placeholder 0"
     )
+
+
+def _mk_with_rationale(session, sport, gid, tid_h, tid_a, d, rationale_json):
+    session.add_all([
+        Team(id=tid_h, name=f"H{gid}", abbreviation=f"H{gid}", sport=sport),
+        Team(id=tid_a, name=f"A{gid}", abbreviation=f"A{gid}", sport=sport),
+    ])
+    session.flush()
+    session.add(Game(id=gid, sport=sport, season="2026", date=d,
+                     home_team_id=tid_h, away_team_id=tid_a, status="scheduled"))
+    session.flush()
+    session.add(PickModel(game_id=gid, strategy_id=1, pick_type="moneyline",
+                          pick_value=f"P{gid}-0", confidence=5,
+                          edge_pct=9.0, odds_at_pick=-110,
+                          rationale_json=rationale_json))
+    session.commit()
+
+
+def test_rationale_json_null_degrades_to_empty_string():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_with_rationale(s, "nfl", 1, 1, 2, d, "null")
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    assert sections[0].picks[0].rationale == ""
+
+
+def test_rationale_json_number_degrades_to_empty_string():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_with_rationale(s, "nfl", 1, 1, 2, d, "5")
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    assert sections[0].picks[0].rationale == ""
+
+
+def test_rationale_json_dict_degrades_to_empty_string():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_with_rationale(s, "nfl", 1, 1, 2, d, '{"code":"rating_gap"}')
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    assert sections[0].picks[0].rationale == ""
+
+
+def test_rationale_json_wellformed_list_still_renders():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_with_rationale(
+        s, "nfl", 1, 1, 2, d,
+        '[{"code": "rating_gap", "side": "home", "strength": "moderate"}]',
+    )
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    assert sections[0].picks[0].rationale != ""

@@ -46,6 +46,8 @@ def _rationale_for(session, pick: PickModel, game: Game) -> str:
         raw = json.loads(pick.rationale_json)
     except (ValueError, TypeError):
         return ""
+    if not isinstance(raw, list):
+        return ""
     factors = [
         PickFactor(code=f.get("code", ""), side=f.get("side", "home"),
                    strength=f.get("strength", "moderate"))
