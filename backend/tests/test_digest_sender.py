@@ -17,9 +17,17 @@ def test_dry_run_writes_file_and_sends_nothing(tmp_path, monkeypatch):
     assert calls == [], "dry run must not call the network"
 
 
-def test_missing_api_key_does_not_send(tmp_path):
+def test_missing_api_key_does_not_send(monkeypatch):
+    # httpx.post MUST be patched. Without it, deleting the `if not api_key`
+    # guard would make this test hit api.resend.com for real, take a 401, and
+    # still observe sent is False — i.e. pass against the broken code it
+    # exists to guard.
+    calls = []
+    monkeypatch.setattr("backend.digest.sender.httpx.post",
+                        lambda *a, **k: calls.append(a) or None)
     sent = send_email("subj", "<p>hi</p>", "hi", "a@b.c", ["d@e.f"], api_key=None)
     assert sent is False
+    assert calls == [], "a missing key must not reach the network"
 
 
 def test_send_failure_never_leaks_the_key(caplog, monkeypatch):

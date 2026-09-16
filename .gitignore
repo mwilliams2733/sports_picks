@@ -13,3 +13,4 @@ config.yaml
 uvicorn.log
 *.egg-info/
 codebase_export.txt
+digest_preview.html
