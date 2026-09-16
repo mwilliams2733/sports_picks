@@ -19,8 +19,8 @@ def _setup_db():
     return session, t1, t2, strat
 
 
-def _add_picks(session, t1, t2, strat, confidence, wins, losses, sport="nba"):
-    for i in range(wins + losses):
+def _add_picks(session, t1, t2, strat, confidence, wins, losses, sport="nba", pushes=0):
+    for i in range(wins + losses + pushes):
         game = Game(
             sport=sport, season="2025-26",
             date=date(2026, 3, i % 28 + 1),
@@ -37,10 +37,16 @@ def _add_picks(session, t1, t2, strat, confidence, wins, losses, sport="nba"):
         )
         session.add(pick)
         session.commit()
+        if i < wins:
+            result_value, payout = "win", 100.0
+        elif i < wins + losses:
+            result_value, payout = "loss", 0.0
+        else:
+            result_value, payout = "push", 0.0
         result = PickResult(
             pick_id=pick.id,
-            result="win" if i < wins else "loss",
-            payout=100.0 if i < wins else 0.0,
+            result=result_value,
+            payout=payout,
         )
         session.add(result)
     session.commit()
@@ -107,3 +113,16 @@ def test_recalibrator_only_counts_its_own_sport():
     ).all()
     assert len(rows) == 1
     assert rows[0].actual_win_rate == 1.0
+
+
+def test_pushes_excluded_from_win_rate():
+    session, t1, t2, strat = _setup_db()
+    _add_picks(session, t1, t2, strat, confidence=5, wins=21, losses=0, pushes=9)
+    recal = Recalibrator(session, sport="nba")
+    recal.run(days=90)
+    rows = session.query(CalibrationHistory).filter(
+        CalibrationHistory.sport == "nba", CalibrationHistory.confidence_tier == 5
+    ).all()
+    assert len(rows) == 1
+    assert rows[0].actual_win_rate == 1.0
+    assert rows[0].sample_size == 21

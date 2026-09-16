@@ -55,15 +55,17 @@ class Recalibrator:
             )
 
             total = len(picks_with_results)
-            if total < MIN_PICKS_PER_TIER:
+            wins = sum(1 for p, r in picks_with_results if r.result == "win")
+            pushes = sum(1 for p, r in picks_with_results if r.result == "push")
+            decided = total - pushes
+            if decided < MIN_PICKS_PER_TIER:
                 logger.info(
-                    "Tier %d: only %d picks (need %d), skipping",
-                    tier, total, MIN_PICKS_PER_TIER,
+                    "Tier %d: only %d decided picks (need %d), skipping",
+                    tier, decided, MIN_PICKS_PER_TIER,
                 )
                 continue
 
-            wins = sum(1 for p, r in picks_with_results if r.result == "win")
-            actual_rate = wins / total
+            actual_rate = wins / decided
             expected_rate = EXPECTED_WIN_RATES.get(tier, 0.5)
             deviation = actual_rate - expected_rate
             old_threshold = thresholds.get(tier, DEFAULT_THRESHOLDS[tier])
@@ -84,7 +86,7 @@ class Recalibrator:
                 "direction": direction,
                 "old_threshold": old_threshold,
                 "new_threshold": new_threshold,
-                "sample_size": total,
+                "sample_size": decided,
             }
 
             self.session.add(CalibrationHistory(
@@ -93,7 +95,7 @@ class Recalibrator:
                 confidence_tier=tier,
                 predicted_win_rate=expected_rate,
                 actual_win_rate=actual_rate,
-                sample_size=total,
+                sample_size=decided,
                 old_threshold=old_threshold,
                 new_threshold=new_threshold,
             ))
