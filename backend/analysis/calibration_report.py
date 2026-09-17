@@ -29,6 +29,17 @@ production -- ``calibrated_model.py`` is out of scope and is not modified.
 instances within a process.  Every entry point here saves it, overwrites it
 with an explicitly fitted model, and restores it afterwards, so a stale model
 cannot silently leak into a later run.
+
+Known limitation: features are not point-in-time
+------------------------------------------------
+The model *fit* is cleanly split by date, but the evaluation *features* are
+not.  ``_build_game_data`` reads team stats and ELO as they stand today
+(``_get_team_stats`` filters on ``team_id`` with no ``game_id`` and no date
+bound), so a February game is scored using May information.  That bias runs in
+the model's favour, which means **any error this report measures is a lower
+bound on the true error**.  It applies equally to the in-sample and
+out-of-sample runs, so comparisons between them remain valid.  The caveat is
+printed alongside the Brier score so it travels with the numbers.
 """
 from __future__ import annotations
 
@@ -40,7 +51,7 @@ from datetime import date
 from sqlalchemy import and_, event
 from sqlalchemy.orm import Session, with_loader_criteria
 
-from backend.analysis.calibrated_model import CalibratedModel
+from backend.analysis.calibrated_model import MIN_TRAINING_GAMES, CalibratedModel
 from backend.analysis.variants.ensemble import EnsembleStrategy
 from backend.models import Game
 
@@ -98,7 +109,10 @@ def reliability_bins(
             raise ValueError(f"predicted probability out of range: {prob}")
         if outcome not in (0, 1):
             raise ValueError(f"outcome must be 0 or 1, got {outcome!r}")
-        idx = min(int(prob * n_bins), n_bins - 1)
+        # Round before truncating so a value that is a float hair under a bin
+        # edge (0.3 stored as 0.29999999999999999) lands in the bin a reader
+        # would expect. Hygiene: it cannot lose or duplicate an observation.
+        idx = min(int(round(prob * n_bins, 12)), n_bins - 1)
         buckets[idx].append((prob, outcome))
 
     out: list[Bin] = []
@@ -141,7 +155,8 @@ def binary_pairs(rows: list[tuple[float, int, int]]) -> list[tuple[float, int]]:
 def effective_sample_size(n: int, n_clusters: int, icc: float) -> float:
     """Cluster-adjusted sample size under an assumed intra-cluster correlation.
 
-    Games sharing a team and season are not independent observations. With
+    Games sharing a team are not independent observations. The clusters are
+    teams -- one cluster per team, not per team-season. With
     average cluster size ``m``, the design effect is ``1 + (m - 1) * icc`` and
     the effective n is ``n / design_effect``. ``icc`` is an assumption, not a
     measurement -- callers should quote the assumption alongside the number.
@@ -167,6 +182,11 @@ class Report:
     fit_end: date | None
     n_fit: int
     n_model_training_games: int
+    # False when CalibratedModel refused to fit (fewer than MIN_TRAINING_GAMES
+    # in the window). The strategy then silently serves _fallback_probability,
+    # a fixed heuristic -- so the curve would describe the heuristic, not the
+    # model, and must not be presented as the model's calibration.
+    model_trained: bool
     eval_start: date | None
     eval_end: date | None
     n_eval: int
@@ -312,6 +332,7 @@ def evaluate(
         fit_end=fit_games[-1].date if fit_games else None,
         n_fit=len(fit_games),
         n_model_training_games=model.n_training_games,
+        model_trained=model.trained,
         eval_start=eval_games[0].date if eval_games else None,
         eval_end=eval_games[-1].date if eval_games else None,
         n_eval=len(pairs),
@@ -328,14 +349,23 @@ def evaluate(
 # CLI
 # --------------------------------------------------------------------------
 
+def is_leaked(report: Report) -> bool:
+    """True when the model was fit on at least one game it is scored against.
+
+    Derived from the actual fit/eval intersection, never from the ``in_sample``
+    flag: ``--eval-on fit`` without ``--in-sample`` is fully leaked while the
+    flag is False, and the header is the line that gets pasted downstream.
+    """
+    return bool(report.fit_game_ids & report.eval_game_ids)
+
+
 def format_report(report: Report) -> str:
     r = report
     lines: list[str] = []
-    mode = (
-        "IN-SAMPLE (leakage control -- NOT a publishable number)"
-        if r.in_sample
-        else "out-of-sample"
-    )
+    if is_leaked(r):
+        mode = "LEAKED -- fit and evaluation sets overlap. NOT a publishable number"
+    else:
+        mode = "out-of-sample"
     lines.append(f"Calibration report -- sport={r.sport} -- {mode}")
     lines.append(f"  split date        : {r.split_date} (fit < split <= evaluate)")
     lines.append(
@@ -348,12 +378,41 @@ def format_report(report: Report) -> str:
         f"({r.eval_start} .. {r.eval_end}), window={r.eval_on}"
     )
     lines.append(f"  ties excluded     : {r.n_ties_excluded}")
-    if r.fit_game_ids & r.eval_game_ids:
-        lines.append("  !! WARNING: fit and evaluation sets OVERLAP -- this is leaked.")
+    if is_leaked(r):
+        lines.append(
+            f"  !! WARNING: fit and evaluation sets OVERLAP on "
+            f"{len(r.fit_game_ids & r.eval_game_ids)} games -- this is leaked."
+        )
     lines.append("")
 
     if not r.bins:
         lines.append("  No evaluation games. Nothing to report.")
+        return "\n".join(lines)
+
+    # Finding 1: an unfitted CalibratedModel does not raise -- it sets
+    # trained=False, and predict_home_win_prob then silently returns the fixed
+    # _fallback_probability heuristic. The resulting curve describes the
+    # heuristic, not the model, so refuse to print it as calibration.
+    if not r.model_trained:
+        lines.append(
+            "  !! REFUSING TO PRINT A RELIABILITY TABLE."
+        )
+        lines.append(
+            f"  !! CalibratedModel did not fit: only {r.n_model_training_games} "
+            f"training games in the window (needs {MIN_TRAINING_GAMES})."
+        )
+        lines.append(
+            "  !! Every probability below would come from _fallback_probability,"
+        )
+        lines.append(
+            "  !! a fixed heuristic -- NOT the model. Such a table would describe"
+        )
+        lines.append(
+            "  !! the heuristic's calibration and must not be quoted as the"
+        )
+        lines.append(
+            "  !! model's. Widen the fit window or fix the training data."
+        )
         return "\n".join(lines)
 
     if r.n_eval < MIN_EVAL_GAMES:
@@ -380,13 +439,21 @@ def format_report(report: Report) -> str:
         f"  Brier score       : {r.brier:.4f}  (lower is better; 0.25 = always 0.5)"
     )
     lines.append("")
+    lines.append("  CAVEAT: evaluation features are season-end snapshots, not")
+    lines.append("  point-in-time -- team stats and ELO are read as they stand today,")
+    lines.append("  so a February game is scored with May information. This biases in")
+    lines.append("  the model's favour, so the error measured here is a LOWER BOUND.")
+    lines.append("")
     lines.append("  Sample size")
     lines.append(f"    raw n           : {r.n_eval} games across {r.n_teams} teams")
     for icc in (0.01, 0.05):
         ess = effective_sample_size(r.n_eval, r.n_teams, icc)
         lines.append(f"    effective n     : {ess:7.1f}  assuming intra-team ICC = {icc}")
     lines.append(
-        "    Games sharing a team and season are NOT independent observations."
+        "    Games sharing a team are NOT independent observations; the"
+    )
+    lines.append(
+        "    clusters here are teams."
     )
     lines.append(
         "    Treat the effective n, not the raw count, as the basis for confidence."

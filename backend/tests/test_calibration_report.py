@@ -14,7 +14,10 @@ from backend.analysis.calibration_report import (
     binary_pairs,
     brier_score,
     choose_split_date,
+    effective_sample_size,
     evaluate,
+    format_report,
+    is_leaked,
     reliability_bins,
 )
 from backend.models import Base, EloRating, Game, Odds, Team
@@ -32,7 +35,8 @@ def test_perfect_calibration_has_near_zero_gap_and_known_brier():
         assert b.gap == pytest.approx(0.0, abs=1e-9)
         assert b.observed_rate == pytest.approx(b.mean_predicted, abs=1e-9)
 
-    # Hand-computed: every pair contributes 0.64 or 0.04; total 6.4 over 20.
+    # Hand-computed: 4 pairs contribute 0.64 and 16 contribute 0.04,
+    # so the total is 2.56 + 0.64 = 3.2 over 20 pairs = 0.16.
     assert brier_score(pairs) == pytest.approx(0.16, abs=1e-9)
 
 
@@ -151,3 +155,124 @@ def test_in_sample_control_reports_itself_as_leaked(db_session):
     assert not (clean.fit_game_ids & clean.eval_game_ids)
     assert leaked.fit_game_ids & leaked.eval_game_ids
     assert leaked.n_model_training_games > clean.n_model_training_games
+
+
+# --- 7. Effective sample size is arithmetic in a measurement instrument -----
+
+def test_effective_sample_size_matches_the_design_effect_formula():
+    # The real NBA evaluation set: 310 games across 33 teams.
+    # m    = 2 * 310 / 33      = 18.787878...
+    # deff = 1 + (m - 1) * .05 =  1.889393...
+    # ess  = 310 / deff        = 164.07...
+    m = 2 * 310 / 33
+    deff = 1 + (m - 1) * 0.05
+    assert effective_sample_size(310, 33, 0.05) == pytest.approx(310 / deff)
+    assert effective_sample_size(310, 33, 0.05) == pytest.approx(164.08, abs=0.01)
+    # A smaller ICC must cost less precision.
+    assert effective_sample_size(310, 33, 0.01) == pytest.approx(263.18, abs=0.01)
+    # Zero correlation means no penalty at all.
+    assert effective_sample_size(310, 33, 0.0) == pytest.approx(310.0)
+
+
+def test_effective_sample_size_degenerate_cluster_size_is_a_no_op():
+    # 7 games across 14 teams: every team appears exactly once, so the average
+    # cluster holds one observation and there is no correlation to discount --
+    # whatever the ICC.
+    for icc in (0.0, 0.01, 0.05, 0.5):
+        assert effective_sample_size(7, 14, icc) == pytest.approx(7.0)
+    # Guard the empty cases rather than dividing by zero.
+    assert effective_sample_size(0, 33, 0.05) == 0.0
+    assert effective_sample_size(310, 0, 0.05) == 0.0
+
+
+# --- 8. The header cannot contradict the overlap warning beneath it ---------
+
+def test_eval_on_fit_without_in_sample_is_labelled_leaked(db_session):
+    """`--eval-on fit` fits on date<split and scores date<split: fully leaked.
+
+    `in_sample` is False for that run, so a header derived from the flag would
+    read "out-of-sample" above a leaked table. The header is the line that gets
+    pasted into downstream reports, so it must be derived from the real
+    fit/eval intersection.
+    """
+    Base.metadata.create_all(db_session.get_bind())
+    _seed_two_windows(db_session)
+
+    split = choose_split_date(db_session, "nba", train_frac=0.7)
+    report = evaluate(db_session, "nba", min_bin=5, split_date=split,
+                      in_sample=False, eval_on="fit")
+
+    assert report.in_sample is False           # the flag says clean...
+    assert is_leaked(report)                   # ...but the sets say otherwise
+    header = format_report(report).splitlines()[0]
+    assert "LEAKED" in header
+    assert "out-of-sample" not in header
+
+
+def test_clean_run_header_says_out_of_sample(db_session):
+    Base.metadata.create_all(db_session.get_bind())
+    _seed_two_windows(db_session)
+
+    split = choose_split_date(db_session, "nba", train_frac=0.7)
+    report = evaluate(db_session, "nba", min_bin=5, split_date=split)
+
+    assert not is_leaked(report)
+    assert "out-of-sample" in format_report(report).splitlines()[0]
+
+
+# --- 9. An unfitted model must not produce a reliability table -------------
+
+def test_untrained_model_refuses_to_print_a_reliability_table(db_session):
+    """Below MIN_TRAINING_GAMES the strategy serves a fixed heuristic.
+
+    CalibratedModel sets trained=False and predict_home_win_prob silently falls
+    back to _fallback_probability. A table built from that describes the
+    heuristic, not the model, and must never be printable as calibration.
+    """
+    Base.metadata.create_all(db_session.get_bind())
+    # 14 games before the split: too few for CalibratedModel to fit.
+    _seed_two_windows(db_session, n_early=14, n_late=30)
+
+    split = date(2026, 1, 16)  # leaves the 14 earliest games in the fit window
+    report = evaluate(db_session, "nba", min_bin=5, split_date=split)
+
+    assert report.n_fit == 14
+    assert report.model_trained is False
+    assert report.n_model_training_games == 0
+
+    out = format_report(report)
+    assert "REFUSING TO PRINT A RELIABILITY TABLE" in out
+    assert "_fallback_probability" in out
+    # The numbers themselves must not be rendered.
+    assert "Brier score" not in out
+    assert "mean_pred" not in out
+
+
+def test_trained_model_does_print_the_table(db_session):
+    """The refusal must be conditional, not a blanket suppression."""
+    Base.metadata.create_all(db_session.get_bind())
+    _seed_two_windows(db_session)
+
+    split = choose_split_date(db_session, "nba", train_frac=0.7)
+    report = evaluate(db_session, "nba", min_bin=5, split_date=split)
+
+    assert report.model_trained is True
+    out = format_report(report)
+    assert "REFUSING" not in out
+    assert "Brier score" in out
+
+
+# --- 10. The point-in-time caveat travels with the numbers -----------------
+
+def test_point_in_time_caveat_is_printed_next_to_the_brier_score(db_session):
+    """Downstream readers see the header and the table, not the hand-off doc."""
+    Base.metadata.create_all(db_session.get_bind())
+    _seed_two_windows(db_session)
+
+    split = choose_split_date(db_session, "nba", train_frac=0.7)
+    out = format_report(evaluate(db_session, "nba", min_bin=5, split_date=split))
+
+    assert "season-end snapshots" in out
+    assert "LOWER BOUND" in out
+    # It must sit with the Brier score, not be buried at the top.
+    assert out.index("Brier score") < out.index("LOWER BOUND")
