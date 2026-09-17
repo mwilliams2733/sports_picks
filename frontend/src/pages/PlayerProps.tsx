@@ -76,8 +76,15 @@ export default function PlayerProps() {
     propsData.flatMap(p => p.matchup ? p.matchup.split(' @ ') : [])
   )).sort();
 
-  // Reset team and market filters when sport changes
-  useEffect(() => { setTeamFilter(''); setMarketFilter(''); }, [sport]);
+  // Reset team and market filters when sport changes. Adjust state during
+  // render instead of in an effect, so this doesn't cause an extra render
+  // pass. Must run before the early return below.
+  const [prevSport, setPrevSport] = useState(sport);
+  if (sport !== prevSport) {
+    setPrevSport(sport);
+    setTeamFilter('');
+    setMarketFilter('');
+  }
 
   const filteredProps = propsData
     .filter(p => p.confidence === null || p.confidence >= minConfidence)

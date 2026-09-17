@@ -70,8 +70,15 @@ export default function TodaysPicks() {
     setBetModalOpen(true);
   };
 
-  // Reset team filter when sport changes (must be before early returns)
-  useEffect(() => { setTeamFilter(''); }, [sport]);
+  // Reset team filter when sport changes. Adjust state during render (React's
+  // documented pattern for "state that depends on a prop") instead of in an
+  // effect, so this doesn't cause an extra render pass. Must run before any
+  // early return below.
+  const [prevSport, setPrevSport] = useState(sport);
+  if (sport !== prevSport) {
+    setPrevSport(sport);
+    setTeamFilter('');
+  }
 
   const error = picks.error || record.error || games.error;
   const loading = picks.isLoading || record.isLoading || games.isLoading;
