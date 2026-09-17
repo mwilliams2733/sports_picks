@@ -19,10 +19,15 @@ export default function TodaysPicks() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { sport, setSport } = useAppStore();
 
-  // Sync URL → store on mount
+  // Sync URL → store on mount. setSport writes to the Zustand store (external
+  // state a useState lazy initializer can't reach), so this has to stay an
+  // effect. Deliberately NOT adding the missing deps below: doing so would
+  // re-run this on every sport change and fight the store → URL sync in
+  // handleSportChange, reintroducing a URL→store→URL loop.
   useEffect(() => {
     const urlSport = searchParams.get('sport');
     if (urlSport && urlSport !== sport) setSport(urlSport);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Sync store → URL on sport change
