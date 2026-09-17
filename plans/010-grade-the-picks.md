@@ -140,6 +140,21 @@ path in this repo fetches a post-game box score.** That is the real gap.
 
 ### Task 1: Stop `grade_pick` inventing a result for pick types it does not understand
 
+> **DONE 2026-09-17 — `6117d5e`.** 549 -> 552 passing, mutation-proved.
+> **Correction for later tasks: there were six call sites, not the two named
+> below.** `api/users.py` x3 (add-pick, parlay leg, grade endpoint) and
+> `backtesting/backtester.py` x1 also unpacked the return value and would have
+> raised `TypeError` on `None`. All six are updated. Note the backtester
+> excludes ungradeable picks from its sample entirely -- counting them as
+> losses understates the strategy, counting them as pushes inflates the
+> denominator.
+>
+> One trap worth carrying into Task 4: the grade endpoint already has a local
+> named `graded` (a counter, `graded += 1`). Naming the new local `graded`
+> shadows it and turns the increment into `tuple + int`. The new locals are
+> called `grade_outcome`.
+
+
 This is the safety fix and is worth landing on its own, immediately. After it,
 the worst case is that props stay ungraded — not that they are recorded as
 losses.
