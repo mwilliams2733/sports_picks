@@ -231,9 +231,16 @@ def _team_stat_rows(session: Session, team_id: int,
     if rows or game_date is None:
         return rows
 
+    # The team must actually have played the fallback game. Production holds
+    # legacy rows attaching 33 different teams' stats to one game (1014); without
+    # this guard the fallback could hand a team a stat line from a game it was
+    # never in.
     latest_prior = (session.query(Game.id)
                     .join(TeamStat, TeamStat.game_id == Game.id)
-                    .filter(TeamStat.team_id == team_id, Game.date < game_date)
+                    .filter(TeamStat.team_id == team_id,
+                            Game.date < game_date,
+                            ((Game.home_team_id == team_id)
+                             | (Game.away_team_id == team_id)))
                     .order_by(Game.date.desc(), Game.id.desc())
                     .first())
     if latest_prior is None:

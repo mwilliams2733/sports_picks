@@ -282,17 +282,23 @@ def _final_games(session: Session, sport: str) -> list[Game]:
 
 
 def backfill_team_stats(session: Session, sport: str, *, dry_run: bool = False,
+                        force: bool = False,
                         lookback: int = DEFAULT_LOOKBACK) -> dict[str, int]:
     """Compute and store point-in-time stats for every final game of ``sport``.
 
     Games are walked in chronological order so each one sees only its
     predecessors.  Resumable and gap-tolerant: each game is asked individually
     whether it already has rows.  Does not commit -- the caller decides.
+
+    ``force`` recomputes even for games that already have rows.  Use it once
+    when the existing rows predate this module: the handful of legacy rows in
+    production are of unknown provenance and may not be point-in-time, and the
+    upsert makes overwriting them safe.
     """
     games = _final_games(session, sport)
     processed = skipped = rows = 0
     for i, game in enumerate(games):
-        if _game_has_stats(session, game.id):
+        if not force and _game_has_stats(session, game.id):
             skipped += 1
             continue
         processed += 1

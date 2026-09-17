@@ -107,3 +107,34 @@ def test_unmeasured_features_still_use_their_documented_defaults(two_games):
     assert s.offensive_rating == pytest.approx(100.0)
     assert s.defensive_rating == pytest.approx(100.0)
     assert s.pace == pytest.approx(100.0)
+
+
+def test_fallback_ignores_rows_for_a_game_the_team_never_played(two_games):
+    """Production holds legacy rows attaching 33 teams' stats to one game.
+
+    A team must not inherit a stat line from a game it was not in.
+    """
+    session, a, g1, g2 = two_games
+    b_id = g2.away_team_id
+    other = Team(name="Delta", abbreviation="DEL", sport="nba")
+    session.add(other)
+    session.commit()
+
+    orphan_game = Game(sport="nba", season="2024-2025", date=date(2024, 1, 6),
+                       home_team_id=b_id, away_team_id=other.id,
+                       home_score=100, away_score=99, status="final")
+    session.add(orphan_game)
+    session.commit()
+    # Team A is not in orphan_game, yet carries a row against it.
+    session.add(TeamStat(team_id=a.id, game_id=orphan_game.id,
+                         stat_type="point_diff", value=-99.0))
+    session.commit()
+
+    upcoming = Game(sport="nba", season="2024-2025", date=date(2024, 1, 9),
+                    home_team_id=a.id, away_team_id=b_id, status="scheduled")
+    session.add(upcoming)
+    session.commit()
+
+    s = _get_team_stats(session, a.id, "nba",
+                        game_id=upcoming.id, game_date=upcoming.date)
+    assert s.point_diff == pytest.approx(13.0), "must skip the orphan row"

@@ -147,6 +147,9 @@ def _store_games(session: Session, sport: str, target_date: date, games: list[di
     team_cache: dict[str, int] = {}
     count = 0
     season_label = f"{target_date.year}-{target_date.year + 1}"
+    # Rows we touched this run, so their point-in-time team_stats can be
+    # (re)computed once scores have landed. See _refresh_team_stats below.
+    touched: list[Game] = []
     # Unordered team pairs ESPN listed for target_date. Used for reconciliation.
     espn_pairs_target_date: set[frozenset[int]] = set()
 
@@ -176,6 +179,7 @@ def _store_games(session: Session, sport: str, target_date: date, games: list[di
                 existing.status = g["status"]
             if existing.start_time is None:
                 existing.start_time = start_time
+            touched.append(existing)
             continue
 
         game = Game(
@@ -186,13 +190,44 @@ def _store_games(session: Session, sport: str, target_date: date, games: list[di
             status=g["status"],
         )
         session.add(game)
+        touched.append(game)
         count += 1
 
     if espn_pairs_target_date:
         _reconcile_against_espn(session, sport, target_date, espn_pairs_target_date)
 
     session.commit()
+    _refresh_team_stats(session, touched)
     return count
+
+
+def _refresh_team_stats(session: Session, games: list[Game]) -> None:
+    """Recompute point-in-time team_stats for the games this run touched.
+
+    This is the only production producer of TeamStat rows. It runs here, off
+    the games/scores path, and deliberately NOT off the odds or props paths:
+    the stats depend on scores and dates only.
+
+    The values are computed from games strictly *before* each game's own date
+    (see backend.pipeline.team_stats), so a game's own result can never enter
+    its own features even though it has just been written as final. The write
+    is an upsert, so a game re-seen on a later run is updated, not duplicated.
+
+    A failure here must not lose the games we just stored, so it is logged
+    rather than raised -- the backfill script can always fill the gap, and the
+    resume check is per game.
+    """
+    if not games:
+        return
+    from backend.pipeline.team_stats import update_team_stats_for_games
+    try:
+        written = update_team_stats_for_games(session, games)
+        session.commit()
+        logger.info("Refreshed %d team_stat values across %d games",
+                    written, len(games))
+    except Exception:
+        session.rollback()
+        logger.exception("team_stats refresh failed for %d games", len(games))
 
 
 def _reconcile_against_espn(session: Session, sport: str, target_date: date,
