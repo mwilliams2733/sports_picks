@@ -262,17 +262,44 @@ def test_trained_model_does_print_the_table(db_session):
     assert "Brier score" in out
 
 
-# --- 10. The point-in-time caveat travels with the numbers -----------------
+# --- 10. The caveat travels with the numbers, and is true ------------------
 
-def test_point_in_time_caveat_is_printed_next_to_the_brier_score(db_session):
-    """Downstream readers see the header and the table, not the hand-off doc."""
+def test_report_does_not_claim_the_error_is_a_lower_bound(db_session):
+    """Plan 008 made the evaluation features point-in-time.
+
+    Until it did, this report warned that team stats and Elo were read as they
+    stand today, so the measured error was a lower bound on the truth.  That
+    warning is now false: ``_build_game_data`` passes ``game_id`` and
+    ``game_date`` down to ``_team_stat_rows``, which can never reach forward in
+    time.  Printing it anyway tells a reader to discount a number that does not
+    need discounting.
+    """
     Base.metadata.create_all(db_session.get_bind())
     _seed_two_windows(db_session)
 
     split = choose_split_date(db_session, "nba", train_frac=0.7)
     out = format_report(evaluate(db_session, "nba", min_bin=5, split_date=split))
 
-    assert "season-end snapshots" in out
-    assert "LOWER BOUND" in out
+    assert "LOWER BOUND" not in out
+    assert "season-end snapshots" not in out
+
+
+def test_constant_feature_caveat_is_printed_next_to_the_brier_score(db_session):
+    """The limitation that remains is that three features carry no signal.
+
+    ``offensive_rating``, ``defensive_rating`` and ``pace`` need possession
+    counts no collector supplies, so they fall back to a constant for every
+    game.  A reader comparing this Brier against another model has to know the
+    model produced it on four working features, not seven.
+    """
+    Base.metadata.create_all(db_session.get_bind())
+    _seed_two_windows(db_session)
+
+    split = choose_split_date(db_session, "nba", train_frac=0.7)
+    out = format_report(evaluate(db_session, "nba", min_bin=5, split_date=split))
+
+    assert "CAVEAT" in out
+    assert "offensive_rating" in out
+    assert "pace" in out
     # It must sit with the Brier score, not be buried at the top.
-    assert out.index("Brier score") < out.index("LOWER BOUND")
+    assert out.index("Brier score") < out.index("CAVEAT")

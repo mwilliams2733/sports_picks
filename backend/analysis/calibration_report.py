@@ -30,16 +30,23 @@ instances within a process.  Every entry point here saves it, overwrites it
 with an explicitly fitted model, and restores it afterwards, so a stale model
 cannot silently leak into a later run.
 
-Known limitation: features are not point-in-time
-------------------------------------------------
-The model *fit* is cleanly split by date, but the evaluation *features* are
-not.  ``_build_game_data`` reads team stats and ELO as they stand today
-(``_get_team_stats`` filters on ``team_id`` with no ``game_id`` and no date
-bound), so a February game is scored using May information.  That bias runs in
-the model's favour, which means **any error this report measures is a lower
-bound on the true error**.  It applies equally to the in-sample and
-out-of-sample runs, so comparisons between them remain valid.  The caveat is
-printed alongside the Brier score so it travels with the numbers.
+Known limitation: three features are constant
+---------------------------------------------
+``offensive_rating``, ``defensive_rating`` and ``pace`` all need possession
+counts, and nothing in this repo collects them.  ``backfill_team_stats``
+deliberately refuses to invent them, so they are absent for every game and the
+consumers' ``or 100.0`` fallbacks supply the same constant each time.  Whatever
+this report measures, it measures on point differential, Elo, win-loss splits
+and rest days.  The caveat is printed alongside the Brier score so it travels
+with the numbers.
+
+Historical note: until plan 008 this section documented a different, worse
+limitation -- that the evaluation *features* were season-end snapshots, making
+every error a lower bound.  That is no longer true.  ``_build_game_data``
+passes ``game_id`` and ``game_date`` into ``_team_stat_rows``, which bounds the
+lookup to rows written strictly before the game being scored and so can never
+reach forward in time.  The numbers this report prints are estimates, not
+lower bounds.
 """
 from __future__ import annotations
 
@@ -439,10 +446,11 @@ def format_report(report: Report) -> str:
         f"  Brier score       : {r.brier:.4f}  (lower is better; 0.25 = always 0.5)"
     )
     lines.append("")
-    lines.append("  CAVEAT: evaluation features are season-end snapshots, not")
-    lines.append("  point-in-time -- team stats and ELO are read as they stand today,")
-    lines.append("  so a February game is scored with May information. This biases in")
-    lines.append("  the model's favour, so the error measured here is a LOWER BOUND.")
+    lines.append("  CAVEAT: three of the model's features carry no signal.")
+    lines.append("  offensive_rating, defensive_rating and pace need possession")
+    lines.append("  counts, which no collector in this repo supplies, so every game")
+    lines.append("  falls back to the same constant. The score above was produced on")
+    lines.append("  point differential, Elo, win-loss splits and rest days alone.")
     lines.append("")
     lines.append("  Sample size")
     lines.append(f"    raw n           : {r.n_eval} games across {r.n_teams} teams")

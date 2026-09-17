@@ -51,11 +51,12 @@ REJECTED (one-line rationale).
 
 ## Operator action that is not in any plan
 
-**Rotate the Odds API key.** A live key is in plaintext at `uvicorn.log:78`
-(written by an exception handler that formatted a request URL). The file is
-git-ignored and was never committed, so this is not a repo leak — but the key
-is burned. Plan 005 stops the recurrence; only rotation fixes the exposure.
-See plan 005's header for the steps.
+~~**Rotate the Odds API key.**~~ **DONE 2026-09-16.** A live key was in
+plaintext at `uvicorn.log:78` (written by an exception handler that formatted a
+request URL). The file is git-ignored and was never committed, so this was
+never a repo leak. Plan 005 stopped the recurrence; the rotation closed the
+exposure. The burned key may still sit in `uvicorn.log` on disk — inert now,
+but the file can be truncated.
 
 ## What these plans do NOT cover
 

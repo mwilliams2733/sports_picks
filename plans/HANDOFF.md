@@ -167,10 +167,13 @@ The natural next pieces of work, none of them planned yet:
 
 ## Outstanding operator actions
 
-1. **Rotate the Odds API key.** A live key sat in plaintext in `uvicorn.log`
-   (git-ignored, never committed, so not a repo leak). Plan 005 stopped the
-   recurrence; only rotation fixes the exposure. You said you would do this
-   later — it is recorded in `plans/README.md` too.
+1. ~~**Rotate the Odds API key.**~~ **DONE 2026-09-16.** A live key had sat in
+   plaintext in `uvicorn.log` (git-ignored, never committed, so not a repo
+   leak). Plan 005 stopped the recurrence; the rotation closed the exposure.
+   Remember the new key has to be set in **both** places the deployment reads
+   it: `~/.secrets/shared.env` locally and `/opt/sports-picks/.env` on the
+   server (`deploy/setup.sh:51`). The burned key may still be in `uvicorn.log`
+   on disk — inert, but worth truncating.
 2. **Do not set `digest.enabled: true` yet.** The digest works end to end and a
    dry-run preview rendered real picks with real rationales. 008 has now fixed
    the data defect that made the ranking surface the model's largest errors
