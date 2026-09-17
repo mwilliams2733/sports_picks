@@ -1,14 +1,11 @@
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import type { DailyData } from '../types';
+import { computeCumulativeChartData } from '../lib/performanceChart';
 
 interface Props { data: DailyData[]; }
 
 export default function PerformanceChart({ data }: Props) {
-  let cumulative = 0;
-  const chartData = data.map(d => {
-    cumulative += d.profit;
-    return { ...d, cumulative: Math.round(cumulative * 100) / 100 };
-  });
+  const chartData = computeCumulativeChartData(data);
   return (
     <ResponsiveContainer width="100%" height={280}>
       <LineChart data={chartData}>
