@@ -21,13 +21,13 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 004 | Make the activity feed work (route order + WS dispatch) | P1 | M | 001 — merged | **MERGED** into `master` as `bb4b841` — /users/feed returns 200, real WebSocket frames delivered, bounded test so a regression fails rather than hangs |
 | 005 | Scrub the API key from logs, restore the budget alarm | P1 | S | — | **MERGED** into `master` as `b62358e` |
 | 006 | Per-sport, push-aware, newest-first recalibration | P1 | S | — | **MERGED** into `master` as `0e1f13f` |
-| 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | **MERGED** into `master` — tool built and verified; measurement itself BLOCKED: the model has almost no features (see root cause below). Unblocked by 008. |
-| 008 | Populate the features the model actually trains on | P1 | L | 007 | TODO — written against `142635c`. **Blocks 007's decision gate.** |
+| 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | **MERGED** into `master` — tool built and verified; measurement itself was BLOCKED by the model having almost no features. Unblocked by 008. |
+| 008 | Populate the features the model actually trains on | P1 | L | 007 — merged | **MERGED** into `master` — `team_stats` 1 → 1058 game_ids, `elo_history` 0 → 2116 rows, all point-in-time. `pace` / `offensive_rating` / `defensive_rating` structurally refused (need possessions). Two review rounds closed a train/serve Elo skew. Backfill ran against a copy only; production DB untouched. |
 | 009 | Clear the frontend ESLint errors | P2 | M | — | **MERGED** into `master` as `0670d45` — eslint 0 errors / 0 warnings, tsc clean, vitest 15/15, all verified post-merge |
 
-Current `master`: **500 backend tests passing**, 0 failed (360 at the start of
+Current `master`: **532 backend tests passing**, 0 failed (360 at the start of
 the audit). Frontend: eslint 0/0, tsc clean, vitest 15/15.
-Only plan 008 remains unmerged — its branch has 5 commits and is under review.
+All nine plans are merged.
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) |
 REJECTED (one-line rationale).

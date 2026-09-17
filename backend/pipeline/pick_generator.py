@@ -3,7 +3,7 @@ import logging
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
-from backend.models import Game, PickModel, StrategyModel, Odds, TeamStat, EloRating
+from backend.models import Game, PickModel, StrategyModel, Odds, TeamStat, EloRating, EloHistory
 from backend.data_types import GameData, TeamStats, OddsSnapshot, FighterStats
 from backend.analysis.variants.ensemble import EnsembleStrategy
 from backend.analysis.variants.recent_form import RecentFormStrategy
@@ -113,13 +113,28 @@ def _check_lookahead_spot(session: Session, team_id: int, opponent_team_id: int,
     if not next_game:
         return False
 
-    # Get next opponent's ELO
+    # Get next opponent's ELO -- on the SAME basis as `team_elo`, which comes
+    # from `_team_elo` and is therefore the replayed `elo_history` rating. The
+    # raw `EloRating` query this replaces put the two sides of the comparison
+    # below on tables that disagree by a mean of 53 points and up to 134, wider
+    # than the 50-point band itself.
+    #
+    # `game_date`, not `next_game.date`, and no game id. `next_game` is selected
+    # with `Game.date > game_date`, so bounding by its date would admit ratings
+    # from games between the predicted game and the next one; passing
+    # `next_game.id` would hit the exact-match step and return `next_game`'s own
+    # pre-game rating. Both are after `game_date` and neither exists at
+    # prediction time. This asks "how strong is that opponent as far as anyone
+    # knows today", which is the question the heuristic means.
     next_opp_id = next_game.away_team_id if next_game.home_team_id == team_id else next_game.home_team_id
-    next_opp_elo = session.query(EloRating).filter(
-        EloRating.team_id == next_opp_id
-    ).first()
+    next_opp_elo = _team_elo_or_none(session, next_opp_id, sport, None, game_date)
 
-    if next_opp_elo and next_opp_elo.rating > team_elo - 50:
+    # Deliberately the None-aware resolver: an opponent with no rating anywhere
+    # is unknown, not average. Letting `_team_elo`'s 1500.0 default carry this
+    # would answer True for any `team_elo` below 1550 on no evidence at all.
+    # The original row-or-None query fell through to `return False` here, and
+    # that behaviour is preserved.
+    if next_opp_elo is not None and next_opp_elo > team_elo - 50:
         # Next opponent is roughly equal or better
         return True
 
@@ -128,8 +143,10 @@ def _check_lookahead_spot(session: Session, team_id: int, opponent_team_id: int,
 
 def _build_game_data(session: Session, game,
                      pitcher_scores: dict[int, dict[str, float]] | None = None) -> GameData:
-    home_stats = _get_team_stats(session, game.home_team_id, game.sport)
-    away_stats = _get_team_stats(session, game.away_team_id, game.sport)
+    home_stats = _get_team_stats(session, game.home_team_id, game.sport,
+                                 game_id=game.id, game_date=game.date)
+    away_stats = _get_team_stats(session, game.away_team_id, game.sport,
+                                 game_id=game.id, game_date=game.date)
     odds_rows = session.query(Odds).filter(Odds.game_id == game.id).all()
     odds = [OddsSnapshot(bookmaker=o.bookmaker, moneyline_home=o.moneyline_home or 0,
         moneyline_away=o.moneyline_away or 0, spread_home=o.spread_home or 0.0,
@@ -204,10 +221,144 @@ def _build_fighter_stats(session: Session, fighter_id: int, sport: str, before_d
     )
 
 
-def _get_team_stats(session: Session, team_id: int, sport: str) -> TeamStats:
-    stats_rows = session.query(TeamStat).filter(TeamStat.team_id == team_id).all()
+def _team_stat_rows(session: Session, team_id: int,
+                    game_id: int | None, game_date: date | None) -> list[TeamStat]:
+    """The TeamStat rows that apply to `team_id` going into a specific game.
+
+    Previously this filtered on `team_id` alone, so whichever games happened to
+    have rows supplied stats for *every* game that team ever played. In
+    production exactly one game had rows, which is why some picks carried
+    recent_form / net_rating rationale factors and others did not.
+
+    Rows are written point-in-time (computed strictly before their own game by
+    `backend.pipeline.team_stats`), so this game's own rows are the correct,
+    non-leaking answer. A scheduled game usually has none yet, so the fallback
+    is the team's most recent *strictly earlier* game that does. That is stale
+    by at most one game and can never reach forward in time. With no game
+    context at all, or no prior rows, the caller's defaults apply.
+    """
+    if game_id is None:
+        return []
+
+    rows = (session.query(TeamStat)
+            .filter(TeamStat.team_id == team_id, TeamStat.game_id == game_id)
+            .all())
+    if rows or game_date is None:
+        return rows
+
+    # The team must actually have played the fallback game. Production holds
+    # legacy rows attaching 33 different teams' stats to one game (1014); without
+    # this guard the fallback could hand a team a stat line from a game it was
+    # never in.
+    latest_prior = (session.query(Game.id)
+                    .join(TeamStat, TeamStat.game_id == Game.id)
+                    .filter(TeamStat.team_id == team_id,
+                            # `<` rather than `<=` only as a tie-break: rows are
+                            # already written point-in-time, so a same-day game's
+                            # row cannot contain that day's results and `<=`
+                            # would be benign here -- it would merely pick a
+                            # fresher row. This is untested for that reason: the
+                            # consequence of getting it wrong is one extra game
+                            # of staleness, not leakage. Contrast
+                            # `team_stats.strictly_before`, where `<=` DOES leak
+                            # and is covered by a mutation test.
+                            Game.date < game_date,
+                            ((Game.home_team_id == team_id)
+                             | (Game.away_team_id == team_id)))
+                    .order_by(Game.date.desc(), Game.id.desc())
+                    .first())
+    if latest_prior is None:
+        return []
+    return (session.query(TeamStat)
+            .filter(TeamStat.team_id == team_id,
+                    TeamStat.game_id == latest_prior[0])
+            .all())
+
+
+def _team_elo(session: Session, team_id: int, sport: str,
+              game_id: int | None, game_date: date | None = None) -> float:
+    """The Elo rating this team carried INTO `game_id`.
+
+    `EloHistory` rows are written pre-game by `backend.pipeline.team_stats`,
+    and `calibrated_model` trains on exactly this lookup. Reading the current
+    `EloRating` instead -- an end-of-history rating that already reflects the
+    outcome being predicted -- was both lookahead during historical replay and
+    a train/serve skew once the history table was populated.
+
+    Three sources, in order:
+
+    1. the game's own `EloHistory` row, written pre-game;
+    2. failing that, the team's most recent *strictly earlier* `EloHistory`
+       row in this sport -- the replayed rating it carried out of its last
+       played game;
+    3. failing that, the current `EloRating`, then 1500.0.
+
+    Step 2 is not an optimisation, it is the whole point of this function for
+    live picks. A genuinely upcoming game has no `EloHistory` row of its own,
+    so without it every live pick fell through to `EloRating` -- and for team
+    sports that table is *not* the pre-game rating. It is written in exactly
+    one place, `backtesting.historical.compute_historical_elo`, whose only
+    entry point `load_historical_data` has no callers in this repo: not the
+    scheduler, not an API route. It is therefore frozen at whatever a past
+    manual run left, on a different replay basis from the `elo_history` the
+    model now trains on. Measured on the backfilled production copy the two
+    disagree by 53 points on average and up to 134, in both directions, so no
+    intercept absorbs it. Step 2 puts serving back on the training basis.
+
+    Deliberately NOT fixed by writing replayed ratings back into `EloRating`:
+    that would change the live serving table as a side effect of a training-data
+    change (see `team_stats.py:327-329`).
+    """
+    rating = _team_elo_or_none(session, team_id, sport, game_id, game_date)
+    return rating if rating is not None else 1500.0
+
+
+def _team_elo_or_none(session: Session, team_id: int, sport: str,
+                      game_id: int | None,
+                      game_date: date | None = None) -> float | None:
+    """`_team_elo` without the 1500.0 default: None means "no rating anywhere".
+
+    Split out so that a caller which must distinguish "unknown" from "average"
+    -- `_check_lookahead_spot` does -- shares this resolution order instead of
+    reimplementing it against one of the tables.
+    """
+    if game_id is not None:
+        hist = (session.query(EloHistory)
+                .filter(EloHistory.team_id == team_id,
+                        EloHistory.game_id == game_id)
+                .first())
+        if hist is not None:
+            return hist.rating
+
+    if game_date is not None:
+        prior = (session.query(EloHistory)
+                 .join(Game, Game.id == EloHistory.game_id)
+                 .filter(EloHistory.team_id == team_id,
+                         EloHistory.sport == sport,
+                         # Strictly earlier. Step 1 already answered for the
+                         # game's own row, so `<=` could only reach a *different*
+                         # same-day game's pre-game rating -- staleness in
+                         # reverse, not leakage, which is why this carries a
+                         # comment rather than a mutation test. Contrast
+                         # `team_stats.strictly_before`, where `<=` does leak.
+                         Game.date < game_date)
+                 .order_by(Game.date.desc(), Game.id.desc())
+                 .first())
+        if prior is not None:
+            return prior.rating
+
+    row = (session.query(EloRating)
+           .filter(EloRating.team_id == team_id, EloRating.sport == sport)
+           .first())
+    return row.rating if row else None
+
+
+def _get_team_stats(session: Session, team_id: int, sport: str,
+                    game_id: int | None = None,
+                    game_date: date | None = None) -> TeamStats:
+    stats_rows = _team_stat_rows(session, team_id, game_id, game_date)
     stats_dict = {s.stat_type: s.value for s in stats_rows}
-    elo_row = session.query(EloRating).filter(EloRating.team_id == team_id, EloRating.sport == sport).first()
+    elo_rating = _team_elo(session, team_id, sport, game_id, game_date)
     return TeamStats(point_diff=stats_dict.get("point_diff", 0.0),
         home_record=(int(stats_dict.get("home_wins", 0)), int(stats_dict.get("home_losses", 0))),
         away_record=(int(stats_dict.get("away_wins", 0)), int(stats_dict.get("away_losses", 0))),
@@ -215,6 +366,6 @@ def _get_team_stats(session: Session, team_id: int, sport: str) -> TeamStats:
         offensive_rating=stats_dict.get("offensive_rating", 100.0),
         defensive_rating=stats_dict.get("defensive_rating", 100.0),
         pace=stats_dict.get("pace", 100.0), strength_of_schedule=stats_dict.get("sos", 0.5),
-        elo_rating=elo_row.rating if elo_row else 1500.0, rest_days=int(stats_dict.get("rest_days", 2)),
+        elo_rating=elo_rating, rest_days=int(stats_dict.get("rest_days", 2)),
         turnover_margin=stats_dict.get("turnover_margin"), red_zone_pct=stats_dict.get("red_zone_pct"),
         conference_strength=stats_dict.get("conference_strength"))
