@@ -121,21 +121,22 @@ the worktree.
 
 ### What to do about 008
 
-It has real work and no verification. Options, in order of preference:
+Its outcomes were spot-checked (table above) but **its code was never
+reviewed**. Recommended: dispatch a code review of
+`git diff master..advisor/008-populate-team-stats` before merging, focused on
 
-1. **Review its diff** (`git diff master..advisor/008-populate-team-stats`) and
-   decide. What to check is in `plans/008-...md`: both mutation proofs (the
-   strictly-before boundary, and the `game_id` scoping), the pre/post-game Elo
-   decision, and — critically — that `pace` and `net_rating` were **refused**
-   rather than filled with plausible substitutes.
-2. **Re-dispatch 008 from scratch** against the plan, discarding the branch.
-3. Leave it; the branch keeps.
+- the two mutation proofs it claims (strictly-before boundary; `game_id`
+  scoping) — read the tests, not just the report
+- whether the pre-game Elo convention is applied consistently everywhere, given
+  `historical.py` still writes post-game into the same column
+- the two out-of-step-list commits (`553bc41`, `11db971`) — documented
+  deviations, judged on merit
+- whether any test would pass against the pre-fix code
 
-**The success-shaped failure to watch for:** if a post-backfill calibration run
-looks *excellent*, that is more likely leakage than a fix. Three ways it
-happens — a `<=` instead of `<` on the boundary, copying the existing Elo
-precedent that writes the post-game rating into the row `calibrated_model`
-reads as that game's feature, or fabricating the two unpopulatable features.
+**The success-shaped failure was checked and did not occur.** A post-backfill
+run that looked *excellent* would have suggested leakage; instead Brier got
+*worse* (0.1836 → 0.2020) with a coherent explanation, and the fabrication
+check came back clean. That is the shape of an honest result.
 
 ## Open plans
 
