@@ -13,7 +13,7 @@ from backend.pipeline.full_pipeline import (
 )
 from backend.pipeline.pick_generator import generate_and_store_picks
 from backend.pipeline.prop_pipeline import run_prop_pipeline
-from backend.pipeline.grader import grade_pick, grade_prop_pick, capture_closing_odds, grade_completed_games
+from backend.pipeline.grader import grade_pick, grade_prop_pick, payout_for, capture_closing_odds, grade_completed_games
 from backend.collectors.espn_box_score import collect_box_scores_for_final_games
 from backend.collectors.budget import get_credit_summary, DEFAULT_BUDGET
 from backend.models import (
@@ -273,14 +273,36 @@ def grade_pending_picks(session):
     skipped = 0
     for pick, game in ungraded:
         if game.home_score is not None and game.away_score is not None:
-            grade_outcome = grade_pick(pick.pick_type, pick.pick_value,
-                game.home_score, game.away_score, pick.odds_at_pick or -110)
-            if grade_outcome is None:
-                # grade_pick has no branch for this type (props, notably).
-                # Leave it ungraded rather than record an invented result.
-                skipped += 1
-                continue
-            result, payout = grade_outcome
+            if pick.pick_type == "prop" and pick.prop_player and pick.prop_market:
+                # Props are graded against the player's box score, not the
+                # final score. Mirrors the PaperPick loop below, which has
+                # always branched this way.
+                player_stat = (
+                    session.query(PlayerStat)
+                    .filter_by(player_name=pick.prop_player,
+                               stat_type="game_log", game_date=game.date)
+                    .first()
+                )
+                prop_outcome = grade_prop_pick(pick.pick_value, pick.prop_market,
+                                               player_stat)
+                if prop_outcome is None:
+                    # No box score yet, or a market we cannot map to a stat.
+                    skipped += 1
+                    continue
+                result = prop_outcome[0]
+                # grade_prop_pick never sees the odds and returns a flat 1.0
+                # for any winner. Price it from the pick's own odds instead,
+                # or a -200 winner books +1.00 units instead of +0.50.
+                payout = payout_for(result, pick.odds_at_pick or -110)
+            else:
+                grade_outcome = grade_pick(pick.pick_type, pick.pick_value,
+                    game.home_score, game.away_score, pick.odds_at_pick or -110)
+                if grade_outcome is None:
+                    # grade_pick has no branch for this type. Leave it
+                    # ungraded rather than record an invented result.
+                    skipped += 1
+                    continue
+                result, payout = grade_outcome
             pick_result = PickResult(pick_id=pick.id, result=result, payout=payout)
             capture_closing_odds(
                 session, pick_result, game.id,

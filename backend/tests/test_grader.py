@@ -245,3 +245,26 @@ def test_grade_pick_still_grades_the_types_it_does_support():
     assert result == "win"
     assert payout == pytest.approx(100 / 110)   # -110 stake returns 0.909...
     assert grade_pick("moneyline", "AWAY", 110, 100, -110) == ("loss", -1.0)
+
+
+# --- payout_for: one definition of what a result is worth --------------------
+
+def test_payout_for_prices_a_win_from_its_own_odds():
+    """grade_prop_pick returns a flat 1.0 for every winner because it never
+    sees the odds. Anything storing a payout has to price it properly."""
+    from backend.pipeline.grader import payout_for
+    assert payout_for("win", -200) == pytest.approx(0.5)
+    assert payout_for("win", 150) == pytest.approx(1.5)
+
+
+def test_payout_for_books_a_loss_and_a_push_without_consulting_odds():
+    from backend.pipeline.grader import payout_for
+    assert payout_for("loss", -200) == -1.0
+    assert payout_for("push", -200) == 0.0
+
+
+def test_payout_for_falls_back_to_zero_on_unusable_odds_rather_than_raising():
+    """Grading runs inside the scheduler and must never raise. A win at odds we
+    cannot price is booked at 0.0 -- visibly wrong rather than invented."""
+    from backend.pipeline.grader import payout_for
+    assert payout_for("win", 0) == 0.0

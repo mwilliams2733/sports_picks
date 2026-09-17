@@ -31,6 +31,30 @@ MARKET_STAT_MAP = {
 }
 
 
+def payout_for(result: str, odds_at_pick: int) -> float:
+    """Units won or lost for ``result`` at ``odds_at_pick``.
+
+    The single definition of what a graded result is worth, so the game path
+    and the prop path cannot disagree. :func:`grade_prop_pick` deliberately
+    does not take odds -- it returns a flat 1.0 for any winner -- so anything
+    persisting a payout has to price it here instead of storing that ratio.
+
+    Unusable odds book a win at 0.0 rather than raising: grading runs inside
+    the scheduler and must not take pick generation down with it. A visibly
+    wrong 0.0 is preferable to an invented price.
+    """
+    if result == "win":
+        try:
+            return calculate_payout(odds_at_pick)
+        except InvalidOddsError:
+            logger.warning("Invalid odds_at_pick=%r for a win; booking 0.0 payout",
+                           odds_at_pick)
+            return 0.0
+    if result == "push":
+        return 0.0
+    return -1.0
+
+
 def grade_pick(pick_type: str, pick_value: str, home_score: int, away_score: int,
                odds_at_pick: int) -> tuple[str, float] | None:
     """Grade a game-level pick from the final score.
@@ -72,15 +96,8 @@ def grade_pick(pick_type: str, pick_value: str, home_score: int, away_score: int
     else:
         logger.warning("grade_pick cannot grade pick_type=%r; leaving ungraded", pick_type)
         return None
-    if won:
-        try:
-            return "win", calculate_payout(odds_at_pick)
-        except InvalidOddsError:
-            logger.warning("Invalid odds_at_pick=%r for %s pick %r; grading win with 0.0 payout",
-                            odds_at_pick, pick_type, pick_value)
-            return "win", 0.0
-    else:
-        return "loss", -1.0
+    result = "win" if won else "loss"
+    return result, payout_for(result, odds_at_pick)
 
 
 def grade_prop_pick(pick_value: str, market: str, player_stat) -> tuple[str, float] | None:
