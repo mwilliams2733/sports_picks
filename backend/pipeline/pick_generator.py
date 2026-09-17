@@ -238,6 +238,15 @@ def _team_stat_rows(session: Session, team_id: int,
     latest_prior = (session.query(Game.id)
                     .join(TeamStat, TeamStat.game_id == Game.id)
                     .filter(TeamStat.team_id == team_id,
+                            # `<` rather than `<=` only as a tie-break: rows are
+                            # already written point-in-time, so a same-day game's
+                            # row cannot contain that day's results and `<=`
+                            # would be benign here -- it would merely pick a
+                            # fresher row. This is untested for that reason: the
+                            # consequence of getting it wrong is one extra game
+                            # of staleness, not leakage. Contrast
+                            # `team_stats.strictly_before`, where `<=` DOES leak
+                            # and is covered by a mutation test.
                             Game.date < game_date,
                             ((Game.home_team_id == team_id)
                              | (Game.away_team_id == team_id)))
@@ -252,7 +261,7 @@ def _team_stat_rows(session: Session, team_id: int,
 
 
 def _team_elo(session: Session, team_id: int, sport: str,
-              game_id: int | None) -> float:
+              game_id: int | None, game_date: date | None = None) -> float:
     """The Elo rating this team carried INTO `game_id`.
 
     `EloHistory` rows are written pre-game by `backend.pipeline.team_stats`,
@@ -261,9 +270,29 @@ def _team_elo(session: Session, team_id: int, sport: str,
     outcome being predicted -- was both lookahead during historical replay and
     a train/serve skew once the history table was populated.
 
-    For a genuinely upcoming game there is no history row yet and the current
-    rating IS the pre-game rating, so live pick generation is unaffected; this
-    only changes what a replay over past games sees.
+    Three sources, in order:
+
+    1. the game's own `EloHistory` row, written pre-game;
+    2. failing that, the team's most recent *strictly earlier* `EloHistory`
+       row in this sport -- the replayed rating it carried out of its last
+       played game;
+    3. failing that, the current `EloRating`, then 1500.0.
+
+    Step 2 is not an optimisation, it is the whole point of this function for
+    live picks. A genuinely upcoming game has no `EloHistory` row of its own,
+    so without it every live pick fell through to `EloRating` -- and for team
+    sports that table is *not* the pre-game rating. It is written in exactly
+    one place, `backtesting.historical.compute_historical_elo`, whose only
+    entry point `load_historical_data` has no callers in this repo: not the
+    scheduler, not an API route. It is therefore frozen at whatever a past
+    manual run left, on a different replay basis from the `elo_history` the
+    model now trains on. Measured on the backfilled production copy the two
+    disagree by 53 points on average and up to 134, in both directions, so no
+    intercept absorbs it. Step 2 puts serving back on the training basis.
+
+    Deliberately NOT fixed by writing replayed ratings back into `EloRating`:
+    that would change the live serving table as a side effect of a training-data
+    change (see `team_stats.py:327-329`).
     """
     if game_id is not None:
         hist = (session.query(EloHistory)
@@ -272,6 +301,18 @@ def _team_elo(session: Session, team_id: int, sport: str,
                 .first())
         if hist is not None:
             return hist.rating
+
+    if game_date is not None:
+        prior = (session.query(EloHistory)
+                 .join(Game, Game.id == EloHistory.game_id)
+                 .filter(EloHistory.team_id == team_id,
+                         EloHistory.sport == sport,
+                         Game.date < game_date)
+                 .order_by(Game.date.desc(), Game.id.desc())
+                 .first())
+        if prior is not None:
+            return prior.rating
+
     row = (session.query(EloRating)
            .filter(EloRating.team_id == team_id, EloRating.sport == sport)
            .first())
@@ -283,7 +324,7 @@ def _get_team_stats(session: Session, team_id: int, sport: str,
                     game_date: date | None = None) -> TeamStats:
     stats_rows = _team_stat_rows(session, team_id, game_id, game_date)
     stats_dict = {s.stat_type: s.value for s in stats_rows}
-    elo_rating = _team_elo(session, team_id, sport, game_id)
+    elo_rating = _team_elo(session, team_id, sport, game_id, game_date)
     return TeamStats(point_diff=stats_dict.get("point_diff", 0.0),
         home_record=(int(stats_dict.get("home_wins", 0)), int(stats_dict.get("home_losses", 0))),
         away_record=(int(stats_dict.get("away_wins", 0)), int(stats_dict.get("away_losses", 0))),
