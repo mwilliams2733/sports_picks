@@ -37,8 +37,8 @@ first.
 
 - **Priority**: P1
 - **Effort**: L
-- **Risk**: MEDIUM (Task 3 depends on an external data source that may not
-  exist; see STOP conditions)
+- **Risk**: LOW-MEDIUM (was MEDIUM; the Task 3 spike resolved the open
+  question on 2026-09-17 — ESPN supplies box scores free, no purchase needed)
 - **Depends on**: none
 - **Category**: bug + missing capability
 - **Planned at**: commit `25bdb09`, 2026-09-17
@@ -455,23 +455,33 @@ git commit -m "feat(picks): carry prop player and market on PickModel"
 
 ### Task 3: Collect post-game player box scores
 
-**This is the task that decides whether the plan is finishable.** Tasks 1, 2
-and 4 are code; this one depends on a data source existing. Do the spike in
-Step 1 before writing anything.
+**This was the task that decided whether the plan is finishable.** The spike
+has run: ESPN supplies what is needed, free. See the box below.
 
 **Files:**
-- Modify: `backend/collectors/player_stats/collector.py`
-- Modify: `backend/collectors/player_stats/nba_api_source.py` (and siblings as
-  the spike dictates)
+- Create: `backend/collectors/espn_box_score.py`
 - Modify: `backend/pipeline/scheduler.py` (`morning_scout`)
-- Test: `backend/tests/test_box_score_collection.py` (new)
+- Test: `backend/tests/test_espn_box_score.py` (new)
+
+Nothing under `collectors/player_stats/` is modified. That package stays
+player-keyed and pre-game; this is game-keyed and post-game. The one thing
+reused from it is `PlayerStatsCollector.store_stats`, called rather than
+reimplemented.
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: `PlayerStat` rows with `stat_type="game_log"` and `game_date` set
-  to the date of a **completed** game — exactly the shape
+- Produces, all in `backend/collectors/espn_box_score.py`:
+  - `resolve_espn_event(sport: str, game_date: date, home_abbr: str, away_abbr: str, client: httpx.Client | None = None) -> str | None`
+  - `parse_box_score(summary: dict) -> list[dict]` — each dict has
+    `player_name` plus any of `minutes, points, rebounds, assists, threes,
+    steals, blocks, turnovers`
+  - `collect_box_scores_for_final_games(session, sport: str | None = None) -> int`
+    — returns rows written
+- And the rows themselves: `PlayerStat` with `stat_type="game_log"` and
+  `game_date` set to **our `Game.date`**, which is the shape
   `grade_prop_pick` looks up via
   `filter_by(player_name=..., stat_type="game_log", game_date=game.date)`.
+  Task 4 depends on that date being ours and not ESPN's.
 
 > **SPIKE DONE 2026-09-17. Answer: ESPN, free, no purchase needed — but not
 > the shape this task assumed.** STOP condition 1 is **not** triggered. Details
@@ -538,54 +548,296 @@ Step 1 before writing anything.
 > pre-game, last-5 contract is the wrong shape for grading anyway, as the
 > Current state section already notes.
 
-- [ ] ~~**Step 1: Spike — find out why `fetch_player_recent` returns nothing**~~ **DONE — see above**
+- [ ] ~~**Step 1: Spike — find out why `fetch_player_recent` returns nothing**~~ **DONE 2026-09-17 — see the box above.**
 
-Time-box this. It is a question, not a deliverable.
+> The steps below were rewritten around ESPN after the spike. The original
+> steps assumed the fix was repairing `fetch_player_recent`; it is not.
 
-```
-.venv/Scripts/python.exe -c "
-import asyncio
-from backend.collectors.player_stats.collector import PlayerStatsCollector
-c = PlayerStatsCollector()
-print(asyncio.run(c.fetch_player_recent('nba', 'Donovan Mitchell', n=5)))
-"
-```
+- [ ] **Step 2: Write the failing test for event resolution**
 
-Three possible answers, each changing what you build:
-
-- **It returns data.** Then the pre-game path works and only the *post-game*
-  trigger is missing — go to Step 2 and wire collection into `morning_scout`.
-- **It returns empty because the source is unreachable or unauthenticated.**
-  Check which sources `prop_pipeline` constructs (`nba_api`, `espn_stats`,
-  `balldontlie`, `mysportsfeeds`) and which need a key. **STOP and report**
-  which source is needed and what it costs — a key purchase is your decision,
-  not the executor's.
-- **It returns empty because the method is unimplemented or always returns
-  `[]`.** Then this task is "write a box-score collector", and the spike should
-  say which of the four sources exposes per-game logs.
-
-Record the answer in the plan file before continuing.
-
-- [ ] **Step 2: Write the failing test**
-
-Write it against a **stubbed source**, not the network — `pytest-httpx` is
-already a dependency and the suite is network-free today. Keep it that way.
+Network-free. `pytest-httpx` is already a dependency and the suite makes no
+real requests today — keep it that way. Create
+`backend/tests/test_espn_box_score.py`.
 
 ```python
-def test_box_scores_are_stored_against_the_game_that_was_played(db_session):
-    """Grading looks up (player_name, stat_type="game_log", game_date). A row
-    stored without game_date, or against the fetch date rather than the game
-    date, is invisible to grade_prop_pick even though it is present.
+import datetime
+import pytest
+from backend.collectors.espn_box_score import resolve_espn_event
+
+
+def _scoreboard(*short_names):
+    return {"events": [{"id": f"40{i}", "shortName": n}
+                       for i, n in enumerate(short_names)]}
+
+
+def test_resolves_an_event_listed_on_the_previous_espn_day(httpx_mock):
+    """Our Game.date runs a day ahead of ESPN's for most games.
+
+    Of 8 sampled final NBA games, 7 matched at ESPN offset -1 and 1 matched
+    exactly. Searching the exact date alone finds about one game in eight, and
+    the misses look like missing data rather than a UTC/ET offset.
+    """
+    httpx_mock.add_response(url__regex=r".*dates=20251231.*", json=_scoreboard("GS @ CHA"))
+    httpx_mock.add_response(url__regex=r".*dates=20251230.*", json=_scoreboard("MIN @ LAL"))
+
+    event_id = resolve_espn_event(
+        sport="nba", game_date=datetime.date(2025, 12, 31),
+        home_abbr="LAL", away_abbr="MIN",
+    )
+    assert event_id == "400"
+
+
+def test_returns_none_rather_than_a_wrong_event_when_no_day_matches(httpx_mock):
+    """A near-miss must not resolve. Grading the wrong game is worse than not
+    grading: it produces a real, confident, wrong result."""
+    httpx_mock.add_response(url__regex=r".*dates=.*", json=_scoreboard("BOS @ NY"))
+
+    assert resolve_espn_event(
+        sport="nba", game_date=datetime.date(2025, 12, 31),
+        home_abbr="LAL", away_abbr="MIN",
+    ) is None
+```
+
+- [ ] **Step 3: Run it and watch it fail**
+
+```
+.venv/Scripts/python.exe -m pytest backend/tests/test_espn_box_score.py -q
+```
+
+Expected: `ModuleNotFoundError: No module named 'backend.collectors.espn_box_score'`.
+
+- [ ] **Step 4: Implement `resolve_espn_event`**
+
+Create `backend/collectors/espn_box_score.py`. The search order is `0, -1, +1`
+so an exact match always beats a neighbouring day.
+
+```python
+"""Post-game player box scores from ESPN, keyed on a finished Game.
+
+Deliberately separate from ``collectors/player_stats``. That package is
+player-keyed and pre-game: it answers "how has this player been doing lately",
+which is a prediction feature. Grading needs the opposite -- "what did this
+player actually do in that game" -- so this is keyed on a Game and only ever
+runs after one is final.
+
+ESPN shares no id with our ``Game`` (there is no ``espn_id`` column), so an
+event is resolved by date plus team abbreviations. Our dates run one day ahead
+of ESPN's for most games (UTC vs ET), so the search covers a +/-1 day window.
+"""
+import logging
+from datetime import date, timedelta
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+SPORT_PATHS = {
+    "nba": "basketball/nba",
+    "nfl": "football/nfl",
+    "ncaab": "basketball/mens-college-basketball",
+    "ncaaf": "football/college-football",
+}
+_BASE = "https://site.api.espn.com/apis/site/v2/sports"
+_TIMEOUT = 20.0
+
+
+def resolve_espn_event(sport: str, game_date: date, home_abbr: str,
+                       away_abbr: str, client: httpx.Client | None = None) -> str | None:
+    """The ESPN event id for this game, or None if no day in the window matches.
+
+    Returns None rather than a best guess. Grading against the wrong game
+    produces a confident wrong result, which is strictly worse than leaving the
+    pick ungraded.
+    """
+    path = SPORT_PATHS.get(sport)
+    if path is None:
+        return None
+    owns_client = client is None
+    client = client or httpx.Client(timeout=_TIMEOUT)
+    try:
+        for delta in (0, -1, 1):
+            stamp = (game_date + timedelta(days=delta)).strftime("%Y%m%d")
+            try:
+                resp = client.get(f"{_BASE}/{path}/scoreboard", params={"dates": stamp})
+                resp.raise_for_status()
+                events = resp.json().get("events", [])
+            except Exception as exc:
+                logger.warning("ESPN scoreboard %s failed: %s", stamp, exc)
+                continue
+            for event in events:
+                name = event.get("shortName", "")
+                if home_abbr in name and away_abbr in name:
+                    return str(event.get("id"))
+        return None
+    finally:
+        if owns_client:
+            client.close()
+```
+
+- [ ] **Step 5: Run it and watch it pass**
+
+```
+.venv/Scripts/python.exe -m pytest backend/tests/test_espn_box_score.py -q
+```
+
+Expected: PASS, 2 tests.
+
+- [ ] **Step 6: Write the failing tests for box-score parsing**
+
+Both traps here produce plausible-looking rows, so both get a test.
+
+```python
+from backend.collectors.espn_box_score import parse_box_score
+
+_LABELS = ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK",
+           "OREB", "DREB", "PF", "+/-"]
+
+
+def _summary(*athletes):
+    return {"boxscore": {"players": [
+        {"statistics": [{"labels": _LABELS, "athletes": list(athletes)}]}
+    ]}}
+
+
+def test_threes_come_from_the_made_half_of_the_made_attempted_pair():
+    """ESPN reports 3PT as "made-attempted" ("2-7"). Storing the raw string, or
+    the attempted count, silently grades every threes prop against the wrong
+    number."""
+    rows = parse_box_score(_summary({
+        "athlete": {"displayName": "Chet Holmgren"},
+        "stats": ["26", "10", "3-8", "2-7", "4-6", "9", "2", "3", "1", "0",
+                  "3", "6", "2", "+2"],
+    }))
+    assert len(rows) == 1
+    assert rows[0]["threes"] == 2.0
+    assert rows[0]["points"] == 10.0
+    assert rows[0]["rebounds"] == 9.0
+    assert rows[0]["assists"] == 2.0
+    assert rows[0]["turnovers"] == 3.0
+    assert rows[0]["steals"] == 1.0
+    assert rows[0]["blocks"] == 0.0
+    assert rows[0]["minutes"] == 26.0
+
+
+def test_a_player_who_did_not_play_produces_no_row_at_all():
+    """ESPN gives DNP players `stats: []` and `didNotPlay: true`.
+
+    Zero-filling them is not a harmless default: a stored 0 rebounds makes
+    "Under 1.5 Rebounds" grade as a WIN for a player who never took the court.
+    An absent row leaves the pick ungraded, which is the honest outcome.
+    """
+    rows = parse_box_score(_summary({
+        "athlete": {"displayName": "Bismack Biyombo"},
+        "didNotPlay": True,
+        "stats": [],
+    }))
+    assert rows == []
+
+
+def test_labels_are_read_positionally_per_block_not_assumed():
+    """Label order is a property of each statistics block. Hard-coding indexes
+    works until a sport or a season reorders them, and then grades everything
+    against the wrong column."""
+    payload = {"boxscore": {"players": [{"statistics": [{
+        "labels": ["PTS", "MIN", "REB"],
+        "athletes": [{"athlete": {"displayName": "X"}, "stats": ["11", "30", "4"]}],
+    }]}]}}
+    rows = parse_box_score(payload)
+    assert rows[0]["points"] == 11.0
+    assert rows[0]["minutes"] == 30.0
+```
+
+- [ ] **Step 7: Run all three, watch them fail, then implement**
+
+```python
+#: ESPN box-score label -> PlayerStat field. Only labels that map to a
+#: ``_STAT_FIELDS`` column appear; the rest (FG, FT, OREB, DREB, PF, +/-) are
+#: ignored.
+_LABEL_FIELD = {
+    "MIN": "minutes", "PTS": "points", "REB": "rebounds", "AST": "assists",
+    "STL": "steals", "BLK": "blocks", "TO": "turnovers",
+}
+#: Labels reported as "made-attempted"; only the made half is a stat we store.
+_MADE_ATTEMPTED = {"3PT": "threes"}
+
+
+def parse_box_score(summary: dict) -> list[dict]:
+    """Player rows from an ESPN ``summary`` payload.
+
+    Players who did not play are omitted entirely rather than zero-filled: a
+    stored zero is a measurement, and grading an Under against a player who
+    never appeared would record a confident wrong win.
+    """
+    rows: list[dict] = []
+    for block in summary.get("boxscore", {}).get("players", []):
+        for stat_block in block.get("statistics", []):
+            labels = stat_block.get("labels", [])
+            for entry in stat_block.get("athletes", []):
+                values = entry.get("stats") or []
+                if entry.get("didNotPlay") or len(values) != len(labels):
+                    continue
+                name = (entry.get("athlete") or {}).get("displayName", "")
+                if not name:
+                    continue
+                row = {"player_name": name}
+                for label, raw in zip(labels, values):
+                    field = _LABEL_FIELD.get(label)
+                    if field is not None:
+                        try:
+                            row[field] = float(raw)
+                        except (TypeError, ValueError):
+                            pass
+                        continue
+                    made_field = _MADE_ATTEMPTED.get(label)
+                    if made_field is not None:
+                        try:
+                            row[made_field] = float(str(raw).split("-")[0])
+                        except (TypeError, ValueError):
+                            pass
+                rows.append(row)
+    return rows
+```
+
+- [ ] **Step 8: Run them, watch them pass, then write the storage test**
+
+This is the test that matters most, and its trap is the subtlest in the plan:
+
+```python
+def test_rows_are_stored_against_OUR_game_date_not_espns(db_session, monkeypatch):
+    """`grade_prop_pick` is looked up with `game_date=game.date` -- OUR date.
+
+    ESPN's date for the same game is usually a day earlier. Storing ESPN's date
+    writes rows that are present, correct, and permanently invisible to
+    grading. Store our Game.date.
     """
 ```
 
-Assert on a real `PlayerStat` row read back from the session, with
-`stat_type == "game_log"` and `game_date` equal to the **game's** date.
+Seed a final `Game` on a known date, monkeypatch `resolve_espn_event` and the
+summary fetch to return a fixed payload, call
+`collect_box_scores_for_final_games(session, "nba")`, then assert a `PlayerStat`
+exists with `stat_type == "game_log"` and `game_date == game.date`.
 
-- [ ] **Step 3: Run it and watch it fail.** Then implement the minimum that
-  makes it pass, per the spike's answer.
+- [ ] **Step 9: Implement `collect_box_scores_for_final_games`**
 
-- [ ] **Step 4: Call it from `morning_scout` before grading**
+Reuse `PlayerStatsCollector.store_stats` rather than writing `PlayerStat` rows
+directly — it already owns name normalisation and the upsert on
+`(player_name, sport, stat_type, game_date)`, and duplicating that is exactly
+how two paths drift. `store_stats` touches no fallback chain
+(`_normalize_name` is a `@staticmethod`), so an empty collector is a legitimate
+way to reach it:
+
+```python
+    collector = PlayerStatsCollector({})   # store_stats needs no chains
+    collector.store_stats(session, rows, "game_log", team_id, sport, "espn")
+```
+
+Set `row["game_date"]` to the **Game's** date as an ISO string before storing —
+`store_stats` parses `YYYY-MM-DD`.
+
+Skip games that already have `game_log` rows so the collector is resumable, and
+ask **per game** rather than tracking how far it got. Never assume contiguity.
+
+- [ ] **Step 10: Call it from `morning_scout` before grading**
 
 In `backend/pipeline/scheduler.py`, `morning_scout` currently opens with:
 
@@ -594,8 +846,7 @@ In `backend/pipeline/scheduler.py`, `morning_scout` currently opens with:
         grade_completed_games(session)
 ```
 
-Box-score collection must run **before** `grade_pending_picks`, and must be
-wrapped so a collector failure cannot stop grading:
+Collection must run **before** grading, and must not be able to stop it:
 
 ```python
         try:
@@ -605,12 +856,33 @@ wrapped so a collector failure cannot stop grading:
         grade_pending_picks(session)
 ```
 
-- [ ] **Step 5: Full suite, then commit**
+- [ ] **Step 11: Full suite, then commit**
 
 ```
 .venv/Scripts/python.exe -m pytest backend/tests -q
-git commit -m "feat(collectors): fetch post-game player box scores for grading"
 ```
+
+Expected: 552 plus every test added here, 0 failed, and **no network access** —
+if the suite slows noticeably, a test is reaching ESPN and must be stubbed.
+
+```bash
+git add backend/collectors/espn_box_score.py backend/pipeline/scheduler.py backend/tests/test_espn_box_score.py
+git commit -m "feat(collectors): fetch post-game player box scores from ESPN"
+```
+
+- [ ] **Step 12: One live smoke test, by hand, not in the suite**
+
+The unit tests prove the parsing; they cannot prove the endpoint still behaves.
+Against a **copy** of the database:
+
+```
+cp sports_picks.db /tmp/box.db
+```
+
+Then call the collector against `/tmp/box.db` and confirm `player_stats` gains
+rows with `stat_type='game_log'` whose `game_date` values match `games.date`
+for the games collected. **If they are offset by a day, the date bug is in the
+writer, and grading will find nothing at all.**
 
 ---
 
@@ -759,3 +1031,14 @@ Deliberately not in this plan, so they do not get re-audited:
   risk, but fixing it while also changing grading would confuse the diff. Worth
   its own small plan.
 - **Enabling `digest.enabled`.** That decision waits on Task 5's numbers.
+- **`nba_api_source.fetch_recent_games` is broken** and this plan no longer
+  touches it. `nba_api_source.py:157` passes `last_n_games=n` to
+  `PlayerGameLog`, which has no such parameter, so the call raises `TypeError`
+  before any request and the fallback chain swallows it as a warning. Line 167
+  already slices `games[:n]`, so the fix is deleting the kwarg. **But fixing it
+  buys nothing here:** `stats.nba.com` read-times-out from this machine (30s,
+  60s and 90s all failed) while ESPN and BallDontLie answered on the same run.
+  It is still worth recording because it silently degrades the *pre-game* prop
+  analysis: `prop_pipeline.py:80-83` asks for recent game logs to analyse props
+  with, always gets nothing, and logs it as a source failure rather than a bug.
+  Props are being analysed on season averages alone. Its own small plan.
