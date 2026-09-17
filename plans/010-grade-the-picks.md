@@ -937,6 +937,21 @@ writer, and grading will find nothing at all.**
 
 ### Task 4: Route prop picks to the prop grader
 
+> **DONE 2026-09-17 — `935ed15`.** 576 -> 584 passing, mutation-proved twice.
+>
+> **The plan missed the payout, and it mattered.** `grade_prop_pick` never
+> sees the odds — it returns `("win", 1.0)` for every winner. The PaperPick
+> loop discards that ratio and recomputes from `pick.odds`, but
+> `PickResult.payout` *persists* it, so storing it directly books a -200
+> winner as +1.00 units instead of +0.50 and inflates every ROI number
+> computed from that table, silently and in the strategy's favour.
+>
+> Fixed by adding `payout_for(result, odds_at_pick)` to `grader.py` as the one
+> definition of what a graded result is worth, with `grade_pick`'s tail
+> rewritten to derive from it. Task 5 should read payouts from
+> `pick_results.payout` and can now trust them.
+
+
 **Files:**
 - Modify: `backend/pipeline/scheduler.py:256-274`
 - Test: `backend/tests/test_grade_pending_props.py` (new)
