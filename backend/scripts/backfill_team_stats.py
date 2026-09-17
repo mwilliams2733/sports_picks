@@ -37,6 +37,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from backend.database import get_engine, get_session
@@ -58,7 +59,19 @@ def _sports_with_final_games(session) -> list[str]:
 
 def run(db_path: str, sports: list[str] | None = None,
         dry_run: bool = False, force: bool = False) -> dict:
-    """Backfill ``db_path``. Returns a per-sport summary dict."""
+    """Backfill ``db_path``. Returns a per-sport summary dict.
+
+    Raises ``FileNotFoundError`` if ``db_path`` does not exist. Without this
+    check ``create_all`` below would happily create an empty database at a
+    typo'd path and the run would report a successful zero-row backfill
+    against it -- the most misleading possible outcome for a one-off script
+    whose whole job is to populate an existing database.
+    """
+    if db_path != ":memory:" and not os.path.exists(db_path):
+        raise FileNotFoundError(
+            f"--db {db_path!r} does not exist. Refusing to create a new, empty "
+            f"database: a zero-row 'successful' backfill would hide the typo."
+        )
     engine = get_engine(db_path)
     Base.metadata.create_all(engine)
     session = get_session(engine)

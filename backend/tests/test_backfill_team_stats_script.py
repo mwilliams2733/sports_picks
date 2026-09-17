@@ -91,3 +91,18 @@ def test_backfilled_values_are_point_in_time(db_file):
     assert r1 == pytest.approx(1500.0)
     session.close()
     engine.dispose()
+
+
+def test_a_typod_db_path_is_refused_not_created(tmp_path):
+    """A nonexistent ``--db`` must raise, not silently create an empty database.
+
+    ``run`` calls ``create_all``, so without the existence guard a typo'd path
+    produced a brand-new empty database and a cheerful zero-row "successful"
+    backfill -- indistinguishable from a real run that had nothing to do.
+    """
+    missing = tmp_path / "typo.db"
+
+    with pytest.raises(FileNotFoundError):
+        script.run(str(missing))
+
+    assert not missing.exists(), "the script created the database it was told to fill"
