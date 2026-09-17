@@ -113,13 +113,28 @@ def _check_lookahead_spot(session: Session, team_id: int, opponent_team_id: int,
     if not next_game:
         return False
 
-    # Get next opponent's ELO
+    # Get next opponent's ELO -- on the SAME basis as `team_elo`, which comes
+    # from `_team_elo` and is therefore the replayed `elo_history` rating. The
+    # raw `EloRating` query this replaces put the two sides of the comparison
+    # below on tables that disagree by a mean of 53 points and up to 134, wider
+    # than the 50-point band itself.
+    #
+    # `game_date`, not `next_game.date`, and no game id. `next_game` is selected
+    # with `Game.date > game_date`, so bounding by its date would admit ratings
+    # from games between the predicted game and the next one; passing
+    # `next_game.id` would hit the exact-match step and return `next_game`'s own
+    # pre-game rating. Both are after `game_date` and neither exists at
+    # prediction time. This asks "how strong is that opponent as far as anyone
+    # knows today", which is the question the heuristic means.
     next_opp_id = next_game.away_team_id if next_game.home_team_id == team_id else next_game.home_team_id
-    next_opp_elo = session.query(EloRating).filter(
-        EloRating.team_id == next_opp_id
-    ).first()
+    next_opp_elo = _team_elo_or_none(session, next_opp_id, sport, None, game_date)
 
-    if next_opp_elo and next_opp_elo.rating > team_elo - 50:
+    # Deliberately the None-aware resolver: an opponent with no rating anywhere
+    # is unknown, not average. Letting `_team_elo`'s 1500.0 default carry this
+    # would answer True for any `team_elo` below 1550 on no evidence at all.
+    # The original row-or-None query fell through to `return False` here, and
+    # that behaviour is preserved.
+    if next_opp_elo is not None and next_opp_elo > team_elo - 50:
         # Next opponent is roughly equal or better
         return True
 
@@ -294,6 +309,19 @@ def _team_elo(session: Session, team_id: int, sport: str,
     that would change the live serving table as a side effect of a training-data
     change (see `team_stats.py:327-329`).
     """
+    rating = _team_elo_or_none(session, team_id, sport, game_id, game_date)
+    return rating if rating is not None else 1500.0
+
+
+def _team_elo_or_none(session: Session, team_id: int, sport: str,
+                      game_id: int | None,
+                      game_date: date | None = None) -> float | None:
+    """`_team_elo` without the 1500.0 default: None means "no rating anywhere".
+
+    Split out so that a caller which must distinguish "unknown" from "average"
+    -- `_check_lookahead_spot` does -- shares this resolution order instead of
+    reimplementing it against one of the tables.
+    """
     if game_id is not None:
         hist = (session.query(EloHistory)
                 .filter(EloHistory.team_id == team_id,
@@ -307,6 +335,12 @@ def _team_elo(session: Session, team_id: int, sport: str,
                  .join(Game, Game.id == EloHistory.game_id)
                  .filter(EloHistory.team_id == team_id,
                          EloHistory.sport == sport,
+                         # Strictly earlier. Step 1 already answered for the
+                         # game's own row, so `<=` could only reach a *different*
+                         # same-day game's pre-game rating -- staleness in
+                         # reverse, not leakage, which is why this carries a
+                         # comment rather than a mutation test. Contrast
+                         # `team_stats.strictly_before`, where `<=` does leak.
                          Game.date < game_date)
                  .order_by(Game.date.desc(), Game.id.desc())
                  .first())
@@ -316,7 +350,7 @@ def _team_elo(session: Session, team_id: int, sport: str,
     row = (session.query(EloRating)
            .filter(EloRating.team_id == team_id, EloRating.sport == sport)
            .first())
-    return row.rating if row else 1500.0
+    return row.rating if row else None
 
 
 def _get_team_stats(session: Session, team_id: int, sport: str,
