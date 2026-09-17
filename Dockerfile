@@ -17,9 +17,13 @@ RUN npm run build
 FROM python:3.12-slim
 WORKDIR /app
 
-# Install Python deps via pyproject.toml (pip's PEP 517 build).
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -e .
+# Install Python deps via pyproject.toml (pip's PEP 517 build), pinned by
+# constraints.txt. Without the constraints this resolved whatever was newest
+# on build day, so two identical builds weeks apart could ship different major
+# versions of a dependency with no commit between them. See constraints.txt
+# for how to regenerate it.
+COPY pyproject.toml constraints.txt ./
+RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -e . -c constraints.txt
 
 # Copy backend source + project config.
 COPY backend ./backend
