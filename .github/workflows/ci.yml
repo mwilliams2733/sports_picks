@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# A fast follow-up push supersedes the run in flight rather than queueing
+# behind it. master is excluded so pushes there always produce a recorded
+# result for the commit that is actually deployed.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  backend:
+    name: backend (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every version's result; one failing must not mask the other.
+      fail-fast: false
+      matrix:
+        # 3.12 is what Dockerfile:17 serves in production; 3.14 is what the
+        # local .venv runs. Before this workflow existed only 3.14 was ever
+        # exercised, so the deployed runtime was untested.
+        python: ['3.12', '3.14']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Test
+        # Tests are isolated from the live database: every fixture builds its
+        # own SQLite file under pytest's tmp_path.
+        run: pytest backend/tests -q
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the build stage in Dockerfile:5.
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        # --legacy-peer-deps is required, not a convenience: vite-plugin-pwa
+        # 1.2.0 does not list vite@8 as a supported peer, so a strict `npm ci`
+        # fails outright. It is also the mode the committed lockfile was
+        # generated with. Same flag, same reason, as Dockerfile:8-12. Revisit
+        # when vite-plugin-pwa ships a vite-8-compatible release.
+        run: npm ci --legacy-peer-deps
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        # `tsc -b && vite build`, so this typechecks as well as bundles.
+        run: npm run build
