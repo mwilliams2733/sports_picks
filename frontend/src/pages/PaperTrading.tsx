@@ -67,6 +67,14 @@ export default function PaperTrading() {
     }
   };
 
+  // This is hand-rolled server-state fetching (setState after an async API
+  // call) on the app's most complex page — the one page that doesn't use
+  // React Query. The correct fix is migrating these to useQuery and
+  // replacing manual refetches with invalidateQueries, which means rewriting
+  // the parlay builder and prop search; that's a separate, larger refactor
+  // (see plans/009-frontend-eslint-errors.md). Suppressed here rather than
+  // done as a side effect of a lint sweep.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadGames(); loadProps(); loadFeed(); }, []);
 
   const selectUser = async (user: UserProfile) => {
