@@ -455,6 +455,25 @@ git commit -m "feat(picks): carry prop player and market on PickModel"
 
 ### Task 3: Collect post-game player box scores
 
+> **DONE 2026-09-17 — `fb50170`.** 552 -> 564 passing. Live smoke test against
+> a copy trimmed to two games: both events resolved across the date offset, 36
+> player rows written across four teams, all 36 `game_date` values matching our
+> game dates, zero mismatched. Production untouched.
+>
+> **Two corrections for whoever writes the remaining tasks:**
+> - **`url__regex` is not a pytest-httpx matcher** — it was invented in Step 2
+>   below. This repo's tests match on exact `url=` strings (see
+>   `test_mlb_stats.py:46`), and so do the ones that shipped.
+> - **`PlayerStat.team_id` is `nullable=False`**, so `parse_box_score` also
+>   returns `team_abbr`, taken from each block's `team.abbreviation`. Block
+>   order is undocumented; inferring home/away from it would mislabel a whole
+>   team. The shipped signature is unchanged otherwise.
+>
+> `collect_box_scores_for_final_games` **commits** (via `store_stats`), unlike
+> most of `backend.pipeline`. Task 4 should not assume it can roll back a
+> collection.
+
+
 **This was the task that decided whether the plan is finishable.** The spike
 has run: ESPN supplies what is needed, free. See the box below.
 
