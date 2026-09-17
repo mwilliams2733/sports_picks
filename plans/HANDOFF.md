@@ -6,7 +6,7 @@ Written mid-session before a restart. Everything below is recoverable from
 ## Where things stand
 
 `master` is at the **Merge plan 007** commit. Run `git log --oneline -12` to see
-the merge history. Test baseline on `master`: **~494 passing, 0 failed**
+the merge history. Test baseline on `master`: **500 passing, 0 failed** (verified)
 (`.venv/Scripts/python.exe -m pytest backend/tests -q`, ~4 min).
 
 Started this session at 360 tests.
