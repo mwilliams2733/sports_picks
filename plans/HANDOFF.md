@@ -312,6 +312,54 @@ is the pre-backfill number.
 3. The digest's dry-run preview writes `digest_preview.html` to the repo root;
    it is git-ignored.
 
+### The dry-run preview was run on 2026-09-17 — and found the real blocker
+
+The preview works. For 2026-05-26 it rendered one game pick (Over 217.1,
+−110, ★★★☆☆, +7.3%) and five player props, with real matchups, odds and
+rationales. The pre-008 failure mode is **gone**: that preview led with five
+heavy favourites from −286 to −2336; this one leads with a −110 at three
+stars. Run for *today* it correctly produced nothing, there being no games
+dated 2026-09-17.
+
+Nothing was sent. Four independent guards: `digest.enabled: false`, the
+`dry_run_path` early return in `sender.send_email`, no `RESEND_API_KEY`, and
+empty `recipients`. `digest.selector` is pure-read, so production was not
+written to.
+
+**But five of the preview's six rows are props, and props have never been
+graded — nor can they be.** `pick_results` has **0 rows**. Three defects sit
+behind that, and they compound:
+
+1. **`grade_pick` grades every prop as a loss.** It has branches for
+   moneyline, spread and over_under, then `else: return "loss", -1.0`
+   (`grader.py:62-63`). `pick_type="prop"` hits the else.
+   `scheduler.grade_pending_picks` routes *every* ungraded pick through it.
+   This is **latent, not active** — `pick_results` is empty because the
+   scheduler has not run, not because the code is safe. The next
+   `morning_scout` marks all 82 props as losses.
+2. **`PickModel` has no `prop_player` or `prop_market` columns.** `PaperPick`
+   has both, which is why the PaperPick loop 30 lines below
+   (`scheduler.py:290`) branches correctly to `grade_prop_pick` while the
+   strategy-pick loop cannot. The obvious fix — copy that branch — has nothing
+   to pass.
+3. **`player_stats` holds 0 rows with `stat_type="game_log"`.**
+   `grade_prop_pick` looks up exactly that, so even with the schema fixed it
+   returns `None` for every prop. There is no outcome data to grade against.
+
+The same file contains the correct pattern and the broken one, thirty lines
+apart. That is the dead-wiring shape again: `grade_prop_pick` is correct, is
+tested, and is simply never reached from the strategy path.
+
+**Consequence for the digest decision.** Everything measured on 2026-09-17 —
+Brier 0.2032, the bin table, the underdog finding — describes the **game**
+model. The digest is majority props by row count, and prop confidence has
+never been checked against a single outcome (39 of 82 props, 48%, sit at
+maximum confidence). Keep `digest.enabled: false`: not because the digest is
+broken, but because its dominant content is unvalidated and currently
+ungradeable.
+
+Planned as **`plans/010-grade-the-picks.md`**.
+
 ## Scratch that did not survive
 
 Under the session temp dir, now gone: the SDD ledger for the digest plan, the

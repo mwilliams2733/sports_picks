@@ -11,6 +11,11 @@ its STOP conditions, and update your row when done.
 clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings**
 (not addressed by these plans). There is no CI.
 
+> **Superseded 2026-09-17.** Those were the numbers when this audit was
+> written. Current state is at the bottom of this section: 549 passing, eslint
+> clean, and CI now exists (`.github/workflows/ci.yml`, green on 3.12 and
+> 3.14).
+
 ## Execution order & status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -24,10 +29,14 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | **MERGED** into `master` — tool built and verified; measurement itself was BLOCKED by the model having almost no features. Unblocked by 008. |
 | 008 | Populate the features the model actually trains on | P1 | L | 007 — merged | **MERGED** into `master` — `team_stats` 1 → 1058 game_ids, `elo_history` 0 → 2116 rows, all point-in-time. `pace` / `offensive_rating` / `defensive_rating` structurally refused (need possessions). Two review rounds closed a train/serve Elo skew. Backfill ran against a copy only; production DB untouched. |
 | 009 | Clear the frontend ESLint errors | P2 | M | — | **MERGED** into `master` as `0670d45` — eslint 0 errors / 0 warnings, tsc clean, vitest 15/15, all verified post-merge |
+| 010 | Make picks gradeable, then grade them | P1 | L | — | **OPEN** — written 2026-09-17. `pick_results` has 0 rows and `grade_pick` returns `("loss", -1.0)` for every prop. Latent: the next `morning_scout` run marks all 82 props as losses. Blocks `digest.enabled` and any ROI or prop-calibration claim. |
 
-Current `master`: **532 backend tests passing**, 0 failed (360 at the start of
-the audit). Frontend: eslint 0/0, tsc clean, vitest 15/15.
-All nine plans are merged.
+Current `master`: **549 backend tests passing**, 0 failed (360 at the start of
+the audit), verified by CI on Python **3.12 and 3.14**. Frontend: eslint 0/0,
+tsc clean, vitest 15/15.
+
+Plans 001-009 are all merged. **Plan 010 is open** — see the row above; it is
+the only thing standing between the digest and a decision on enabling it.
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) |
 REJECTED (one-line rationale).
