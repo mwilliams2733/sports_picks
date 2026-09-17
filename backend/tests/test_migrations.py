@@ -96,3 +96,31 @@ def test_both_entry_points_produce_the_same_picks_columns():
     pipeline = _build()
     assert web == pipeline
     assert {"model_prob", "rationale_json"} <= web
+
+
+def test_run_migrations_adds_the_prop_grading_columns_to_a_legacy_picks_table():
+    """Same failure shape as the digest columns above.
+
+    Without a registered migration, a pre-existing database gets the new model
+    attributes but not the columns, and every prop pick insert dies inside a
+    broad `except`. `Base.metadata.create_all` does not repair an existing
+    table -- that is the whole reason this file exists.
+    """
+    engine = get_engine(":memory:")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE TABLE picks ("
+            " id INTEGER PRIMARY KEY, game_id INTEGER NOT NULL,"
+            " strategy_id INTEGER NOT NULL, pick_type VARCHAR NOT NULL,"
+            " pick_value VARCHAR NOT NULL, confidence INTEGER NOT NULL,"
+            " edge_pct FLOAT NOT NULL, odds_at_pick INTEGER,"
+            " created_at DATETIME NOT NULL)"
+        )
+    legacy = _columns(engine, "picks")
+    assert "prop_player" not in legacy and "prop_market" not in legacy
+
+    run_migrations(engine)
+
+    cols = _columns(engine, "picks")
+    assert "prop_player" in cols
+    assert "prop_market" in cols

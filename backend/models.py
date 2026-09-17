@@ -111,6 +111,11 @@ class PickModel(Base):
     odds_at_pick = Column(Integer, nullable=True)
     model_prob = Column(Float, nullable=True)
     rationale_json = Column(Text, nullable=True)
+    # Only for pick_type="prop". prop_market holds the market KEY
+    # ("player_threes"), not the display label ("3-Pointers"): MARKET_STAT_MAP
+    # is keyed by the former, and _market_label is not one-to-one.
+    prop_player = Column(String, nullable=True)
+    prop_market = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
     game = relationship("Game")
 

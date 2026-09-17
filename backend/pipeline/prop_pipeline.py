@@ -192,18 +192,31 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id)
     picks_generated = 0
     if strategy_id:
         for analysis in _dedup_prop_analyses(winning):
-            pick = PickModel(
-                game_id=analysis.game_id, strategy_id=strategy_id,
-                pick_type="prop",
-                pick_value=f"{analysis.player_name} {analysis.outcome} {analysis.line} {_market_label(analysis.market)}",
-                confidence=analysis.confidence, edge_pct=analysis.edge_pct,
-                odds_at_pick=analysis.odds, created_at=datetime.now(tz=timezone.utc),
-            )
+            pick = _build_prop_pick(analysis, strategy_id)
             session.add(pick)
             picks_generated += 1
     session.commit()
     return {"games": len(games), "stats_fetched": stats_count,
             "props_analyzed": props_analyzed, "picks_generated": picks_generated}
+
+def _build_prop_pick(analysis, strategy_id: int) -> PickModel:
+    """The PickModel for one analysed prop.
+
+    ``prop_player`` and ``prop_market`` are written here, at generation time,
+    because they cannot be recovered reliably afterwards: ``pick_value`` embeds
+    a *display label* and :func:`_market_label` covers only 7 of the 16 keys in
+    ``MARKET_STAT_MAP``, so the reverse mapping is not one-to-one. Grading
+    reads the market key, never the label.
+    """
+    return PickModel(
+        game_id=analysis.game_id, strategy_id=strategy_id,
+        pick_type="prop",
+        pick_value=f"{analysis.player_name} {analysis.outcome} {analysis.line} {_market_label(analysis.market)}",
+        confidence=analysis.confidence, edge_pct=analysis.edge_pct,
+        odds_at_pick=analysis.odds, created_at=datetime.now(tz=timezone.utc),
+        prop_player=analysis.player_name, prop_market=analysis.market,
+    )
+
 
 def _market_label(market: str) -> str:
     labels = {"player_points": "Points", "player_rebounds": "Rebounds",

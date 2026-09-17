@@ -130,6 +130,24 @@ def migrate_pick_rationale(engine):
                 conn.execute(text("ALTER TABLE picks ADD COLUMN rationale_json TEXT"))
 
 
+def migrate_pick_prop_fields(engine):
+    """Add prop_player/prop_market to picks if missing.
+
+    Without these a prop pick cannot be graded: `grade_prop_pick` needs a
+    market key and a player name, and `pick_value` is prose that does not map
+    back to a market one-to-one.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "picks" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("picks")]
+        with engine.begin() as conn:
+            if "prop_player" not in columns:
+                conn.execute(text("ALTER TABLE picks ADD COLUMN prop_player VARCHAR"))
+            if "prop_market" not in columns:
+                conn.execute(text("ALTER TABLE picks ADD COLUMN prop_market VARCHAR"))
+
+
 # The single source of truth for which schema migrations run, and in what
 # order. Every process that opens the database — the FastAPI app AND the
 # standalone pipeline scheduler — calls this instead of listing migrations
@@ -145,6 +163,7 @@ MIGRATIONS = (
     migrate_pick_result_line_at_close,
     migrate_pick_model_prob,
     migrate_pick_rationale,
+    migrate_pick_prop_fields,
 )
 
 
