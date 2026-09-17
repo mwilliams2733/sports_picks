@@ -30,9 +30,11 @@ Two subagents were mid-run and did **not** survive the restart. Their branches
 and commits DO survive in `.git`; only the worktree directories under
 `AppData/Local/Temp/claude/...` are lost.
 
-**`advisor/008-populate-team-stats` — 6 commits, NOT reviewed, NOT merged.**
-This is the valuable one. Branched from `advisor/007-calibration-report`
-(it needs 007's report tool). Its commits:
+**`advisor/008-populate-team-stats` — 5 commits, reported DONE_WITH_CONCERNS,
+NOT reviewed, NOT merged.** It came back just before the restart. Report:
+`.superpowers/008-team-stats-report.md`. Branched from
+`advisor/007-calibration-report` (now merged to master, so it will rebase or
+merge cleanly). Commits:
 
 ```
 11db971 fix(pipeline): keep elo_history current after the one-off backfill
@@ -42,9 +44,50 @@ This is the valuable one. Branched from `advisor/007-calibration-report`
 81dc426 feat(pipeline): compute point-in-time team stats per game
 ```
 
-It never reported back, so **no execution report exists** and its work is
-unverified. Note `553bc41` suggests it resolved the pre-game/post-game Elo
-question in the right direction, which is encouraging but not proof.
+Reports 520 passed (487 baseline + 33 new) and both required mutation proofs
+run and failed as expected.
+
+**Independently verified against its working DB copy before the restart:**
+
+| | |
+|---|---|
+| `team_stats` distinct game_ids | **1 → 1058** |
+| `elo_history` rows | **0 → 2116** |
+| `picks` | still 708 (wrote none) |
+| Live `sports_picks.db` | **untouched** — still 1 and 0 |
+| Fabrication check | `pace` / `offensive_rating` / `defensive_rating` present for **exactly 1** game (the legacy game-1014 rows). The eight derivable stat types are at 1058. **It refused to fabricate**, as the plan required. |
+| `rest_days` | now present for all 1058 — the feature that was structurally absent |
+
+**The headline result is counter-intuitive and worth understanding before
+reviewing:** the 99% predictions are gone (top bin now 2 games at 0.91, mass
+sits 0.4-0.8), but **Brier rose from 0.1836 to 0.2020**. That is not a
+regression. The old number came from a model whose only non-zero coefficient
+was an end-of-season Elo rating — constant per team and unknowable before
+tip-off. 0.2020 is the first honestly-measurable score. The model is still
+badly calibrated: overconfident on underdogs by 15-19 points.
+
+Elo decision: it wrote **pre-game** ratings, not post-game as `historical.py`
+does, because both consumers read `elo_history[(team_id, game_id)]` as the
+feature *for* that game. `calibrated_model.py` was left untouched. This was the
+trap the plan flagged hardest and it resolved it the right way.
+
+**Still needs a code review before merge.** What it flagged itself, worth
+checking:
+
+1. `backtesting.historical.compute_historical_elo` **still writes post-game
+   ratings into the same column**. If it runs after this merges it will corrupt
+   `elo_history` with the opposite convention. Reconcile before it next runs —
+   this is the highest-risk loose end.
+2. 007's `calibration_report.py` docstring documents this exact defect as a
+   "known limitation". That paragraph goes stale the moment 008 merges.
+3. 99 legacy orphan rows on game 1014 were left in place; it guarded the
+   fallback rather than deleting them.
+4. Two changes beyond the literal step list (`553bc41`, `11db971`), both in
+   in-scope files, separately committed — the data fix exposed a train/serve
+   Elo skew that had been hidden.
+5. Two of five features remain structurally constant. The modelling choice —
+   drop them, source possessions, or leave them defaulted — is still unmade and
+   is the natural next decision.
 
 **`advisor/009-frontend-eslint` — 0 commits.** It was still running `npm ci`
 when the session ended. Nothing was done; re-dispatch from scratch.
