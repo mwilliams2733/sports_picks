@@ -1,8 +1,0 @@
-pyproject.toml
-backend/__init__.py
-backend/tests/__init__.py
-sports_picks.egg-info/PKG-INFO
-sports_picks.egg-info/SOURCES.txt
-sports_picks.egg-info/dependency_links.txt
-sports_picks.egg-info/requires.txt
-sports_picks.egg-info/top_level.txt
