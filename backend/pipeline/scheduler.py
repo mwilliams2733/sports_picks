@@ -14,6 +14,7 @@ from backend.pipeline.full_pipeline import (
 from backend.pipeline.pick_generator import generate_and_store_picks
 from backend.pipeline.prop_pipeline import run_prop_pipeline
 from backend.pipeline.grader import grade_pick, grade_prop_pick, capture_closing_odds, grade_completed_games
+from backend.collectors.espn_box_score import collect_box_scores_for_final_games
 from backend.collectors.budget import get_credit_summary, DEFAULT_BUDGET
 from backend.models import (
     Base, Game, PickModel, PickResult, StrategyModel,
@@ -126,6 +127,14 @@ def run_pipeline(config_path: str = "config.yaml"):
 def morning_scout(config, engine, scheduler, is_retry=False):
     session = get_session(engine)
     try:
+        # Box scores first: grade_pending_picks can only grade a prop if the
+        # player's game_log row for that game already exists. A collector
+        # failure must not stop grading the game-level picks, which do not
+        # depend on it.
+        try:
+            collect_box_scores_for_final_games(session)
+        except Exception:
+            logger.exception("Box score collection failed; grading with what is present")
         grade_pending_picks(session)
         grade_completed_games(session)
         active_sports = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]
