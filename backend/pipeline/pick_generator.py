@@ -128,8 +128,10 @@ def _check_lookahead_spot(session: Session, team_id: int, opponent_team_id: int,
 
 def _build_game_data(session: Session, game,
                      pitcher_scores: dict[int, dict[str, float]] | None = None) -> GameData:
-    home_stats = _get_team_stats(session, game.home_team_id, game.sport)
-    away_stats = _get_team_stats(session, game.away_team_id, game.sport)
+    home_stats = _get_team_stats(session, game.home_team_id, game.sport,
+                                 game_id=game.id, game_date=game.date)
+    away_stats = _get_team_stats(session, game.away_team_id, game.sport,
+                                 game_id=game.id, game_date=game.date)
     odds_rows = session.query(Odds).filter(Odds.game_id == game.id).all()
     odds = [OddsSnapshot(bookmaker=o.bookmaker, moneyline_home=o.moneyline_home or 0,
         moneyline_away=o.moneyline_away or 0, spread_home=o.spread_home or 0.0,
@@ -204,8 +206,48 @@ def _build_fighter_stats(session: Session, fighter_id: int, sport: str, before_d
     )
 
 
-def _get_team_stats(session: Session, team_id: int, sport: str) -> TeamStats:
-    stats_rows = session.query(TeamStat).filter(TeamStat.team_id == team_id).all()
+def _team_stat_rows(session: Session, team_id: int,
+                    game_id: int | None, game_date: date | None) -> list[TeamStat]:
+    """The TeamStat rows that apply to `team_id` going into a specific game.
+
+    Previously this filtered on `team_id` alone, so whichever games happened to
+    have rows supplied stats for *every* game that team ever played. In
+    production exactly one game had rows, which is why some picks carried
+    recent_form / net_rating rationale factors and others did not.
+
+    Rows are written point-in-time (computed strictly before their own game by
+    `backend.pipeline.team_stats`), so this game's own rows are the correct,
+    non-leaking answer. A scheduled game usually has none yet, so the fallback
+    is the team's most recent *strictly earlier* game that does. That is stale
+    by at most one game and can never reach forward in time. With no game
+    context at all, or no prior rows, the caller's defaults apply.
+    """
+    if game_id is None:
+        return []
+
+    rows = (session.query(TeamStat)
+            .filter(TeamStat.team_id == team_id, TeamStat.game_id == game_id)
+            .all())
+    if rows or game_date is None:
+        return rows
+
+    latest_prior = (session.query(Game.id)
+                    .join(TeamStat, TeamStat.game_id == Game.id)
+                    .filter(TeamStat.team_id == team_id, Game.date < game_date)
+                    .order_by(Game.date.desc(), Game.id.desc())
+                    .first())
+    if latest_prior is None:
+        return []
+    return (session.query(TeamStat)
+            .filter(TeamStat.team_id == team_id,
+                    TeamStat.game_id == latest_prior[0])
+            .all())
+
+
+def _get_team_stats(session: Session, team_id: int, sport: str,
+                    game_id: int | None = None,
+                    game_date: date | None = None) -> TeamStats:
+    stats_rows = _team_stat_rows(session, team_id, game_id, game_date)
     stats_dict = {s.stat_type: s.value for s in stats_rows}
     elo_row = session.query(EloRating).filter(EloRating.team_id == team_id, EloRating.sport == sport).first()
     return TeamStats(point_diff=stats_dict.get("point_diff", 0.0),
