@@ -5,8 +5,8 @@ Written mid-session before a restart. Everything below is recoverable from
 
 ## Where things stand
 
-`master` is at the **Merge plan 007** commit. Run `git log --oneline -12` to see
-the merge history. Test baseline on `master`: **500 passing, 0 failed** (verified)
+`master` is at the **Merge plan 009** commit. Run `git log --oneline -12` to see
+the merge history. Test baseline on `master`: **500 passing backend, 0 failed**; frontend **eslint 0/0, tsc clean, vitest 15/15** (all verified)
 (`.venv/Scripts/python.exe -m pytest backend/tests -q`, ~4 min).
 
 Started this session at 360 tests.
@@ -89,8 +89,19 @@ checking:
    drop them, source possessions, or leave them defaulted — is still unmade and
    is the natural next decision.
 
-**`advisor/009-frontend-eslint` — 0 commits.** It was still running `npm ci`
-when the session ended. Nothing was done; re-dispatch from scratch.
+**`advisor/009-frontend-eslint` — MERGED** into `master` as `0670d45`.
+`npx eslint .` went from 6 errors / 2 warnings to **0 / 0**; verified in the
+merged main tree along with `tsc -b` clean and `vitest run` 15/15. Five errors
+genuinely fixed; `PaperTrading.tsx` carries a line-scoped suppression naming the
+React Query migration as the real fix. Two `exhaustive-deps` suppressions on the
+URL→store mount effects were explicitly permitted by the plan (adding the deps
+would reintroduce a URL→store→URL loop). All three carry reasons.
+
+Known unrelated issue it surfaced: `npm ci` fails on a pre-existing
+`vite`/`vite-plugin-pwa` peer conflict in the committed lockfile;
+`npm ci --legacy-peer-deps` works. `Dockerfile:8-12` already documents that
+workaround. Worth its own ticket; nothing in 009 touched `package.json` or the
+lockfile.
 
 ## How to resume
 

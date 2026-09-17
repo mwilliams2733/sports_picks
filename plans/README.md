@@ -23,12 +23,11 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 006 | Per-sport, push-aware, newest-first recalibration | P1 | S | — | **MERGED** into `master` as `0e1f13f` |
 | 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | **MERGED** into `master` — tool built and verified; measurement itself BLOCKED: the model has almost no features (see root cause below). Unblocked by 008. |
 | 008 | Populate the features the model actually trains on | P1 | L | 007 | TODO — written against `142635c`. **Blocks 007's decision gate.** |
-| 009 | Clear the frontend ESLint errors | P2 | M | — | **DONE** on branch `advisor/009-frontend-eslint` (commits `6451af4`..`bfeb79e`) — `npx eslint .` now 0 errors, 0 warnings (5 fixed, 1 documented suppression at `PaperTrading.tsx:70` pending the React Query migration); `tsc -b` clean; `vitest run` 15/15 (14 baseline + 1 new); `npm run build` exits 0 |
+| 009 | Clear the frontend ESLint errors | P2 | M | — | **MERGED** into `master` as `0670d45` — eslint 0 errors / 0 warnings, tsc clean, vitest 15/15, all verified post-merge |
 
-Suite after five merges (001, 002, 003, 005, 006): **409 passed** (360 baseline + 21 + 6 + 8), 0 failed.
-Plan 004 was written against `5c2e0d0` and has been refreshed against `943cf25`:
-its in-scope source files are unchanged, but the baseline is now 409 and
-inverting 001's characterization test is mandatory rather than conditional.
+Current `master`: **500 backend tests passing**, 0 failed (360 at the start of
+the audit). Frontend: eslint 0/0, tsc clean, vitest 15/15.
+Only plan 008 remains unmerged — its branch has 5 commits and is under review.
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) |
 REJECTED (one-line rationale).
