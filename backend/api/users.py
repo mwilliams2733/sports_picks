@@ -1,5 +1,5 @@
 from datetime import datetime, timezone, date, timedelta
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func
 from backend.database import get_session
@@ -8,12 +8,22 @@ from backend.pipeline.grader import grade_pick, grade_prop_pick
 from backend.analysis.odds_utils import calculate_payout
 import json
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-def _log_feed_event(session, user_id: int | None, event_type: str, payload: dict):
-    """Save activity event to DB and broadcast via WebSocket."""
+def _log_feed_event(session, loop, user_id: int | None, event_type: str, payload: dict):
+    """Save activity event to DB and broadcast via WebSocket.
+
+    ``loop`` is the running asyncio event loop captured on ``app.state.loop``
+    at lifespan startup. Handlers here are synchronous and run in an anyio
+    worker thread, so we schedule the broadcast onto that loop from this
+    thread with ``run_coroutine_threadsafe`` rather than trying to create a
+    task directly (there is no event loop in this thread).
+    """
     session.add(ActivityFeed(
         user_id=user_id,
         event_type=event_type,
@@ -21,13 +31,16 @@ def _log_feed_event(session, user_id: int | None, event_type: str, payload: dict
     ))
     session.commit()
     # Broadcast via WebSocket (fire-and-forget)
+    if loop is None:
+        logger.debug("Feed broadcast skipped: no event loop available")
+        return
     try:
         from backend.api.websocket import manager
-        asyncio.get_event_loop().create_task(
-            manager.broadcast(event_type, payload)
+        asyncio.run_coroutine_threadsafe(
+            manager.broadcast(event_type, payload), loop
         )
-    except RuntimeError:
-        pass  # No event loop running (e.g., in tests)
+    except Exception:
+        logger.warning("Feed broadcast failed", exc_info=True)
 
 
 class CreateUserRequest(BaseModel):
@@ -112,6 +125,31 @@ def create_user(request: Request, body: CreateUserRequest):
         session.add(user)
         session.commit()
         return {"id": user.id, "name": user.name, "starting_balance": user.starting_balance}
+    finally:
+        session.close()
+
+
+@router.get("/feed")
+def get_activity_feed(request: Request, limit: int = Query(50, ge=1, le=200)):
+    """Get recent activity feed events."""
+    session = get_session(request.app.state.engine)
+    try:
+        events = (
+            session.query(ActivityFeed)
+            .order_by(ActivityFeed.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": e.id,
+                "user_id": e.user_id,
+                "event_type": e.event_type,
+                "payload": json.loads(e.payload),
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in events
+        ]
     finally:
         session.close()
 
@@ -241,10 +279,11 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
         session.commit()
 
         # Log activity feed event
+        loop = request.app.state.loop
         user = session.query(UserProfile).get(user_id)
         user_name = user.name if user else "Unknown"
         odds_str = f"{body.odds:+d}" if body.odds >= 0 else str(body.odds)
-        _log_feed_event(session, user_id, "pick_placed", {
+        _log_feed_event(session, loop, user_id, "pick_placed", {
             "user_name": user_name,
             "message": f"{user_name} bet {body.pick_value} {odds_str} — ${body.stake:,.0f}",
             "pick_value": body.pick_value,
@@ -254,13 +293,13 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
 
         if result:
             event_type = "pick_won" if result == "win" else "pick_lost"
-            _log_feed_event(session, user_id, event_type, {
+            _log_feed_event(session, loop, user_id, event_type, {
                 "user_name": user_name,
                 "message": f"{user_name} {'won' if result == 'win' else 'lost'} {body.pick_value} — {'+'  if (payout or 0) > 0 else ''}${payout or 0:,.0f}",
                 "result": result,
                 "payout": payout,
             })
-            _update_streaks(session, user_id)
+            _update_streaks(session, loop, user_id)
 
         return {
             "id": pick.id,
@@ -432,10 +471,11 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
         session.commit()
 
         # Log activity
+        loop = request.app.state.loop
         user = session.query(UserProfile).get(user_id)
         user_name = user.name if user else "Unknown"
         legs_str = " + ".join(leg.pick_value for leg in body.legs)
-        _log_feed_event(session, user_id, "pick_placed", {
+        _log_feed_event(session, loop, user_id, "pick_placed", {
             "user_name": user_name,
             "message": f"{user_name} placed {len(body.legs)}-leg parlay: {legs_str} — ${body.stake:,.0f} to win ${body.stake * (combined_decimal - 1):,.0f}",
             "parlay": True,
@@ -459,6 +499,7 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
 def grade_paper_picks(request: Request):
     """Grade all pending paper picks for games that are final."""
     session = get_session(request.app.state.engine)
+    loop = request.app.state.loop
     try:
         pending = (
             session.query(PaperPick, Game)
@@ -508,7 +549,7 @@ def grade_paper_picks(request: Request):
             user_name = user.name if user else "Unknown"
             event_type = "pick_won" if pick.result == "win" else "pick_lost"
             if pick.result in ("win", "loss"):
-                _log_feed_event(session, pick.user_id, event_type, {
+                _log_feed_event(session, loop, pick.user_id, event_type, {
                     "user_name": user_name,
                     "message": f"{user_name} {'won' if pick.result == 'win' else 'lost'} {pick.pick_value} — {'+'  if (pick.payout or 0) > 0 else ''}${pick.payout or 0:,.0f}",
                     "result": pick.result,
@@ -518,7 +559,7 @@ def grade_paper_picks(request: Request):
         # Update streaks for all affected users
         affected_users = set(pick.user_id for pick, _ in pending)
         for uid in affected_users:
-            _update_streaks(session, uid)
+            _update_streaks(session, loop, uid)
 
         session.commit()
         return {"graded": graded}
@@ -526,7 +567,7 @@ def grade_paper_picks(request: Request):
         session.close()
 
 
-def _update_streaks(session, user_id: int):
+def _update_streaks(session, loop, user_id: int):
     """Recompute streaks from the user's most recent graded picks."""
     picks = (
         session.query(PaperPick)
@@ -560,7 +601,7 @@ def _update_streaks(session, user_id: int):
 
         # Log streak event if notable (3+)
         if streak >= 3:
-            _log_feed_event(session, user_id, "streak", {
+            _log_feed_event(session, loop, user_id, "streak", {
                 "user_name": user.name,
                 "message": f"{user.name} is on a {streak}-pick {'win' if current_result == 'win' else 'loss'} streak!",
                 "streak": streak,
@@ -631,26 +672,3 @@ def get_user_stats(request: Request, user_id: int):
         session.close()
 
 
-@router.get("/feed")
-def get_activity_feed(request: Request, limit: int = 50):
-    """Get recent activity feed events."""
-    session = get_session(request.app.state.engine)
-    try:
-        events = (
-            session.query(ActivityFeed)
-            .order_by(ActivityFeed.created_at.desc())
-            .limit(limit)
-            .all()
-        )
-        return [
-            {
-                "id": e.id,
-                "user_id": e.user_id,
-                "event_type": e.event_type,
-                "payload": json.loads(e.payload),
-                "created_at": e.created_at.isoformat() if e.created_at else None,
-            }
-            for e in events
-        ]
-    finally:
-        session.close()
