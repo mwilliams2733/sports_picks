@@ -23,6 +23,7 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 006 | Per-sport, push-aware, newest-first recalibration | P1 | S | — | **MERGED** into `master` as `0e1f13f` |
 | 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | **DONE (measurement BLOCKED)** — the report tool is built and correct, but no calibration number could be produced: the model has almost no features (see root cause below). Unblocked by 008. |
 | 008 | Populate the features the model actually trains on | P1 | L | 007 | TODO — written against `142635c`. **Blocks 007's decision gate.** |
+| 009 | Clear the frontend ESLint errors | P2 | M | — | TODO — written against `db9951b` |
 
 Suite after five merges (001, 002, 003, 005, 006): **409 passed** (360 baseline + 21 + 6 + 8), 0 failed.
 Plan 004 was written against `5c2e0d0` and has been refreshed against `943cf25`:
