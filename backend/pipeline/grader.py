@@ -31,7 +31,17 @@ MARKET_STAT_MAP = {
 }
 
 
-def grade_pick(pick_type: str, pick_value: str, home_score: int, away_score: int, odds_at_pick: int) -> tuple[str, float]:
+def grade_pick(pick_type: str, pick_value: str, home_score: int, away_score: int,
+               odds_at_pick: int) -> tuple[str, float] | None:
+    """Grade a game-level pick from the final score.
+
+    Returns ``(result, payout_ratio)``, or ``None`` when ``pick_type`` is not
+    one this function can grade -- notably ``"prop"``, which needs player box
+    scores and belongs to :func:`grade_prop_pick`. Callers must treat ``None``
+    as "leave this pick ungraded" and must not substitute a default: an
+    invented result is indistinguishable from a measured one once it is in
+    ``pick_results``.
+    """
     if pick_type == "moneyline":
         if "HOME" in pick_value:
             won = home_score > away_score
@@ -60,7 +70,8 @@ def grade_pick(pick_type: str, pick_value: str, home_score: int, away_score: int
         else:
             won = actual_total < total_line
     else:
-        return "loss", -1.0
+        logger.warning("grade_pick cannot grade pick_type=%r; leaving ungraded", pick_type)
+        return None
     if won:
         try:
             return "win", calculate_payout(odds_at_pick)

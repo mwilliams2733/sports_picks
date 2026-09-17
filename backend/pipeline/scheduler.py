@@ -261,10 +261,17 @@ def grade_pending_picks(session):
         .filter(~PickModel.id.in_(session.query(PickResult.pick_id)))
         .all()
     )
+    skipped = 0
     for pick, game in ungraded:
         if game.home_score is not None and game.away_score is not None:
-            result, payout = grade_pick(pick.pick_type, pick.pick_value,
+            grade_outcome = grade_pick(pick.pick_type, pick.pick_value,
                 game.home_score, game.away_score, pick.odds_at_pick or -110)
+            if grade_outcome is None:
+                # grade_pick has no branch for this type (props, notably).
+                # Leave it ungraded rather than record an invented result.
+                skipped += 1
+                continue
+            result, payout = grade_outcome
             pick_result = PickResult(pick_id=pick.id, result=result, payout=payout)
             capture_closing_odds(
                 session, pick_result, game.id,
@@ -272,7 +279,8 @@ def grade_pending_picks(session):
             )
             session.add(pick_result)
     session.commit()
-    logger.info(f"Graded {len(ungraded)} strategy picks")
+    logger.info("Graded %d strategy picks (%d skipped as ungradeable here)",
+                len(ungraded) - skipped, skipped)
 
     # Also grade pending PaperPicks
     pending_paper = (
@@ -298,11 +306,13 @@ def grade_pending_picks(session):
                 continue
             pick.result = prop_result[0]
         else:
-            result, _ = grade_pick(
+            grade_outcome = grade_pick(
                 pick.pick_type, pick.pick_value,
                 game.home_score, game.away_score, pick.odds
             )
-            pick.result = result
+            if grade_outcome is None:
+                continue
+            pick.result = grade_outcome[0]
 
         if pick.result == "win":
             pick.payout = pick.stake * calculate_payout(pick.odds)

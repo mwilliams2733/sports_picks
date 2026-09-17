@@ -17,9 +17,16 @@ class Backtester:
             picks = self.strategy.predict(game)
             for pick in picks:
                 unit_size = getattr(pick, 'suggested_unit_size', 1.0) or 1.0
-                result, payout = grade_pick(
+                grade_outcome = grade_pick(
                     pick.pick_type, pick.pick_value, home_score, away_score, pick.odds_at_pick
                 )
+                if grade_outcome is None:
+                    # Not a pick type grade_pick understands; excluding it is
+                    # the only honest option -- counting it as a loss would
+                    # understate the strategy, counting it as a push would
+                    # inflate the sample.
+                    continue
+                result, payout = grade_outcome
                 if result == "win":
                     wins += 1
                     total_profit += payout * unit_size

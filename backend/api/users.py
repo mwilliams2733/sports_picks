@@ -251,10 +251,13 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
                     else:
                         payout = -body.stake
             else:
-                grade_result, grade_payout_ratio = grade_pick(
+                grade_outcome = grade_pick(
                     body.pick_type, body.pick_value,
                     game.home_score, game.away_score, body.odds
                 )
+                # None means grade_pick has no branch for this pick type. Leave
+                # the pick pending rather than invent a result for it.
+                grade_result = grade_outcome[0] if grade_outcome else None
                 result = grade_result
                 if grade_result == "win":
                     payout = body.stake * calculate_payout(body.odds)
@@ -420,11 +423,14 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
                     if prop_result:
                         result = prop_result[0]
                 else:
-                    grade_result, _ = grade_pick(
+                    grade_outcome = grade_pick(
                         leg.pick_type, leg.pick_value,
                         game.home_score, game.away_score, leg.odds
                     )
-                    result = grade_result
+                    if grade_outcome is None:
+                        all_graded = False
+                    else:
+                        result = grade_outcome[0]
             else:
                 all_graded = False
 
@@ -531,10 +537,14 @@ def grade_paper_picks(request: Request):
                 else:
                     pick.payout = -pick.stake
             else:
-                grade_result, grade_payout_ratio = grade_pick(
+                # NB: `graded` is the endpoint's counter, incremented below.
+                grade_outcome = grade_pick(
                     pick.pick_type, pick.pick_value,
                     game.home_score, game.away_score, pick.odds
                 )
+                if grade_outcome is None:
+                    continue
+                grade_result = grade_outcome[0]
                 pick.result = grade_result
                 if grade_result == "win":
                     pick.payout = pick.stake * calculate_payout(pick.odds)

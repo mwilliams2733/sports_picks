@@ -1,3 +1,5 @@
+import pytest
+
 from backend.pipeline.grader import grade_pick, grade_prop_pick
 from backend.analysis.odds_utils import calculate_payout
 
@@ -214,3 +216,32 @@ def test_combat_grader_does_not_affect_team_sport_elo():
                 .filter(EloRating.team_id == 2, EloRating.sport == "nba").first()).rating
     assert abs(home_elo - 1500.0) < 0.01, f"NBA Elo must be untouched, got {home_elo}"
     assert abs(away_elo - 1500.0) < 0.01, f"NBA Elo must be untouched, got {away_elo}"
+
+
+# --- grade_pick must not invent a result for types it cannot grade ---------
+
+def test_grade_pick_refuses_a_prop_instead_of_calling_it_a_loss():
+    """An unknown pick type must not be resolved into a confident result.
+
+    `pick_type="prop"` has no branch here -- props are graded by
+    `grade_prop_pick` against player box scores, which this function never
+    sees. Returning ("loss", -1.0) records a real, wrong outcome for every
+    prop ever generated and silently poisons any ROI or calibration number
+    computed afterwards.
+    """
+    assert grade_pick("prop", "Dean Wade Over 0.5 3-Pointers", 110, 105, -200) is None
+    # Scores that would make any real pick a win must not change the answer.
+    assert grade_pick("prop", "Dean Wade Over 0.5 3-Pointers", 999, 0, -200) is None
+
+
+def test_grade_pick_refuses_an_unrecognised_pick_type():
+    """The same guard for anything else added later without a branch here."""
+    assert grade_pick("team_total", "HOME Over 110.5", 120, 100, -110) is None
+
+
+def test_grade_pick_still_grades_the_types_it_does_support():
+    """The refusal must not swallow the working paths."""
+    result, payout = grade_pick("moneyline", "HOME", 110, 100, -110)
+    assert result == "win"
+    assert payout == pytest.approx(100 / 110)   # -110 stake returns 0.909...
+    assert grade_pick("moneyline", "AWAY", 110, 100, -110) == ("loss", -1.0)
