@@ -48,7 +48,7 @@ the root cause of the model claiming 99% where the de-vigged market said 84.5%.
 | `team_stats` distinct game_ids | **1 → 1058** |
 | `elo_history` rows | **0 → 2116** |
 | `rest_days` | present for the first time |
-| Live `sports_picks.db` | **untouched** — backfill ran against copies only |
+| Live `sports_picks.db` | backfilled **2026-09-16** (was untouched during 008) — see below |
 | Fabrication check | `pace` / `offensive_rating` / `defensive_rating` still present for **exactly 1** game. Structurally refused, not fabricated. |
 
 **Brier ROSE 0.1836 → 0.2020, and that is the honest result.** The old number
@@ -197,9 +197,39 @@ needed — the git history and `plans/` are the record.
 `004-activity-feed-report.md` and `007-calibration-report.md`. It is git-ignored,
 so those survive on disk but are not in history.
 
-## Your database was not modified
+## Your database — backfilled 2026-09-16
 
-`sports_picks.db` still has **708 picks** (max id 708). Eighteen test picks were
+During plan 008 all analysis ran against copies and production was left empty.
+It has now been backfilled deliberately:
+
+| | before | after |
+|---|---|---|
+| `team_stats` distinct game_ids | 1 | **1058** |
+| `elo_history` rows | 0 | **2116** |
+| `picks` count / max id | 708 / 708 | **708 / 708** unchanged |
+| `games` | 1664 | **1664** unchanged |
+| `integrity_check` | ok | **ok** |
+
+Backup taken first: `sports_picks.backup-20260916-231622.db` in the repo root,
+git-ignored, verified `integrity_check: ok` with all 708 picks. Keep it until
+you are satisfied with live behaviour.
+
+`pace` / `offensive_rating` / `defensive_rating` are still present for exactly
+**1** game — structurally refused, not fabricated.
+
+**This changes live pick generation.** The model now trains on real
+point-in-time features instead of a matrix that was almost entirely zeros, so
+picks generated from here differ from those generated before. The calibration
+report against production reproduces the copy exactly: **Brier 0.2032**
+out-of-sample, 0.1948 in-sample control.
+
+The daily pipeline keeps both tables current from here
+(`update_team_stats_for_games` and `backfill_elo_history` in
+`full_pipeline.py:234`), so this was a one-off.
+
+## Historical note: state during plan 008
+
+`sports_picks.db` had **708 picks** (max id 708). Eighteen test picks were
 generated during a digest preview and deleted afterwards, with a
 blast-radius check confirming no `pick_results` referenced them. All analysis
 work ran against copies.
