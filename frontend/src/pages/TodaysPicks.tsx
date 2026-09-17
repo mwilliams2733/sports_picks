@@ -19,10 +19,15 @@ export default function TodaysPicks() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { sport, setSport } = useAppStore();
 
-  // Sync URL → store on mount
+  // Sync URL → store on mount. setSport writes to the Zustand store (external
+  // state a useState lazy initializer can't reach), so this has to stay an
+  // effect. Deliberately NOT adding the missing deps below: doing so would
+  // re-run this on every sport change and fight the store → URL sync in
+  // handleSportChange, reintroducing a URL→store→URL loop.
   useEffect(() => {
     const urlSport = searchParams.get('sport');
     if (urlSport && urlSport !== sport) setSport(urlSport);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Sync store → URL on sport change
@@ -70,8 +75,15 @@ export default function TodaysPicks() {
     setBetModalOpen(true);
   };
 
-  // Reset team filter when sport changes (must be before early returns)
-  useEffect(() => { setTeamFilter(''); }, [sport]);
+  // Reset team filter when sport changes. Adjust state during render (React's
+  // documented pattern for "state that depends on a prop") instead of in an
+  // effect, so this doesn't cause an extra render pass. Must run before any
+  // early return below.
+  const [prevSport, setPrevSport] = useState(sport);
+  if (sport !== prevSport) {
+    setPrevSport(sport);
+    setTeamFilter('');
+  }
 
   const error = picks.error || record.error || games.error;
   const loading = picks.isLoading || record.isLoading || games.isLoading;

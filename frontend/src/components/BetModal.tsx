@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useUserStore } from '../stores/userStore'
 import { api } from '../api/client'
 import { useQueryClient } from '@tanstack/react-query'
-import { useToast } from './Toast'
+import { useToast } from '../hooks/useToast'
 import type { UserProfile } from '../types'
 
 interface BetModalProps {

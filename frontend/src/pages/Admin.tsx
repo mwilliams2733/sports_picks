@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import type { UserProfile } from '../types';
-import { useToast } from '../components/Toast';
+import { useToast } from '../hooks/useToast';
 
 export default function Admin() {
   const [users, setUsers] = useState<UserProfile[]>([]);

@@ -23,15 +23,24 @@ export default function PlayerProps() {
   const { sport, setSport } = useAppStore();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('edge');
-  const [minConfidence, setMinConfidence] = useState(0);
+  // minConfidence is purely local state, so its initial value from the URL
+  // is read via a lazy initializer instead of an effect.
+  const [minConfidence, setMinConfidence] = useState(() => {
+    const urlConf = searchParams.get('confidence');
+    return urlConf ? Number(urlConf) : 0;
+  });
   const [teamFilter, setTeamFilter] = useState('');
   const [marketFilter, setMarketFilter] = useState('');
 
+  // Sync URL → store on mount. setSport writes to the Zustand store (external
+  // state a useState lazy initializer can't reach), so this has to stay an
+  // effect. Deliberately NOT adding the missing deps below: doing so would
+  // re-run this on every sport change and fight the store → URL sync in
+  // handleSportChange, reintroducing a URL→store→URL loop.
   useEffect(() => {
     const urlSport = searchParams.get('sport');
-    const urlConf = searchParams.get('confidence');
     if (urlSport && urlSport !== sport) setSport(urlSport);
-    if (urlConf) setMinConfidence(Number(urlConf));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSportChange = (s: string) => {
@@ -76,8 +85,15 @@ export default function PlayerProps() {
     propsData.flatMap(p => p.matchup ? p.matchup.split(' @ ') : [])
   )).sort();
 
-  // Reset team and market filters when sport changes
-  useEffect(() => { setTeamFilter(''); setMarketFilter(''); }, [sport]);
+  // Reset team and market filters when sport changes. Adjust state during
+  // render instead of in an effect, so this doesn't cause an extra render
+  // pass. Must run before the early return below.
+  const [prevSport, setPrevSport] = useState(sport);
+  if (sport !== prevSport) {
+    setPrevSport(sport);
+    setTeamFilter('');
+    setMarketFilter('');
+  }
 
   const filteredProps = propsData
     .filter(p => p.confidence === null || p.confidence >= minConfidence)
