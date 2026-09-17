@@ -205,8 +205,10 @@ def grade_completed_games(session) -> None:
     """Apply post-game updates for all finalized combat-sports games not yet
     Elo-graded.
 
-    Team-sport Elo is managed by the backtesting/historical path and is not
-    touched here. Called daily from the live scheduler (`morning_scout`), so
+    Team-sport Elo is not touched here: it is owned by
+    ``pipeline.team_stats.backfill_elo_history`` (called from the daily
+    pipeline, and from ``backtesting.historical.compute_historical_elo``) and
+    uses **pre-game** semantics, the opposite of this function's. Called daily from the live scheduler (`morning_scout`), so
     games already present in `EloHistory` are skipped to avoid re-applying
     the same update every run.
     """

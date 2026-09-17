@@ -3,8 +3,7 @@ import logging
 from datetime import date, timedelta, datetime, timezone
 from sqlalchemy.orm import Session
 from backend.collectors.espn import ESPNCollector
-from backend.models import Team, Game, EloRating, EloHistory
-from backend.analysis.elo import EloSystem
+from backend.models import Team, Game, EloRating
 
 logger = logging.getLogger(__name__)
 
@@ -98,39 +97,32 @@ def store_games(session: Session, sport: str, season_year: int, games: list[dict
 
 
 def compute_historical_elo(session: Session, sport: str):
-    """Compute ELO ratings by replaying all completed games in chronological order."""
-    from backend.analysis.sport_constants import get_home_advantage_elo
-    hca = get_home_advantage_elo(sport)
-    elo = EloSystem(k_factor=20, home_advantage=hca)
-    games = (
-        session.query(Game)
-        .filter(Game.sport == sport, Game.status == "final")
-        .order_by(Game.date)
-        .all()
-    )
+    """Replay all completed games, storing each team's **pre-game** rating.
 
-    for game in games:
-        home_team = session.get(Team, game.home_team_id)
-        away_team = session.get(Team, game.away_team_id)
-        if not home_team or not away_team:
-            continue
-        if game.home_score is None or game.away_score is None:
-            continue
+    The replay itself is not implemented here.  It is delegated to
+    :func:`backend.pipeline.team_stats.backfill_elo_history` -- the function
+    the daily pipeline already calls -- so that the historical and live paths
+    cannot drift apart again.  They previously did: this function stored the
+    *post*-game rating in the same column the live path fills with the
+    *pre*-game one, which is lookahead for every consumer that reads
+    ``elo_history[(team_id, game_id)]`` as a feature for predicting that game.
 
-        margin = game.home_score - game.away_score
-        winner = home_team.abbreviation if margin > 0 else away_team.abbreviation
-        elo.update(home_team.abbreviation, away_team.abbreviation, winner,
-                   margin=abs(margin))
+    Delegation also inherits two guards this function never had: it skips
+    games already present in the history instead of appending duplicate rows,
+    and it refuses combat sports, whose history is owned by the grader with
+    post-game semantics.
 
-        home_rating_after = elo.get_rating(home_team.abbreviation)
-        away_rating_after = elo.get_rating(away_team.abbreviation)
-        session.add(EloHistory(team_id=game.home_team_id, game_id=game.id,
-                               sport=sport, rating=home_rating_after))
-        session.add(EloHistory(team_id=game.away_team_id, game_id=game.id,
-                               sport=sport, rating=away_rating_after))
+    Unlike the delegate, this function does persist current ratings to
+    ``EloRating``, which is what callers of the backtesting path expect.
+    Commits.
+    """
+    from backend.pipeline.team_stats import backfill_elo_history
+
+    result = backfill_elo_history(session, sport)
+    final_ratings: dict = result["final_ratings"]  # type: ignore[assignment]
 
     # Save final ratings to DB
-    for team_abbr, rating in elo.ratings.items():
+    for team_abbr, rating in final_ratings.items():
         team = session.query(Team).filter(Team.abbreviation == team_abbr, Team.sport == sport).first()
         if not team:
             continue
@@ -142,7 +134,7 @@ def compute_historical_elo(session: Session, sport: str):
             session.add(EloRating(team_id=team.id, sport=sport, rating=rating, updated_at=datetime.now(tz=timezone.utc)))
 
     session.commit()
-    logger.info(f"Computed ELO ratings for {len(elo.ratings)} {sport} teams")
+    logger.info(f"Computed ELO ratings for {len(final_ratings)} {sport} teams")
 
 
 async def load_historical_data(session: Session, sport: str, seasons: list[int], rate_limit: float = 1.0):

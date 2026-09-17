@@ -81,8 +81,10 @@ COMPUTED_STAT_TYPES = (
     "last_n_losses",
 )
 
-#: Elo replay parameters, matching ``backtesting.historical.compute_historical_elo``
-#: so the two paths cannot disagree on what a rating means.
+#: Elo replay parameters.  This module owns the only team-sport replay;
+#: ``backtesting.historical.compute_historical_elo`` delegates to it rather
+#: than keeping its own copy, so the two paths cannot disagree on what a
+#: rating means.
 ELO_K_FACTOR = 20
 
 #: Combat sports keep their own Elo history, written post-game by
@@ -314,18 +316,20 @@ def backfill_team_stats(session: Session, sport: str, *, dry_run: bool = False,
 
 
 def backfill_elo_history(session: Session, sport: str, *,
-                         dry_run: bool = False) -> dict[str, int]:
+                         dry_run: bool = False) -> dict[str, object]:
     """Replay ``sport`` chronologically writing the **pre-game** Elo rating.
 
     The row stored against game G is the rating each team carried *into* G, so
     ``elo_history[(team_id, game_id)]`` -- how both consumers read it -- is a
-    legitimate feature for predicting G.  This differs deliberately from
-    ``backtesting.historical.compute_historical_elo``, which stores the
-    post-game rating and is therefore lookahead when read that way.
+    legitimate feature for predicting G.  Storing the *post*-game rating there
+    instead -- as ``backtesting.historical.compute_historical_elo`` did until
+    it was made to delegate here -- is lookahead when read that way.
 
     ``EloRating`` (the current-rating table) is intentionally left alone: this
     function's job is the history, and rewriting live ratings would change the
-    serving path at the same time as the training data.
+    serving path at the same time as the training data.  The post-replay
+    ratings are *returned* as ``final_ratings`` so a caller whose job is that
+    table can persist them deliberately.
 
     Raises ``ValueError`` for combat sports, whose history is owned by the
     grader and uses post-game semantics.  Does not commit.
@@ -380,7 +384,14 @@ def backfill_elo_history(session: Session, sport: str, *,
                    margin=abs(margin))
 
     return {"sport": sport, "games_total": len(games),
-            "rows_written": written, "games_skipped": skipped}
+            "rows_written": written, "games_skipped": skipped,
+            # Post-replay rating per team abbreviation.  This is the only
+            # legitimate source of a *current* rating, and it is deliberately
+            # returned rather than written: callers that maintain ``EloRating``
+            # (``backtesting.historical.compute_historical_elo``) persist it,
+            # while the daily pipeline ignores it.  Skipped games still fold
+            # into the replay, so this is correct on a re-run.
+            "final_ratings": dict(elo.ratings)}
 
 
 # --------------------------------------------------------------------------

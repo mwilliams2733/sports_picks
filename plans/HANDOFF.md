@@ -81,11 +81,17 @@ before round 2; it now has five.
 
 #### Known residuals, deliberately left
 
-- **`backtesting.historical.compute_historical_elo` still writes post-game
-  ratings into the `elo_history` column that now holds pre-game ones.** It has
-  no live caller, so nothing runs it today — but if it ever does it will corrupt
-  the table with the opposite convention. **Highest-risk loose end; reconcile
-  before it next runs.**
+- ~~**`backtesting.historical.compute_historical_elo` still writes post-game
+  ratings into the `elo_history` column that now holds pre-game ones.**~~
+  **RESOLVED 2026-09-16.** It no longer implements a replay at all: it
+  delegates to `pipeline.team_stats.backfill_elo_history`, the function the
+  daily pipeline already calls, and keeps only the `EloRating` upsert (fed by
+  a new `final_ratings` key on the delegate's return). Delegation also gave it
+  two guards it never had — it skips games already in the history instead of
+  appending duplicates, and it refuses combat sports. That second one was a
+  latent mirror of the same bug: `SEASON_RANGES` accepts `mma`/`boxing`, so the
+  naive fix would have written *pre*-game rows into the grader's *post*-game
+  history. Three tests added, all watched failing first and mutation-proved.
 - `EloRating` is now routed around rather than fixed for team sports. Resolve
   the convention clash above first, then decide whether to wire it up or delete
   it.
@@ -143,7 +149,11 @@ rejected" section so nothing gets re-audited.
 
 The natural next pieces of work, none of them planned yet:
 
-1. Reconcile `historical.py`'s post-game Elo convention (see residuals above).
+1. ~~Reconcile `historical.py`'s post-game Elo convention.~~ **Done
+   2026-09-16** — see residuals above. `EloRating` is still written by that
+   path and still read as a fallback by the pick generator for the 14/239
+   upcoming NBA games with no replayable history; deciding its fate is what
+   remains of this thread.
 2. Decide what to do about the two features that cannot be populated without
    possession data.
 3. Re-run the 007 calibration report now that 008 unblocked it, and only then
