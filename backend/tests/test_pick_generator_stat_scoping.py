@@ -138,3 +138,27 @@ def test_fallback_ignores_rows_for_a_game_the_team_never_played(two_games):
     s = _get_team_stats(session, a.id, "nba",
                         game_id=upcoming.id, game_date=upcoming.date)
     assert s.point_diff == pytest.approx(13.0), "must skip the orphan row"
+
+
+def test_elo_comes_from_elo_history_when_the_game_has_a_row(two_games):
+    """Historical replay must use the rating the team carried into the game.
+
+    `calibrated_model` trains on `elo_history[(team_id, game_id)]`. Serving
+    the current `EloRating` instead -- an end-of-history rating that already
+    reflects the outcome being predicted -- is both lookahead and a train/serve
+    skew. For a genuinely upcoming game there is no history row and the current
+    rating IS the pre-game rating, so live behaviour is unchanged.
+    """
+    from backend.models import EloHistory, EloRating
+    session, a, g1, g2 = two_games
+    session.add(EloRating(team_id=a.id, sport="nba", rating=1700.0))
+    session.add(EloHistory(team_id=a.id, game_id=g2.id, sport="nba",
+                           rating=1550.0))
+    session.commit()
+
+    s2 = _get_team_stats(session, a.id, "nba", game_id=g2.id, game_date=g2.date)
+    assert s2.elo_rating == pytest.approx(1550.0), "must use the pre-game row"
+
+    # No history row for game 1 -> current rating, the documented fallback.
+    s1 = _get_team_stats(session, a.id, "nba", game_id=g1.id, game_date=g1.date)
+    assert s1.elo_rating == pytest.approx(1700.0)

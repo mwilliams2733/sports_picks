@@ -22,6 +22,7 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 005 | Scrub the API key from logs, restore the budget alarm | P1 | S | — | **MERGED** into `master` as `b62358e` |
 | 006 | Per-sport, push-aware, newest-first recalibration | P1 | S | — | **MERGED** into `master` as `0e1f13f` |
 | 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | **DONE** on `advisor/007-calibration-report` — report built; measurement blocked by a data defect (see plan notes) |
+| 008 | Populate the features the model actually trains on | P1 | L | 007 — done, stacked on it | **DONE** on `advisor/008-populate-team-stats` — `team_stats` 1 → 1058 game_ids, `elo_history` 0 → 2116 rows, all point-in-time. `pace` / `net_rating` left unpopulated (need possessions). Backfill run against a copy only; production DB untouched. |
 
 Suite after five merges (001, 002, 003, 005, 006): **409 passed** (360 baseline + 21 + 6 + 8), 0 failed.
 Plan 004 was written against `5c2e0d0` and has been refreshed against `943cf25`:

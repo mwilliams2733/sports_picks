@@ -3,7 +3,7 @@ import logging
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
-from backend.models import Game, PickModel, StrategyModel, Odds, TeamStat, EloRating
+from backend.models import Game, PickModel, StrategyModel, Odds, TeamStat, EloRating, EloHistory
 from backend.data_types import GameData, TeamStats, OddsSnapshot, FighterStats
 from backend.analysis.variants.ensemble import EnsembleStrategy
 from backend.analysis.variants.recent_form import RecentFormStrategy
@@ -251,12 +251,39 @@ def _team_stat_rows(session: Session, team_id: int,
             .all())
 
 
+def _team_elo(session: Session, team_id: int, sport: str,
+              game_id: int | None) -> float:
+    """The Elo rating this team carried INTO `game_id`.
+
+    `EloHistory` rows are written pre-game by `backend.pipeline.team_stats`,
+    and `calibrated_model` trains on exactly this lookup. Reading the current
+    `EloRating` instead -- an end-of-history rating that already reflects the
+    outcome being predicted -- was both lookahead during historical replay and
+    a train/serve skew once the history table was populated.
+
+    For a genuinely upcoming game there is no history row yet and the current
+    rating IS the pre-game rating, so live pick generation is unaffected; this
+    only changes what a replay over past games sees.
+    """
+    if game_id is not None:
+        hist = (session.query(EloHistory)
+                .filter(EloHistory.team_id == team_id,
+                        EloHistory.game_id == game_id)
+                .first())
+        if hist is not None:
+            return hist.rating
+    row = (session.query(EloRating)
+           .filter(EloRating.team_id == team_id, EloRating.sport == sport)
+           .first())
+    return row.rating if row else 1500.0
+
+
 def _get_team_stats(session: Session, team_id: int, sport: str,
                     game_id: int | None = None,
                     game_date: date | None = None) -> TeamStats:
     stats_rows = _team_stat_rows(session, team_id, game_id, game_date)
     stats_dict = {s.stat_type: s.value for s in stats_rows}
-    elo_row = session.query(EloRating).filter(EloRating.team_id == team_id, EloRating.sport == sport).first()
+    elo_rating = _team_elo(session, team_id, sport, game_id)
     return TeamStats(point_diff=stats_dict.get("point_diff", 0.0),
         home_record=(int(stats_dict.get("home_wins", 0)), int(stats_dict.get("home_losses", 0))),
         away_record=(int(stats_dict.get("away_wins", 0)), int(stats_dict.get("away_losses", 0))),
@@ -264,6 +291,6 @@ def _get_team_stats(session: Session, team_id: int, sport: str,
         offensive_rating=stats_dict.get("offensive_rating", 100.0),
         defensive_rating=stats_dict.get("defensive_rating", 100.0),
         pace=stats_dict.get("pace", 100.0), strength_of_schedule=stats_dict.get("sos", 0.5),
-        elo_rating=elo_row.rating if elo_row else 1500.0, rest_days=int(stats_dict.get("rest_days", 2)),
+        elo_rating=elo_rating, rest_days=int(stats_dict.get("rest_days", 2)),
         turnover_margin=stats_dict.get("turnover_margin"), red_zone_pct=stats_dict.get("red_zone_pct"),
         conference_strength=stats_dict.get("conference_strength"))
