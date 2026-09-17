@@ -5,7 +5,7 @@ import { useLeaderboard } from '../hooks/useLeaderboard';
 import { useUserStore } from '../stores/userStore';
 import { useFeedStore } from '../stores/feedStore';
 import type { PaperPickData, GameOddsData, UserStats, PropData, UserProfile } from '../types';
-import { useToast } from '../components/Toast';
+import { useToast } from '../hooks/useToast';
 
 export default function PaperTrading() {
   const queryClient = useQueryClient();
