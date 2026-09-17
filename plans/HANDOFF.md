@@ -5,9 +5,11 @@ Written mid-session before a restart. Everything below is recoverable from
 
 ## Where things stand
 
-`master` is at the **Merge plan 009** commit. Run `git log --oneline -12` to see
-the merge history. Test baseline on `master`: **500 passing backend, 0 failed**; frontend **eslint 0/0, tsc clean, vitest 15/15** (all verified)
-(`.venv/Scripts/python.exe -m pytest backend/tests -q`, ~4 min).
+`master` is at the **Merge plan 008** commit (`bb99490`) — the last of the nine.
+Run `git log --oneline -15` to see the merge history. Test baseline on
+`master`: **545 passing backend, 0 failed**; frontend **eslint 0/0, tsc clean,
+vitest 15/15** (all verified)
+(`.venv/Scripts/python.exe -m pytest backend/tests -q`, ~4.5 min).
 
 Started this session at 360 tests.
 
@@ -22,86 +24,89 @@ Started this session at 360 tests.
 | 005 | Odds API key kept out of logs and responses; budget 429 reachable |
 | 006 | Per-sport, push-aware, newest-first recalibration |
 | 007 | Out-of-sample calibration report (a read-only measurement tool) |
+| 008 | The model trains on real point-in-time features for the first time |
+| 009 | Frontend ESLint clean — 6 errors / 2 warnings → 0 / 0 |
 | — | Daily picks digest (six-task feature, dry-run by default) |
 
-### In flight when the session ended
+### All nine plans are now merged
 
-Two subagents were mid-run and did **not** survive the restart. Their branches
-and commits DO survive in `.git`; only the worktree directories under
-`AppData/Local/Temp/claude/...` are lost.
+**`advisor/008-populate-team-stats` — MERGED** as `bb99490`. Seven commits: the
+original five, plus two review rounds. Report:
+`.superpowers/008-team-stats-report.md`.
 
-**`advisor/008-populate-team-stats` — 5 commits, reported DONE_WITH_CONCERNS,
-NOT reviewed, NOT merged.** It came back just before the restart. Report:
-`.superpowers/008-team-stats-report.md`. Branched from
-`advisor/007-calibration-report` (now merged to master, so it will rebase or
-merge cleanly). Commits:
+Verified post-merge on `master`: **545 backend tests passing, 0 failed**
+(500 before + 45 from 008). Frontend unchanged: eslint 0/0, tsc clean,
+vitest 15/15.
 
-```
-11db971 fix(pipeline): keep elo_history current after the one-off backfill
-553bc41 fix(picks): serve the pre-game Elo rating, not the end-of-history one
-848dbea feat(scripts): backfill team stats and elo history from final games
-399ac79 fix(picks): scope team-stat lookup to the game being predicted
-81dc426 feat(pipeline): compute point-in-time team stats per game
-```
-
-Reports 520 passed (487 baseline + 33 new) and both required mutation proofs
-run and failed as expected.
-
-**Independently verified against its working DB copy before the restart:**
+What it fixed: nothing in production wrote a `TeamStat` row, so the model
+trained on 1058 games with 4 of 5 features identically zero, and `elo_diff`
+fell back to a *current* `EloRating` for historical games — lookahead. That is
+the root cause of the model claiming 99% where the de-vigged market said 84.5%.
 
 | | |
 |---|---|
 | `team_stats` distinct game_ids | **1 → 1058** |
 | `elo_history` rows | **0 → 2116** |
-| `picks` | still 708 (wrote none) |
-| Live `sports_picks.db` | **untouched** — still 1 and 0 |
-| Fabrication check | `pace` / `offensive_rating` / `defensive_rating` present for **exactly 1** game (the legacy game-1014 rows). The eight derivable stat types are at 1058. **It refused to fabricate**, as the plan required. |
-| `rest_days` | now present for all 1058 — the feature that was structurally absent |
+| `rest_days` | present for the first time |
+| Live `sports_picks.db` | **untouched** — backfill ran against copies only |
+| Fabrication check | `pace` / `offensive_rating` / `defensive_rating` still present for **exactly 1** game. Structurally refused, not fabricated. |
 
-**The headline result is counter-intuitive and worth understanding before
-reviewing:** the 99% predictions are gone (top bin now 2 games at 0.91, mass
-sits 0.4-0.8), but **Brier rose from 0.1836 to 0.2020**. That is not a
-regression. The old number came from a model whose only non-zero coefficient
-was an end-of-season Elo rating — constant per team and unknowable before
-tip-off. 0.2020 is the first honestly-measurable score. The model is still
-badly calibrated: overconfident on underdogs by 15-19 points.
+**Brier ROSE 0.1836 → 0.2020, and that is the honest result.** The old number
+came from a model whose only non-zero coefficient was an end-of-season Elo
+rating — constant per team and unknowable before tip-off. 0.2020 is the first
+measurable score. The model is still badly calibrated: overconfident on
+underdogs by 15-19 points.
 
-Elo decision: it wrote **pre-game** ratings, not post-game as `historical.py`
-does, because both consumers read `elo_history[(team_id, game_id)]` as the
-feature *for* that game. `calibrated_model.py` was left untouched. This was the
-trap the plan flagged hardest and it resolved it the right way.
+#### The two review rounds, and why they matter
 
-**Still needs a code review before merge.** What it flagged itself, worth
-checking:
+Both found the same failure shape — a value's basis changed and only some
+readers were updated:
 
-1. `backtesting.historical.compute_historical_elo` **still writes post-game
-   ratings into the same column**. If it runs after this merges it will corrupt
-   `elo_history` with the opposite convention. Reconcile before it next runs —
-   this is the highest-risk loose end.
-2. 007's `calibration_report.py` docstring documents this exact defect as a
-   "known limitation". That paragraph goes stale the moment 008 merges.
-3. 99 legacy orphan rows on game 1014 were left in place; it guarded the
-   fallback rather than deleting them.
-4. Two changes beyond the literal step list (`553bc41`, `11db971`), both in
-   in-scope files, separately committed — the data fix exposed a train/serve
-   Elo skew that had been hidden.
-5. Two of five features remain structurally constant. The modelling choice —
-   drop them, source possessions, or leave them defaulted — is still unmade and
-   is the natural next decision.
+1. **Round 1**: commit `553bc41` fixed the *training* half of the Elo lookup and
+   left live serving reading `EloRating`, a table written only by
+   `compute_historical_elo`, whose entry point `load_historical_data` has **no
+   callers**. Frozen at whatever a past manual run left. Trained and served
+   ratings diverged by up to 134 points in both directions, so no intercept
+   absorbed it. Fixed in `8189510` by adding a most-recent-prior-`EloHistory`
+   step, strictly before the predicted game's date.
+2. **Round 2**: that fix displaced the same defect into `_check_lookahead_spot`,
+   which compared a history-basis `team_elo` against an `EloRating`-basis next
+   opponent across a 50-point band — while the bases differed by a mean of 53.
+   Fixed in `f4b93eb`. Note the obvious one-line fix was a trap: bounding by
+   `next_game.date` or passing `next_game.id` would each have converted a basis
+   bug into a *lookahead* bug.
 
-**`advisor/009-frontend-eslint` — MERGED** into `master` as `0670d45`.
-`npx eslint .` went from 6 errors / 2 warnings to **0 / 0**; verified in the
-merged main tree along with `tsc -b` clean and `vitest run` 15/15. Five errors
-genuinely fixed; `PaperTrading.tsx` carries a line-scoped suppression naming the
-React Query migration as the real fix. Two `exhaustive-deps` suppressions on the
-URL→store mount effects were explicitly permitted by the plan (adding the deps
-would reintroduce a URL→store→URL loop). All three carry reasons.
+Both rounds are mutation-proved. `_check_lookahead_spot` had no direct test
+before round 2; it now has five.
 
-Known unrelated issue it surfaced: `npm ci` fails on a pre-existing
-`vite`/`vite-plugin-pwa` peer conflict in the committed lockfile;
-`npm ci --legacy-peer-deps` works. `Dockerfile:8-12` already documents that
-workaround. Worth its own ticket; nothing in 009 touched `package.json` or the
-lockfile.
+#### Known residuals, deliberately left
+
+- **`backtesting.historical.compute_historical_elo` still writes post-game
+  ratings into the `elo_history` column that now holds pre-game ones.** It has
+  no live caller, so nothing runs it today — but if it ever does it will corrupt
+  the table with the opposite convention. **Highest-risk loose end; reconcile
+  before it next runs.**
+- `EloRating` is now routed around rather than fixed for team sports. Resolve
+  the convention clash above first, then decide whether to wire it up or delete
+  it.
+- 14 of 239 upcoming NBA games still fall through to `EloRating` — teams with no
+  finals, so no history to replay. 5.9%, documented, on the old basis.
+- **Two of five features remain structurally constant** (`pace`,
+  `offensive_rating` / `defensive_rating` need possessions). The modelling
+  choice — drop them, source possessions, or leave them defaulted — is the
+  natural next decision.
+- `models.py` declares **no indexes** on `games`, `elo_history` or
+  `elo_ratings`. Noise at ~2k rows; revisit if `elo_history` grows an order of
+  magnitude.
+- 007's `calibration_report.py` docstring documents the now-fixed data defect as
+  a "known limitation". That paragraph is stale.
+- `_check_lookahead_spot`'s thresholds (100-point favourite, 50-point band,
+  4/10-day windows) are uncalibrated constants feeding a real pick adjustment.
+  Correct basis now, unexamined thresholds.
+
+**The success-shaped failure did not occur.** A post-backfill run that looked
+*excellent* would have suggested leakage; instead Brier got worse with a
+coherent explanation, and the fabrication check came back clean.
 
 ## How to resume
 
@@ -130,39 +135,25 @@ Verify that once with
 `... -c "import backend; print(backend.__file__)"` — it must print a path inside
 the worktree.
 
-### What to do about 008
-
-Its outcomes were spot-checked (table above) but **its code was never
-reviewed**. Recommended: dispatch a code review of
-`git diff master..advisor/008-populate-team-stats` before merging, focused on
-
-- the two mutation proofs it claims (strictly-before boundary; `game_id`
-  scoping) — read the tests, not just the report
-- whether the pre-game Elo convention is applied consistently everywhere, given
-  `historical.py` still writes post-game into the same column
-- the two out-of-step-list commits (`553bc41`, `11db971`) — documented
-  deviations, judged on merit
-- whether any test would pass against the pre-fix code
-
-**The success-shaped failure was checked and did not occur.** A post-backfill
-run that looked *excellent* would have suggested leakage; instead Brier got
-*worse* (0.1836 → 0.2020) with a coherent explanation, and the fabrication
-check came back clean. That is the shape of an honest result.
-
 ## Open plans
 
-- `plans/008-populate-the-features-the-model-trains-on.md` — the important one.
-  Nothing in production writes a `TeamStat` row, so the model trains on 1058
-  games where 4 of 5 features are identically zero in 1057 of them. **This is
-  the root cause of the model claiming 99% on NBA games where the market says
-  84.5%**, and it blocks every calibration and `min_edge` question.
-- `plans/009-frontend-eslint-errors.md` — 6 ESLint errors, 2 warnings. Five are
-  fixable; `PaperTrading.tsx:70` is the React Query migration in disguise and
-  the plan calls for a documented suppression, not a refactor.
+**None.** All nine are merged. `plans/README.md` has the full status table,
+every finding that was *not* turned into a plan, and a "considered and
+rejected" section so nothing gets re-audited.
 
-`plans/README.md` has the full status table, every finding that was *not*
-turned into a plan, and a "considered and rejected" section so nothing gets
-re-audited.
+The natural next pieces of work, none of them planned yet:
+
+1. Reconcile `historical.py`'s post-game Elo convention (see residuals above).
+2. Decide what to do about the two features that cannot be populated without
+   possession data.
+3. Re-run the 007 calibration report now that 008 unblocked it, and only then
+   revisit `min_edge` and the ranking key.
+4. Migrate `PaperTrading.tsx` to React Query — 009 left a documented
+   suppression there naming this as the real fix.
+5. Wire CI. `npm run lint` and the backend suite are both green, so this is
+   cheap now. Note `npm ci` fails on a pre-existing `vite`/`vite-plugin-pwa`
+   peer conflict; `npm ci --legacy-peer-deps` works and `Dockerfile:8-12`
+   already documents it.
 
 ## Outstanding operator actions
 
@@ -171,10 +162,14 @@ re-audited.
    recurrence; only rotation fixes the exposure. You said you would do this
    later — it is recorded in `plans/README.md` too.
 2. **Do not set `digest.enabled: true` yet.** The digest works end to end and a
-   dry-run preview rendered real picks with real rationales. But the ranking
-   currently surfaces the model's largest errors — a preview's top 5 was five
-   heavy favourites from −286 to −2336, one of which the model rated 99% where
-   the market said 84.5%. Fix the data (008) first.
+   dry-run preview rendered real picks with real rationales. 008 has now fixed
+   the data defect that made the ranking surface the model's largest errors
+   (a preview's top 5 was five heavy favourites from −286 to −2336, one rated
+   99% where the market said 84.5%). But the model is still badly calibrated —
+   Brier 0.2020, overconfident on underdogs by 15-19 points, and two of its
+   five features remain constant. **Re-run the dry-run preview and the 007
+   calibration report before enabling it**; the data is honest now, the model
+   is not yet good.
 3. The digest's dry-run preview writes `digest_preview.html` to the repo root;
    it is git-ignored.
 
