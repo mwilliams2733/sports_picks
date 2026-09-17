@@ -18,7 +18,7 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 001 | Pin the paper-trading money path with characterization tests | P1 | M | — | **MERGED** into `master` as `2f8e7ee` |
 | 002 | Reconnect three subsystems whose output is discarded | P1 | M | — | **MERGED** into `master` as `295af51` |
 | 003 | Remove vig in every strategy, fix odds averaging | P1 | M | 002 — merged | **MERGED** into `master` as `943cf25` |
-| 004 | Make the activity feed work (route order + WS dispatch) | P1 | M | 001 — merged | **DONE** on branch `advisor/004-activity-feed` — route reordered, WebSocket broadcast dispatched via `run_coroutine_threadsafe`, disconnect made idempotent; 487 passed |
+| 004 | Make the activity feed work (route order + WS dispatch) | P1 | M | 001 — merged | **MERGED** into `master` as `bb4b841` — /users/feed returns 200, real WebSocket frames delivered, bounded test so a regression fails rather than hangs |
 | 005 | Scrub the API key from logs, restore the budget alarm | P1 | S | — | **MERGED** into `master` as `b62358e` |
 | 006 | Per-sport, push-aware, newest-first recalibration | P1 | S | — | **MERGED** into `master` as `0e1f13f` |
 | 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | **DONE (measurement BLOCKED)** — the report tool is built and correct, but no calibration number could be produced: the model has almost no features (see root cause below). Unblocked by 008. |
