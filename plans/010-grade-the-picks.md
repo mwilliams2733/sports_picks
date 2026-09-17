@@ -311,6 +311,19 @@ git commit -m "fix(grader): refuse to grade pick types with no branch, instead o
 
 ### Task 2: Give `PickModel` the fields a prop grader needs
 
+> **DONE 2026-09-17 — `cfb276d`.** 564 -> 576 passing. Against a copy of
+> production: **82 of 82 props resolved, 0 unresolved** (player_rebounds 24,
+> player_points 24, player_assists 20, player_threes 14), so STOP condition 2
+> was not triggered. Re-running reports 82 already populated — resumable.
+>
+> **Production prop data is NOT backfilled.** Only a copy was written. The
+> live `picks` table does have the two columns, but every value is NULL — see
+> the note below on how the columns got there.
+>
+> Pick construction moved into `_build_prop_pick(analysis, strategy_id)` so it
+> is testable without running the async pipeline; Task 4 does not touch it.
+
+
 **Files:**
 - Modify: `backend/models.py` (class `PickModel`, near line 200 for the
   `PaperPick` precedent)
@@ -452,6 +465,23 @@ git commit -m "feat(picks): carry prop player and market on PickModel"
 ```
 
 ---
+
+> **Found while running Task 2, unrelated to it, and worth its own plan:**
+> **importing `backend.api.main` runs migrations against whatever
+> `sports_picks.db` is in the current working directory.**
+> `main.py:128` is a module-level
+> `app = create_app(os.environ.get("DATABASE_PATH", "sports_picks.db"))`,
+> needed so `uvicorn backend.api.main:app` works (`Dockerfile:44`), and
+> `create_app` calls `run_migrations`. Proven: dropping the two new columns
+> from a copy and then merely importing the module put them back.
+>
+> That is how production gained `picks.prop_player` during this task without
+> anyone backfilling it — running the test suite from the repo root is enough.
+> The container is unaffected (`DATABASE_PATH=/tmp/sports_picks.db`).
+>
+> Today's migrations are additive so nothing was damaged, **but
+> `migrate_api_usage` does `DROP TABLE api_usage`** under a schema condition.
+> An import is therefore one condition away from dropping a production table.
 
 ### Task 3: Collect post-game player box scores
 
