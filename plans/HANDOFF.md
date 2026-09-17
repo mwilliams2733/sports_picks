@@ -358,7 +358,31 @@ maximum confidence). Keep `digest.enabled: false`: not because the digest is
 broken, but because its dominant content is unvalidated and currently
 ungradeable.
 
-Planned as **`plans/010-grade-the-picks.md`**.
+Planned as **`plans/010-grade-the-picks.md`**. **Task 1 is done**
+(`6117d5e`): `grade_pick` now returns `None` for a type it has no branch for,
+and all six call sites treat that as "leave ungraded". The latent corruption is
+closed — props are correctly ungraded rather than wrongly graded.
+
+**Task 3's spike is done too, and the answer is good: ESPN, free, no purchase
+needed.** All three NBA sources currently fail, but only one of the three for a
+reason that costs money:
+
+- `NbaApiSource` passes `last_n_games` to `PlayerGameLog`, which has no such
+  parameter — a `TypeError` thrown *before* any HTTP call, which masked
+  everything else. Remove it and the real problem appears: `stats.nba.com`
+  read-times-out from this machine (30s, 60s, 90s all failed). Unusable here.
+- `BallDontLie` returns 401; it needs a paid key.
+- `ESPN` 404s because the code asks `site.api.../nba/athletes`, a path that
+  does not exist. The scoreboard and summary endpoints both return 200, and
+  `summary?event=<id>` carries full player box scores — MIN, PTS, REB, AST,
+  3PT, STL, BLK, TO — covering every NBA market in `MARKET_STAT_MAP`.
+
+Two traps recorded in the plan. There is **no shared game id** (`Game` has no
+`espn_id`), so events must be matched on date plus team abbreviations. And
+**our dates run one day ahead of ESPN's** (UTC vs ET): of 8 sampled final NBA
+games, 7 matched at offset −1 and 1 matched exactly, 0 missing. Matching on
+exact date alone finds about 1 in 8 and looks like missing data rather than a
+timezone bug.
 
 ## Scratch that did not survive
 

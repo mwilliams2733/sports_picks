@@ -473,7 +473,72 @@ Step 1 before writing anything.
   `grade_prop_pick` looks up via
   `filter_by(player_name=..., stat_type="game_log", game_date=game.date)`.
 
-- [ ] **Step 1: Spike — find out why `fetch_player_recent` returns nothing**
+> **SPIKE DONE 2026-09-17. Answer: ESPN, free, no purchase needed — but not
+> the shape this task assumed.** STOP condition 1 is **not** triggered. Details
+> below; Steps 2-5 still stand but build against ESPN, not `fetch_player_recent`.
+>
+> **The spike command in Step 1 below is wrong.** `PlayerStatsCollector.__init__`
+> *requires* `fallback_chains`, so `PlayerStatsCollector()` raises `TypeError`
+> before testing anything. Use `prop_pipeline.build_default_collector()`.
+>
+> **All three NBA sources fail, for three different reasons:**
+>
+> | source | failure | kind |
+> |---|---|---|
+> | `NbaApiSource` | `PlayerGameLog.__init__() got an unexpected keyword argument 'last_n_games'` | our bug |
+> | `BallDontLieSource` | `401 Unauthorized` | needs a paid key |
+> | `EspnStatsSource` | `404` on athlete search | our bug |
+>
+> 1. **`nba_api_source.py:157` passes `last_n_games=n`, which is not a
+>    parameter of `PlayerGameLog`** (verified against the installed 1.11.4:
+>    the real ones are `player_id`, `season`, `season_type_all_star`,
+>    `date_from_nullable`, `date_to_nullable`, ...). Line 167 already does
+>    `games[:n]`, so the kwarg is both wrong and redundant. **This TypeError
+>    fires before any HTTP request, which masked everything below it.**
+>    Removing it reveals the real problem: `stats.nba.com` **read-times-out
+>    from this machine** — three attempts at 30s, 60s and 90s, all
+>    `ReadTimeout`. Not a general network fault; ESPN and BallDontLie both
+>    answered on the same run. **Treat nba_api as unavailable here.**
+> 2. **BallDontLie needs a paid key.** `build_default_collector()` constructs
+>    `BallDontLieSource()` with no key, so no `Authorization` header. Only
+>    relevant if ESPN is abandoned.
+> 3. **ESPN is reachable and free; the code points at a URL that does not
+>    exist.** `site.api.espn.com/.../nba/athletes` returns 404 *with or
+>    without* the `search` param. `sports.core.api.espn.com/v2/.../athletes`
+>    returns 200, and so does the scoreboard.
+>
+> **The viable path is scoreboard -> summary, not athlete search.** Verified
+> end to end:
+>
+> ```
+> GET site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=YYYYMMDD   -> 200
+> GET site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=<id>          -> 200
+>     boxscore.players[].statistics[0].athletes[] each carry:
+>     labels = MIN, PTS, FG, 3PT, FT, REB, AST, TO, STL, BLK, OREB, DREB, PF, +/-
+>     e.g. Isaiah Hartenstein ['18','12','6-11','0-0','0-0','7','3','1','0','0',...]
+> ```
+>
+> That covers every NBA key in `MARKET_STAT_MAP`. Field mapping onto
+> `_STAT_FIELDS`: `MIN`->minutes, `PTS`->points, `REB`->rebounds,
+> `AST`->assists, `STL`->steals, `BLK`->blocks, `TO`->turnovers, and
+> **`3PT` is a made-attempted string** (`"0-1"`), so `threes` is the part
+> before the hyphen.
+>
+> **Mapping our games to ESPN events needs care — there is no shared id.**
+> `Game` has no `espn_id` column (`models.py:19-33`); `historical.store_games`
+> dedupes on date + teams. And **our dates run one day ahead of ESPN's**: of 8
+> randomly sampled final NBA games, **7 matched at offset -1 and 1 matched
+> exactly; 0 were missing**. That is UTC-vs-ET, and the offset games are the
+> late western ones. Match on (ESPN date in ET, home+away abbreviations) with
+> a +/-1 day window, or derive the ET date from `Game.start_time`. **Do not
+> match on exact date alone — it silently finds ~1 in 8.**
+>
+> **Revised shape of this task:** not "repair `fetch_player_recent`" but "add
+> an ESPN box-score collector keyed on final games". `fetch_player_recent`'s
+> pre-game, last-5 contract is the wrong shape for grading anyway, as the
+> Current state section already notes.
+
+- [ ] ~~**Step 1: Spike — find out why `fetch_player_recent` returns nothing**~~ **DONE — see above**
 
 Time-box this. It is a question, not a deliverable.
 
