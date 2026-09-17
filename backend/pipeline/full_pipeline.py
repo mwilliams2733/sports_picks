@@ -219,9 +219,19 @@ def _refresh_team_stats(session: Session, games: list[Game]) -> None:
     """
     if not games:
         return
-    from backend.pipeline.team_stats import update_team_stats_for_games
+    from backend.pipeline.team_stats import (
+        COMBAT_SPORTS, backfill_elo_history, update_team_stats_for_games,
+    )
     try:
         written = update_team_stats_for_games(session, games)
+        # The backfill script is a one-off; without this, elo_history would
+        # stop growing the day it finishes. backfill_elo_history replays the
+        # sport and skips games that already have rows, so this only appends
+        # the new games -- with the correct pre-game rating for each.
+        # Combat sports are excluded: grader._apply_combat_elo_update owns
+        # their history and writes it post-game.
+        for sport in {g.sport for g in games} - set(COMBAT_SPORTS):
+            backfill_elo_history(session, sport)
         session.commit()
         logger.info("Refreshed %d team_stat values across %d games",
                     written, len(games))

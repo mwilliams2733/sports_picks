@@ -75,3 +75,37 @@ def test_rerunning_the_pipeline_does_not_duplicate_rows(session):
     first = session.query(TeamStat).count()
     _store_games(session, "nba", d1, payload)
     assert session.query(TeamStat).count() == first
+
+
+def test_store_games_keeps_elo_history_current(session):
+    """The backfill is a one-off; the daily path must keep writing pre-game
+    Elo rows, or elo_history stalls the day this lands."""
+    from backend.models import EloHistory
+    d1, d2 = date(2024, 1, 1), date(2024, 1, 5)
+    _store_games(session, "nba", d1,
+                 [_espn("ALP", "BET", d1, 130, 100, "final")])
+    _store_games(session, "nba", d2,
+                 [_espn("ALP", "BET", d2, 100, 140, "final")])
+
+    g1, g2 = session.query(Game).order_by(Game.date).all()
+    hist = {(e.team_id, e.game_id): e.rating
+            for e in session.query(EloHistory).all()}
+    assert len(hist) == 4
+
+    # Game 1's rows are the initial rating: they cannot know game 1.
+    assert hist[(g1.home_team_id, g1.id)] == pytest.approx(1500.0)
+    # Game 2's row reflects game 1's win but not game 2's loss.
+    assert hist[(g2.home_team_id, g2.id)] > 1500.0
+    assert (hist[(g2.home_team_id, g2.id)]
+            + hist[(g2.away_team_id, g2.id)]) == pytest.approx(3000.0)
+
+
+def test_combat_sports_do_not_get_pregame_elo_rows(session):
+    """mma/boxing Elo is owned by the grader and is post-game; the daily
+    team-stats path must not write into it."""
+    from backend.models import EloHistory
+    d = date(2024, 1, 1)
+    _store_games(session, "mma", d, [_espn("AAA", "BBB", d, 1, 0, "final")])
+    assert session.query(EloHistory).count() == 0
+    # Team stats are still produced.
+    assert session.query(TeamStat).count() > 0
