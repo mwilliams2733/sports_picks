@@ -32,15 +32,20 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 010 | Make picks gradeable, then grade them | P1 | L | — | **DONE 2026-09-17** — all five tasks. Grading chain works end to end: 82 props resolved, box scores collected, 75 props graded (48W/27L) on a copy. First measurement: 5-star 75.0% vs 4-star 50.0%, but all from **2 games** (effective n 19.5→10.1), every tier flagged unreliable. **Grades nothing in production yet** — every prop's game is still `status='scheduled'`. |
 | 011 | Importing `backend.api.main` must not touch a database | P2 | S | — | **DONE 2026-09-17** as `3246256`. `app` now comes from a PEP 562 module `__getattr__`, so importing the module is pure while `uvicorn backend.api.main:app` still resolves. No launch site changed. Verified by hand that the server starts and `/health` answers. |
 | 012 | Prop projections have never seen recent form | P1 | M | 010 — done | **OPEN** — written 2026-09-17. `recent_weight=0.6`, so recent form is 60% of every prop projection, and it has never been supplied: `game_log` was empty, so `use_distribution` has never been True and every prop used `abs(diff/line)*100` — not a probability, and it inflates small lines (a 0.5 line reports 140%). Plan 010's collector already supplies the data. **Invalidates plan 010's prop baseline.** |
-| 013 | Nobody asks ESPN about yesterday, so games never finalize | **P0** | M | — | **OPEN** — written 2026-09-17. `morning_scout` fetches `today` at 8/9/10am ET, before that day's games are played, and nothing ever revisits a past date. **570 past games are stuck non-final**, so grading, box scores, `game_log` and `elo_history` growth are all dormant. Every component works; the composition does not. |
+| 013 | Nobody asks ESPN about yesterday, so games never finalize | **P0** | M | — | **Tasks 1-2 DONE 2026-09-17** as `5603514` (3-day finalize-only lookback; ESPN_TEAM_SPORTS widened from nba/nfl). Task 3's catch-up script shipped as `1c75c11` and ran against a **copy only**: 250 of 334 finalized (nba 218/239, ncaab 21/81, mlb 11/14), 0 rows canceled. Production not yet caught up. |
+| 014 | ESPN dates are UTC, so every evening game is stored a day late | P1 | M | 013 — done | **OPEN** — written 2026-09-17. `_parse_date` takes `.date()` off the UTC timestamp, but ESPN groups its scoreboard by **Eastern** date, so anything after 8pm ET is filed a day late and the same game exists twice. Explains 013's 17 unfinalized NBA rows. `espn_id` must land **before** the date fix or it doubles the duplicates. |
 
 Current `master`: **549 backend tests passing**, 0 failed (360 at the start of
 the audit), verified by CI on Python **3.12 and 3.14**. Frontend: eslint 0/0,
 tsc clean, vitest 15/15.
 
-Plans 001-011 are all merged or complete. **Plans 012 (P1) and 013 (P0) are
-open.** Do 013 first: everything plans 010-012 built is downstream of a game
-reaching `status='final'`, and today nothing ever makes that happen.
+Plans 001-011 are complete. **013 is done bar the production catch-up.**
+**Open: 014 (P1) then 012 (P1).**
+
+Do **014** before 012. 013 fixed the steady state, but 014 is why 17 NBA rows
+still would not finalize: the same game exists under two date conventions. 012
+then becomes observable, because it needs `game_log` rows that only exist once
+games finalize.
 
 The digest's gate is no longer machinery — it is sample size. Plan 010 built
 and verified the whole grading chain; every prop number so far rests on two
