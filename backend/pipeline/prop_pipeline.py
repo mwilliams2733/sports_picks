@@ -158,9 +158,9 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id)
     for prop in props:
         season_avg = session.query(PlayerStat).filter_by(
             player_name=prop.player_name, stat_type="season_avg").first()
-        recent = (session.query(PlayerStat)
-            .filter_by(player_name=prop.player_name, stat_type="game_log")
-            .order_by(PlayerStat.game_date.desc()).limit(5).all())
+        # Every game in scope is on target_date (see the query above), so
+        # bounding by it is exactly "strictly before the game being predicted".
+        recent = _recent_form(session, prop.player_name, before=target_date)
         # Determine opponent defensive rating
         opponent_def = None
         player_team_id = None
@@ -203,6 +203,25 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id)
     session.commit()
     return {"games": len(games), "stats_fetched": stats_count,
             "props_analyzed": props_analyzed, "picks_generated": picks_generated}
+
+def _recent_form(session: Session, player_name: str, *, before: date) -> list:
+    """The player's last five game logs strictly BEFORE ``before``.
+
+    The date bound is the point of this function. Without it the query took the
+    five most recent rows outright, which reads the future: a prop on a game
+    that has since been played would be analysed using that game's own box
+    score. Harmless while ``game_log`` was empty; not harmless now that plan
+    010's collector fills it, and recent form is 60% of the projection
+    (``PropAnalyzer.recent_weight``).
+
+    Same defect shape as the team-stat scoping plan 008 fixed in `399ac79`.
+    """
+    return (session.query(PlayerStat)
+            .filter(PlayerStat.player_name == player_name,
+                    PlayerStat.stat_type == "game_log",
+                    PlayerStat.game_date < before)
+            .order_by(PlayerStat.game_date.desc()).limit(5).all())
+
 
 def _build_prop_pick(analysis, strategy_id: int) -> PickModel:
     """The PickModel for one analysed prop.
