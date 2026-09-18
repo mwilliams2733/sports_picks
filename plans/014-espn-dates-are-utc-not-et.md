@@ -451,6 +451,28 @@ Measured: **957 of 2098 moved**, median 0.32, p90 6.81, max 20.64 points.
 
 ### Task 3: One `_parse_date`, in Eastern time
 
+> **DONE 2026-09-17** — `822f5ef`. 625 -> 631 passing, mutation-proved
+> (reverting to `.date()` fails three tests, both DST cases included).
+>
+> **Named `et_date`, not `espn_date`.** The second call site is the Odds API's
+> `commence_time` (`full_pipeline.py:371`), matched against these same rows, so
+> it must share the convention — and a helper both sources use should not be
+> named after one of them.
+>
+> Three tests needed new expectations, each derived from its raw timestamp:
+> `test_parse_date_iso`'s first assertion (as the plan predicted, and only that
+> one); `test_full_pipeline_team_stats`'s fixture, which built `T00:00Z` and so
+> never matched the date it intended; and `test_espn_game_identity`'s series
+> test, which had both games on one date where the `(date, teams)` fallback
+> cannot tell them apart. **That same-date limitation is real for MLB
+> doubleheaders** and is noted in the test rather than papered over.
+>
+> **DEPLOY ORDER:** production has neither the column nor the ids. If this code
+> ingests there before `backfill_espn_ids` and `merge_duplicate_games` run,
+> every evening game already stored under its UTC date will fail to match and a
+> twin will be inserted. The scheduler is not running, so nothing is at risk
+> today.
+
 Only after Tasks 1 and 2. Task 1 gives rows a stable id; Task 2 removes the
 13 pairs that share one. Running this before either creates duplicates, and
 running it before Task 2 would repoint one twin's date onto the other's.
