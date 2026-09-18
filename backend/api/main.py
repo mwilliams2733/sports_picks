@@ -125,4 +125,30 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
 # DATABASE_PATH can be overridden in deployment (e.g. Render's /tmp on free
 # tier, or a mounted disk on paid). Defaults to the project-root SQLite file
 # used in local development.
-app = create_app(os.environ.get("DATABASE_PATH", "sports_picks.db"))
+#: The ASGI app, built on first access rather than at import.
+_app: FastAPI | None = None
+
+
+def __getattr__(name: str):
+    """Construct the ASGI app only when something actually asks for it.
+
+    ``uvicorn backend.api.main:app`` resolves the attribute, so all five
+    launch sites keep working unchanged (``Dockerfile:44``,
+    ``deploy/sports-picks-web.service:11``, ``start.sh:14``,
+    ``start-server.bat:3``, ``start-server-loop.bat:4``).
+
+    Importing any *other* name no longer touches the disk. It used to:
+    ``create_app`` runs ``run_migrations``, Python executes a module body on
+    first import, and every API test does
+    ``from backend.api.main import create_app`` -- so ``pytest`` in the repo
+    root migrated the real ``sports_picks.db``. Harmless while every migration
+    is additive, but ``migrate_api_usage`` contains a ``DROP TABLE``.
+
+    PEP 562. Only called for names not already defined in the module.
+    """
+    if name == "app":
+        global _app
+        if _app is None:
+            _app = create_app(os.environ.get("DATABASE_PATH", "sports_picks.db"))
+        return _app
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
