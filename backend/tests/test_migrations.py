@@ -124,3 +124,24 @@ def test_run_migrations_adds_the_prop_grading_columns_to_a_legacy_picks_table():
     cols = _columns(engine, "picks")
     assert "prop_player" in cols
     assert "prop_market" in cols
+
+
+def test_run_migrations_adds_espn_id_to_a_legacy_games_table():
+    """An unregistered migration gives a pre-existing database the model
+    attribute but not the column, and every game insert then dies inside a
+    broad `except`. That already happened once with picks.rationale_json.
+    """
+    engine = get_engine(":memory:")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE TABLE games ("
+            " id INTEGER PRIMARY KEY, sport VARCHAR NOT NULL,"
+            " season VARCHAR NOT NULL, date DATE NOT NULL,"
+            " home_team_id INTEGER NOT NULL, away_team_id INTEGER NOT NULL,"
+            " status VARCHAR NOT NULL)"
+        )
+    assert "espn_id" not in _columns(engine, "games")
+
+    run_migrations(engine)
+
+    assert "espn_id" in _columns(engine, "games")

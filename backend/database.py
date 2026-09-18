@@ -148,6 +148,23 @@ def migrate_pick_prop_fields(engine):
                 conn.execute(text("ALTER TABLE picks ADD COLUMN prop_market VARCHAR"))
 
 
+def migrate_game_espn_id(engine):
+    """Add espn_id to games if missing.
+
+    Without it a game is identified by (sport, date, home, away), which breaks
+    when the same game arrives under two date conventions: ESPN timestamps in
+    UTC but files its scoreboard by Eastern date, so an evening game lands a
+    day late and a twin row is created.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "games" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("games")]
+        if "espn_id" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE games ADD COLUMN espn_id VARCHAR"))
+
+
 # The single source of truth for which schema migrations run, and in what
 # order. Every process that opens the database — the FastAPI app AND the
 # standalone pipeline scheduler — calls this instead of listing migrations
@@ -164,6 +181,7 @@ MIGRATIONS = (
     migrate_pick_model_prob,
     migrate_pick_rationale,
     migrate_pick_prop_fields,
+    migrate_game_espn_id,
 )
 
 

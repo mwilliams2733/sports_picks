@@ -176,12 +176,30 @@ def _store_games(session: Session, sport: str, target_date: date,
         if game_date == target_date:
             espn_pairs_target_date.add(frozenset({home_id, away_id}))
 
-        existing = session.query(Game).filter(
-            Game.sport == sport,
-            Game.date == game_date,
-            Game.home_team_id == home_id,
-            Game.away_team_id == away_id,
-        ).first()
+        # ESPN's event id is the only stable identity we have. Matching on it
+        # first is what lets the same game be recognised when it was stored
+        # under a different date convention -- ESPN timestamps in UTC but
+        # files its scoreboard by Eastern date, so an evening game lands a day
+        # late and a (date, teams) lookup misses it entirely.
+        existing = None
+        espn_id = g.get("espn_id")
+        if espn_id:
+            existing = session.query(Game).filter(
+                Game.sport == sport, Game.espn_id == espn_id
+            ).first()
+            if existing is not None and existing.date != game_date:
+                logger.info("Correcting %s game %s date: %s -> %s",
+                            sport, existing.id, existing.date, game_date)
+                existing.date = game_date
+
+        if existing is None:
+            # Fallback for rows created before espn_id existed.
+            existing = session.query(Game).filter(
+                Game.sport == sport,
+                Game.date == game_date,
+                Game.home_team_id == home_id,
+                Game.away_team_id == away_id,
+            ).first()
 
         if existing:
             if g["status"] == "final" and existing.status != "final":
@@ -190,12 +208,16 @@ def _store_games(session: Session, sport: str, target_date: date,
                 existing.status = g["status"]
             if existing.start_time is None:
                 existing.start_time = start_time
+            if existing.espn_id is None and espn_id:
+                # Rows predating the column acquire it as they are seen, so
+                # the backfill script is a catch-up rather than the only path.
+                existing.espn_id = espn_id
             touched.append(existing)
             continue
 
         game = Game(
             sport=sport, season=season_label, date=game_date,
-            start_time=start_time,
+            start_time=start_time, espn_id=espn_id,
             home_team_id=home_id, away_team_id=away_id,
             home_score=g["home_score"], away_score=g["away_score"],
             status=g["status"],

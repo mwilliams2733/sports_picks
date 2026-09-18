@@ -22,6 +22,11 @@ class Game(Base):
     sport = Column(String, nullable=False)
     season = Column(String, nullable=False)
     week = Column(Integer, nullable=True)
+    #: ESPN's stable event id. The collector has always returned this
+    #: (collectors/espn.py:40) and it was discarded for want of a column, so
+    #: rows were identified by (date, teams) instead -- which cannot connect
+    #: the same game arriving under two date conventions.
+    espn_id = Column(String, nullable=True, index=True)
     date = Column(Date, nullable=False)
     start_time = Column(DateTime, nullable=True)
     home_team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
