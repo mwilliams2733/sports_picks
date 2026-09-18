@@ -171,6 +171,17 @@ problem the chosen fix solves without breaking anything.
 
 ### Task 1: Make the import pure
 
+> **DONE 2026-09-17 — `3246256`.** 592 -> 595 passing, mutation-proved
+> (re-adding the module-level line fails the guard). Step 7's by-hand check
+> passed: `uvicorn backend.api.main:app` logged
+> `Uvicorn running on http://127.0.0.1:8123` and `/health` returned
+> `{"status":"ok"}`.
+>
+> The plan's predictions held exactly — the first test failed with its own
+> message while the other two passed, and the final count was 595. No launch
+> site was touched.
+
+
 **Files:**
 - Modify: `backend/api/main.py:128`
 - Test: `backend/tests/test_import_has_no_side_effects.py` (new)
