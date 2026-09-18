@@ -77,10 +77,15 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id)
         if stats and source:
             count = collector.store_stats(session, stats, "season_avg", team.id, team.sport, source)
             stats_count += count
-            for s in stats:
-                recent, rsource = await collector.fetch_player_recent(team.sport, s["player_name"], n=5)
-                if recent and rsource:
-                    collector.store_stats(session, recent, "game_log", team.id, team.sport, rsource)
+            # game_log rows come from collectors/espn_box_score.py, which runs
+            # post-game from morning_scout. Fetching "last 5" here was a second
+            # path to the same table that never produced a row: nba_api raised
+            # before its request (last_n_games is not a PlayerGameLog
+            # parameter), stats.nba.com times out from this network, and the
+            # ESPN athlete endpoint 404s. It was also the wrong shape -- a
+            # pre-game fetch cannot contain the game being predicted, which is
+            # what the box-score collector writes. Removing it drops one HTTP
+            # call per player per run for no loss.
 
     props = session.query(PlayerProp).join(Game).filter(Game.date == target_date).all()
 

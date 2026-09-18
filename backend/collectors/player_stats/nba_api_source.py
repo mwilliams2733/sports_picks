@@ -154,7 +154,11 @@ class NbaApiSource(PlayerStatsSource):
         try:
             def _get_gamelog(pid=player_id):
                 time.sleep(0.6)
-                log = PlayerGameLog(player_id=pid, last_n_games=n)
+                # No last_n_games parameter exists on PlayerGameLog; passing it
+                # raised TypeError before any request, and the chain's blanket
+                # except logged that as a source failure. The games[:n] slice
+                # below is what limits the result.
+                log = PlayerGameLog(player_id=pid)
                 return log.get_normalized_dict()
 
             log_data = await loop.run_in_executor(None, _get_gamelog)
