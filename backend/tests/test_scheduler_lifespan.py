@@ -98,7 +98,11 @@ def test_morning_scout_removes_stale_window_jobs_after_recluster(monkeypatch):
     from backend.models import Base, Team, Game
     from backend.pipeline import scheduler as scheduler_module
 
-    async def _noop_fetch_games(session, sports, target_date):
+    async def _noop_fetch_games(session, sports, target_date, *, reconcile=True):
+        # `reconcile` accepted because morning_scout now walks a lookback
+        # window and passes it per day. Without it this stub raises TypeError,
+        # morning_scout's broad `except Exception` swallows it into "Scout
+        # failed fetching games", and no window jobs are created at all.
         return None
 
     monkeypatch.setattr(scheduler_module, "fetch_and_store_games", _noop_fetch_games)

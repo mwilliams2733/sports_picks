@@ -69,6 +69,20 @@ def _build_window(games: list[dict]) -> dict:
     }
 
 
+#: How many days back morning_scout re-asks ESPN about. It runs at 8/9/10am
+#: ET, before that day's games are played, so without a lookback nothing ever
+#: learns a score: the next run asks about the new today. Three days covers a
+#: missed weekend. A guess, not a measurement -- revisit once the steady-state
+#: gap is visible.
+LOOKBACK_DAYS = 3
+
+#: Team sports whose games come from ESPN's scoreboard. mma and boxing are
+#: excluded deliberately: fetch_ufc_events writes their finals directly and
+#: grade_completed_games owns their Elo, so pulling them through this path
+#: would create a second writer for the same rows.
+ESPN_TEAM_SPORTS = ("nba", "nfl", "ncaab", "ncaaf", "mlb")
+
+
 def configure_scheduler(config: dict, engine) -> BackgroundScheduler:
     """Build a BackgroundScheduler with the standard cron job set, but DO
     NOT start it — the caller is responsible for `.start()` and matching
@@ -138,13 +152,31 @@ def morning_scout(config, engine, scheduler, is_retry=False):
         grade_pending_picks(session)
         grade_completed_games(session)
         active_sports = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]
-        scheduled_sports = [s for s in active_sports if s in ("nba", "nfl")]
+        scheduled_sports = [s for s in active_sports if s in ESPN_TEAM_SPORTS]
         if not scheduled_sports:
             logger.info("No auto-scheduled sports in season today")
             return
         today = date.today()
+        # Today's pass reconciles: a postponed game must drop out of Today's
+        # Picks. The lookback days are finalize-only -- their job is to capture
+        # scores for games that had not been played when this ran yesterday.
+        # Without them nothing ever asks ESPN about a past date and a score
+        # never lands; 570 rows were stuck that way on 2026-09-17.
+        windows = [(today, True)] + [
+            (today - timedelta(days=d), False)
+            for d in range(1, LOOKBACK_DAYS + 1)
+        ]
         try:
-            asyncio.run(fetch_and_store_games(session, scheduled_sports, today))
+            for day, reconcile in windows:
+                # Re-evaluated per day: a lookback can cross a season boundary,
+                # and asking about a sport that was out of season that day is a
+                # wasted request.
+                day_sports = [s for s in scheduled_sports
+                              if is_sport_in_season(s, config["seasons"], today=day)]
+                if not day_sports:
+                    continue
+                asyncio.run(fetch_and_store_games(
+                    session, day_sports, day, reconcile=reconcile))
         except Exception as e:
             if is_retry:
                 logger.error(f"Scout retry failed fetching games: {e}")

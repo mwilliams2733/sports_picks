@@ -13,8 +13,17 @@ logger = logging.getLogger(__name__)
 ALL_SPORTS = ["nba", "nfl", "ncaab", "ncaaf", "boxing", "mma", "mlb"]
 
 
-async def fetch_and_store_games(session: Session, sports: list[str], target_date: date) -> int:
-    """Fetch today's games from ESPN and store them in the DB."""
+async def fetch_and_store_games(session: Session, sports: list[str],
+                                target_date: date, *,
+                                reconcile: bool = True) -> int:
+    """Fetch one date's games from ESPN and store them in the DB.
+
+    ``reconcile=False`` is finalize-only: scores and status are upserted, but
+    :func:`_reconcile_against_espn` is skipped. Used for lookback days, where a
+    team-pair match failure would mark a real game ``canceled`` instead of
+    ``final`` -- turning a matching bug into data loss on exactly the rows a
+    lookback exists to rescue.
+    """
     espn = ESPNCollector()
     total = 0
     date_str = target_date.strftime("%Y%m%d")
@@ -22,7 +31,8 @@ async def fetch_and_store_games(session: Session, sports: list[str], target_date
         for sport in sports:
             try:
                 games = await espn.fetch_scoreboard(sport, date_str)
-                stored = _store_games(session, sport, target_date, games)
+                stored = _store_games(session, sport, target_date, games,
+                                      reconcile=reconcile)
                 total += stored
                 logger.info(f"Stored {stored} {sport} games for {target_date}")
             except Exception as e:
@@ -132,7 +142,8 @@ async def fetch_and_store_props(session: Session, sports: list[str], api_key: st
     return total
 
 
-def _store_games(session: Session, sport: str, target_date: date, games: list[dict]) -> int:
+def _store_games(session: Session, sport: str, target_date: date,
+                 games: list[dict], *, reconcile: bool = True) -> int:
     """Store ESPN games into the database, creating teams as needed.
 
     After upserting whatever ESPN returned, reconcile against ESPN's
@@ -193,7 +204,7 @@ def _store_games(session: Session, sport: str, target_date: date, games: list[di
         touched.append(game)
         count += 1
 
-    if espn_pairs_target_date:
+    if reconcile and espn_pairs_target_date:
         _reconcile_against_espn(session, sport, target_date, espn_pairs_target_date)
 
     session.commit()
