@@ -328,6 +328,21 @@ for ncaab (see STOP condition 3).
 
 ### Task 2: Merge the 13 twin pairs
 
+> **DONE 2026-09-17** — `e04fa24`. 618 -> 625 passing, three mutations proved.
+> Against a copy: 13 groups, **13 merged, 0 refused**, 1664 -> 1651 games,
+> picks unchanged at 708/708, zero orphaned rows, `integrity_check: ok`.
+>
+> **Step 6 as written below was wrong.** Deleting the losers' `team_stats` and
+> `elo_history` does **not** undo the double-count: the damage is in every
+> *downstream* rating, and `backfill_elo_history` skips any game that already
+> has rows, so a plain re-run adds nothing. Undoing it needs a full replay —
+> `DELETE FROM elo_history WHERE game_id IN (SELECT id FROM games WHERE
+> sport='nba')`, then `backfill_team_stats`. Measured that way on a copy:
+> **957 of 2098 pre-game ratings moved**, median 0.32, p90 6.81, max **20.64**
+> Elo points.
+>
+> Production is still untouched.
+
 Task 1 turned "probably duplicates" into "provably the same game". This removes
 them, and must land before Task 3.
 
@@ -416,10 +431,19 @@ because `create_all` always has the column.
 .venv/Scripts/python.exe -m backend.scripts.backfill_team_stats --db <abs win path>
 ```
 
-`backfill_elo_history` skips games that already have rows, so **the deletions
-in Step 1 are what let it recompute**. Confirm `elo_history` then has exactly
-two rows per final game, and report how far the ratings moved — that difference
-is the nine double-counted results being undone.
+**Corrected 2026-09-17.** `backfill_elo_history` skips games that already have
+rows, so the Step 1 deletions do **not** let it recompute — every survivor
+keeps its corrupted rating and a re-run writes nothing. Delete the sport's
+whole history first:
+
+```sql
+DELETE FROM elo_history WHERE game_id IN
+    (SELECT id FROM games WHERE sport = 'nba');
+```
+
+then run `backfill_team_stats`. Confirm `elo_history` has exactly two rows per
+final game (2028 for 1014 nba finals) and report how far the ratings moved.
+Measured: **957 of 2098 moved**, median 0.32, p90 6.81, max 20.64 points.
 
 - [ ] **Step 7: Commit.**
 
