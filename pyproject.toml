@@ -5,6 +5,12 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
+    # uvicorn cannot serve /ws without a WebSocket transport: it answers
+    # the upgrade with a plain 200 and the activity feed never connects.
+    # Declared directly rather than via uvicorn[standard], which also
+    # pulls uvloop (no Windows wheel), watchfiles and httptools that this
+    # app does not use.
+    "websockets>=13.0",
     "sqlalchemy>=2.0.0",
     "httpx>=0.28.0",
     "scikit-learn>=1.6.0",

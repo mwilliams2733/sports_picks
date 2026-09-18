@@ -78,3 +78,4 @@ tzdata==2026.4
 tzlocal==5.4.4
 urllib3==2.8.0
 uvicorn==0.53.0
+websockets==17.1
