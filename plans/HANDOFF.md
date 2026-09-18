@@ -5,10 +5,10 @@ lives only in a chat transcript.
 
 ## Where things stand
 
-`master` is at `72416da` and **pushed** — local, `origin/master` and the last
-CI run all agree on that SHA. Test baseline: **549 passing backend, 0 failed**,
+`master` is at `8a286c3` and **pushed** — local, `origin/master` and the last
+CI run all agree on that SHA. Test baseline: **592 passing backend, 0 failed**,
 identical on Python **3.12 and 3.14**; frontend eslint 0/0, `tsc` clean,
-vitest 15/15.
+vitest 15/15. Started this session at 545.
 
 **CI is live** (`.github/workflows/ci.yml`) and is now the fastest way to get
 that baseline — ~50s for all three jobs, versus ~1-4 min locally. Local command
@@ -36,8 +36,20 @@ backup is stamped `20260916-231622` (local) while the CI runs log `06:xxZ`
 | `9ff809e` | CI wired: backend matrix 3.12/3.14 + frontend lint/test/build |
 | `e5e083d` | Dependencies pinned via `constraints.txt` |
 | `72416da` | `sports_picks.egg-info` untracked |
+| `25bdb09` | Handoff brought current |
+| `94ab58b` | **Plan 010 written** — make picks gradeable, then grade them |
+| `6117d5e` | 010 Task 1 — `grade_pick` refuses instead of inventing a loss |
+| `88a91fd` | 010 Task 3 spike — ESPN works, free, no purchase needed |
+| `e047953` | 010 Task 3 rewritten around ESPN |
+| `fb50170` | 010 Task 3 — ESPN post-game box-score collector |
+| `cfb276d` | 010 Task 2 — `PickModel` carries prop player and market |
+| `935ed15` | 010 Task 4 — props routed to the prop grader, payouts priced |
+| `8a286c3` | 010 Task 5 — prop confidence measured against outcomes |
 
-Three findings from it worth carrying forward:
+**Plan 010 is complete: all five tasks executed.** The grading chain works end
+to end. See "Plan 010" below for what it measured and what still blocks it.
+
+Findings from this session worth carrying forward:
 
 1. **Production was still running the pre-008 model.** Plan 008 fixed the code
    but ran its backfill against copies only, so the live DB kept `team_stats`
@@ -53,6 +65,26 @@ Three findings from it worth carrying forward:
 3. **The deployed runtime had never run the test suite.** `Dockerfile:17` pins
    `python:3.12-slim`; the venv is 3.14. The matrix closed that, and 3.12
    passes — the risk was latent, not active.
+4. **Importing `backend.api.main` migrates whatever `sports_picks.db` is in
+   the cwd.** `main.py:128` is a module-level
+   `app = create_app(os.environ.get("DATABASE_PATH", "sports_picks.db"))`,
+   needed so `uvicorn backend.api.main:app` works, and `create_app` calls
+   `run_migrations`. **Proven**, not inferred: dropping two columns from a copy
+   and merely importing the module put them back. That is how production
+   gained `picks.prop_player` during plan 010 with nobody backfilling it —
+   running the test suite from the repo root is enough. The container is
+   unaffected (`DATABASE_PATH=/tmp/...`). Today's migrations are additive so
+   nothing broke, **but `migrate_api_usage` does `DROP TABLE api_usage`** under
+   a schema condition, so an import statement is one condition away from
+   dropping a production table with no command and no confirmation. **Deserves
+   its own plan.**
+5. **Plan 010's three most dangerous bugs were all plausible values, not
+   crashes.** Props graded as losses, box scores stored against ESPN's date
+   instead of ours, and winners booked at a flat 1.0 unit regardless of price.
+   None of them raise, none appear in logs, and all three produce a clean
+   ROI table that is wrong. Worth treating as a design rule here: wherever a
+   value is persisted, ask what a *wrong but well-formed* value looks like
+   downstream.
 
 ### Merged into `master`
 
@@ -212,9 +244,60 @@ the 3.12/3.14 matrix confirm the new set before trusting it.
 
 ## Open plans
 
-**None.** All nine are merged. `plans/README.md` has the full status table,
-every finding that was *not* turned into a plan, and a "considered and
-rejected" section so nothing gets re-audited.
+**None open.** Plans 001-009 are merged and **plan 010 is complete — all five
+tasks executed.** `plans/README.md` has the full status table, every finding
+that was *not* turned into a plan, and a "considered and rejected" section so
+nothing gets re-audited.
+
+### Plan 010 — done, and what it found
+
+`plans/010-grade-the-picks.md`, all five tasks, each annotated inline with the
+corrections the plan needed once executed.
+
+| Task | Landed |
+|---|---|
+| 1 | `grade_pick` returns `None` for a type it has no branch for; six call sites updated, not the two the plan named |
+| 2 | `PickModel.prop_player` / `prop_market` + migration + backfill script |
+| 3 | `collectors/espn_box_score.py` — post-game box scores, keyed on final games |
+| 4 | Props routed to `grade_prop_pick`, with payouts priced from their own odds |
+| 5 | `analysis/prop_calibration.py` — win rate and ROI per confidence tier |
+
+**The chain works end to end.** Proven on a copy: 82 props resolved, box
+scores collected for both games carrying them, **75 props graded (48 W / 27
+L)**, and the report produced real numbers.
+
+**It cannot grade anything in production yet, and that is not a code problem.**
+Every prop in the database belongs to a game still `status='scheduled'` with
+NULL scores, so `grade_pending_picks` correctly skips all 82. The numbers below
+were obtained by reconstructing the two games' real final scores from ESPN
+**on a copy** (home/away orientation verified to match before writing).
+Production needs the scheduler to run and mark those games final.
+
+#### First prop measurement (NBA, on a copy, 2026-09-17)
+
+```
+  tier   settled   wins  losses   win%     units     roi  reliable
+  5         36     27       9    75.0%    +8.62  +0.239    NO
+  4         16      8       8    50.0%    -3.66  -0.229    NO
+  3         10      7       3    70.0%    +0.42  +0.042    NO
+  2         10      5       5    50.0%    -2.19  -0.219    NO
+  1          3      1       2    33.3%    -1.07  -0.358    NO
+```
+
+**5-star vs 4-star: 75.0% vs 50.0%, 5-star higher by 25 points.** Mildly
+encouraging and **not actionable**: all 75 graded props come from **2 games**,
+so tier 5's effective n is 19.5 (ICC 0.05) down to 10.1 (ICC 0.15). Every tier
+is flagged unreliable, correctly.
+
+Reproduce with:
+
+```
+.venv/Scripts/python.exe -m backend.analysis.prop_calibration --db <abs win path> --sport nba
+```
+
+**If it prints `REFUSING: no graded prop picks`, that is the tool working** —
+an all-zero table would read as "confidence predicts nothing", which is a
+finding, not the absence of one.
 
 Of the five "natural next pieces" listed on 2026-09-16, three are done:
 
@@ -242,6 +325,24 @@ Of the five "natural next pieces" listed on 2026-09-16, three are done:
    change.**
 4. **Migrate `PaperTrading.tsx` to React Query** — 009 left a documented
    suppression there naming this as the real fix.
+5. **Let the scheduler run, then re-measure props.** This is the gate on the
+   digest now. The grading chain is built and verified; it needs games
+   carrying props to reach `final`. Until then the prop numbers rest on two
+   nights of basketball.
+6. **Fix the import side effect on `backend.api.main`** — finding 4 above.
+   Lazy app construction, or requiring `DATABASE_PATH` with no default, would
+   both do it. Needs its own plan; the fix has to keep
+   `uvicorn backend.api.main:app` working (`Dockerfile:44`).
+7. **`nba_api_source.fetch_recent_games` is broken** and nothing depends on it
+   for grading any more. `nba_api_source.py:157` passes `last_n_games=n` to
+   `PlayerGameLog`, which has no such parameter, so it raises before any HTTP
+   call and the fallback chain swallows it as a warning. Line 167 already
+   slices `games[:n]`, so the fix is deleting the kwarg — but
+   `stats.nba.com` also read-times-out from this machine, so fixing it buys
+   nothing for data. It matters because it silently degrades **pre-game** prop
+   analysis: `prop_pipeline.py:80-83` asks for recent form, always gets
+   nothing, and logs a source failure rather than a bug. **Props are being
+   analysed on season averages alone.**
 
 ### Calibration baseline (NBA, measured 2026-09-17)
 
@@ -296,19 +397,27 @@ is the pre-backfill number.
    deployed copy failing on its next odds fetch.
 
    Note the repo is **public** (`github.com/mwilliams2733/sports_picks`).
-2. **Do not set `digest.enabled: true` yet.** Still the standing
-   recommendation, but the reasoning has moved on. The 007 report *has* now
-   been re-run against the backfilled production database (numbers above), so
-   the outstanding step is the **dry-run preview**, not the calibration
-   measurement.
+2. **Do not set `digest.enabled: true` yet.** Still the recommendation, but
+   the reason has moved twice and is now much narrower.
 
-   What changed: the data defect is fixed and production now trains on real
-   point-in-time features, so the ranking no longer surfaces the model's
-   largest errors the way it did (a pre-008 preview's top 5 was five heavy
-   favourites from −286 to −2336, one rated 99% where the market said 84.5%).
-   What has not changed: the model is still overconfident on underdogs by
-   11–20 points, and three of its features are constant. **The data is honest
-   now; the model is not yet good.**
+   Everything that *was* blocking it is done. The 007 report has been re-run
+   against the backfilled production data. The dry-run preview has been run
+   and it works — real matchups, real odds, real rationales, and the pre-008
+   failure mode is gone (that preview led with five heavy favourites from
+   −286 to −2336; the current one leads with a −110 at three stars). Props
+   are now gradeable and measurable.
+
+   **What blocks it now is sample size, not machinery.** The digest is
+   majority props by row count, and every prop measurement rests on **two
+   games**: 5-star beats 4-star by 25 points, which is encouraging, with an
+   effective n of 10-20. The game model is separately still overconfident on
+   underdogs by 11–20 points on n=15 and n=28 bins, and three of its features
+   are constant.
+
+   **The gate is: let the scheduler run, let props accumulate across dozens
+   of games, then re-run `prop_calibration` and the 007 report.** The data is
+   honest, the tools are built and verified, and the evidence is two nights
+   deep.
 3. The digest's dry-run preview writes `digest_preview.html` to the repo root;
    it is git-ignored.
 
@@ -403,7 +512,14 @@ satisfied with live behaviour:
   database, git-ignored, verified `integrity_check: ok` with all 708 picks
   before anything was written.
 
-## Your database — backfilled 2026-09-16
+Gone with the session temp dir, and not needed: the plan-010 working copies
+(`props.db`, `box.db`, `chain.db`) and the scripts that drove them. Everything
+they proved is in the commits and in `plans/010-grade-the-picks.md`. Note the
+**production database was never written to by plan 010** beyond the two
+columns a stray import migrated in (finding 4 above) — all 82 props are still
+ungraded there, with `prop_player` and `prop_market` NULL.
+
+## Your database — backfilled 2026-09-16, still ungraded
 
 During plan 008 all analysis ran against copies and production was left empty.
 It has now been backfilled deliberately:
@@ -432,6 +548,30 @@ out-of-sample, 0.1948 in-sample control.
 The daily pipeline keeps both tables current from here
 (`update_team_stats_for_games` and `backfill_elo_history` in
 `full_pipeline.py:234`), so this was a one-off.
+
+### Current state after plan 010
+
+| | value |
+|---|---|
+| `pick_results` | **0 rows** — nothing has ever been graded in production |
+| props | 82, all with `prop_player` / `prop_market` **NULL** |
+| games carrying props | 2, both still `status='scheduled'` with NULL scores |
+| `player_stats` `stat_type='game_log'` | **0 rows** |
+| `picks.prop_player` column | present, added by a stray import (finding 4) |
+
+Plan 010 wrote nothing to production. Everything it proved ran against copies.
+To actually grade in production, in order:
+
+1. Let the scheduler run so the two games reach `status='final'` with scores —
+   or, if you want it now, `morning_scout` does box-score collection and
+   grading in one pass.
+2. `python -m backend.scripts.backfill_prop_fields --db <abs win path>` to fill
+   `prop_player` / `prop_market` for the 82 existing props. New props carry
+   them at generation time.
+3. `python -m backend.analysis.prop_calibration --db <abs win path> --sport nba`
+
+**Back it up first, and dry-run step 2.** Both were verified against copies
+(82/82 resolved, resumable on re-run), but the rule stands.
 
 ## Historical note: state during plan 008
 
