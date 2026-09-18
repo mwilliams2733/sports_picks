@@ -32,13 +32,15 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 010 | Make picks gradeable, then grade them | P1 | L | — | **DONE 2026-09-17** — all five tasks. Grading chain works end to end: 82 props resolved, box scores collected, 75 props graded (48W/27L) on a copy. First measurement: 5-star 75.0% vs 4-star 50.0%, but all from **2 games** (effective n 19.5→10.1), every tier flagged unreliable. **Grades nothing in production yet** — every prop's game is still `status='scheduled'`. |
 | 011 | Importing `backend.api.main` must not touch a database | P2 | S | — | **DONE 2026-09-17** as `3246256`. `app` now comes from a PEP 562 module `__getattr__`, so importing the module is pure while `uvicorn backend.api.main:app` still resolves. No launch site changed. Verified by hand that the server starts and `/health` answers. |
 | 012 | Prop projections have never seen recent form | P1 | M | 010 — done | **OPEN** — written 2026-09-17. `recent_weight=0.6`, so recent form is 60% of every prop projection, and it has never been supplied: `game_log` was empty, so `use_distribution` has never been True and every prop used `abs(diff/line)*100` — not a probability, and it inflates small lines (a 0.5 line reports 140%). Plan 010's collector already supplies the data. **Invalidates plan 010's prop baseline.** |
+| 013 | Nobody asks ESPN about yesterday, so games never finalize | **P0** | M | — | **OPEN** — written 2026-09-17. `morning_scout` fetches `today` at 8/9/10am ET, before that day's games are played, and nothing ever revisits a past date. **570 past games are stuck non-final**, so grading, box scores, `game_log` and `elo_history` growth are all dormant. Every component works; the composition does not. |
 
 Current `master`: **549 backend tests passing**, 0 failed (360 at the start of
 the audit), verified by CI on Python **3.12 and 3.14**. Frontend: eslint 0/0,
 tsc clean, vitest 15/15.
 
-Plans 001-011 are all merged or complete. **Plan 012 is open** (P1) — it is the
-reason the plan 010 prop numbers cannot be trusted as a baseline.
+Plans 001-011 are all merged or complete. **Plans 012 (P1) and 013 (P0) are
+open.** Do 013 first: everything plans 010-012 built is downstream of a game
+reaching `status='final'`, and today nothing ever makes that happen.
 
 The digest's gate is no longer machinery — it is sample size. Plan 010 built
 and verified the whole grading chain; every prop number so far rests on two
