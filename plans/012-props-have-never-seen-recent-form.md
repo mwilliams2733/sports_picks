@@ -434,6 +434,34 @@ def test_a_prop_with_enough_history_is_analysed_on_the_distribution():
 
 ### Task 4: Re-measure, and say plainly that the old baseline is void
 
+> **BLOCKED on data, not code — 2026-09-17.** Tasks 1-3 are done
+> (`adb66d8`, `033d712`, `6c8c62e`). This task cannot produce a measurement
+> yet:
+>
+> ```
+> game_log rows          : 52
+> players with >=3 logs  : 0      <- Task 3 requires 3
+> distribution           : 52 players x exactly 1 log
+> ```
+>
+> Box scores exist for **2 games**, so every player has one log and **zero
+> props are analysable**. Running this now would report 0 analysed and the
+> calibration tool would refuse — the predicted outcome, and the absence of a
+> measurement rather than one.
+>
+> **What unblocks it:** run `collect_box_scores_for_final_games` across the
+> ~1014 final NBA games (after plan 013's catch-up). Three logs per player
+> needs roughly three games per player, so a few hundred games at minimum.
+>
+> **Do this first, it makes that run 4x cheaper.**
+> `espn_box_score.py:196` still calls `resolve_espn_event`, which searches the
+> scoreboard on three dates per game — because it was written before
+> `Game.espn_id` existed. Its module docstring now says something false:
+> *"ESPN shares no id with our Game (there is no espn_id column)"*. Using
+> `game.espn_id` when present turns ~4000 requests into ~1014 and removes the
+> date-window guesswork entirely. Small, and squarely in plan 014's spirit.
+
+
 **Files:**
 - No production code. Uses `backend/analysis/prop_calibration.py` from plan 010.
 
