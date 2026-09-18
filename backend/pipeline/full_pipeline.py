@@ -3,6 +3,7 @@ import logging
 from datetime import date, datetime, timezone
 from sqlalchemy.orm import Session
 from backend.collectors.espn import ESPNCollector
+from backend.time_utils import et_date
 from backend.collectors.odds_api import OddsAPICollector, redact_api_key
 from backend.collectors.budget import check_budget, record_api_call, BudgetStatus
 from backend.exceptions import BudgetExhaustedError
@@ -170,7 +171,7 @@ def _store_games(session: Session, sport: str, target_date: date,
         home_id = _ensure_team(session, team_cache, home_abbr, g["home_team_name"], sport)
         away_id = _ensure_team(session, team_cache, away_abbr, g["away_team_name"], sport)
 
-        game_date = _parse_date(g["date"])
+        game_date = et_date(g["date"])
         start_time = _parse_start_time(g["date"])
 
         if game_date == target_date:
@@ -367,7 +368,10 @@ def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
     if not home_name or not away_name or not commence:
         return
 
-    game_date = _parse_date(commence)
+    # The Odds API's commence_time is UTC too, and this date is matched
+    # against game rows that are now Eastern-dated. Using a different
+    # convention here would recreate the very split this fixes.
+    game_date = et_date(commence)
 
     # Try to find existing teams by name first
     home_team = session.query(Team).filter(Team.sport == sport, Team.name == home_name).first()
@@ -446,10 +450,6 @@ def _ensure_team(session: Session, cache: dict[str, int], abbr: str, name: str, 
         session.flush()
     cache[key] = team.id
     return team.id
-
-
-def _parse_date(date_str: str) -> date:
-    return datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
 
 
 def _parse_start_time(date_str: str) -> datetime:

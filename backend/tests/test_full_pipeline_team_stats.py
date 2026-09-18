@@ -17,7 +17,10 @@ def _espn(home, away, d, home_score=None, away_score=None, status="scheduled"):
     return {
         "home_team": home, "away_team": away,
         "home_team_name": f"{home} Team", "away_team_name": f"{away} Team",
-        "date": f"{d.isoformat()}T00:00Z",
+        # 19:00Z is 2pm ET on the same day. T00:00Z would be 7pm ET the
+        # PREVIOUS day, so the game would be filed under d-1 -- dates are
+        # Eastern, which is what ESPN files events under.
+        "date": f"{d.isoformat()}T19:00Z",
         "home_score": home_score, "away_score": away_score,
         "status": status,
     }

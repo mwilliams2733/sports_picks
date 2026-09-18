@@ -15,7 +15,7 @@ from backend.digest.sender import send_email
 
 logger = logging.getLogger(__name__)
 
-ET = ZoneInfo("America/New_York")
+from backend.time_utils import ET  # noqa: F401  (re-exported)
 
 
 def send_daily_digest(config: dict, engine, target_date=None) -> dict:

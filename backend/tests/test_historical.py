@@ -1,5 +1,6 @@
 from datetime import date
-from backend.backtesting.historical import store_games, compute_historical_elo, _season_dates, _parse_date
+from backend.backtesting.historical import store_games, compute_historical_elo, _season_dates
+from backend.time_utils import et_date
 from backend.models import Base, Team, Game, EloRating, EloHistory
 
 
@@ -16,8 +17,14 @@ def test_season_dates_nfl_crosses_year():
 
 
 def test_parse_date_iso():
-    assert _parse_date("2026-03-14T00:00Z") == date(2026, 3, 14)
-    assert _parse_date("2026-01-05T19:30:00+00:00") == date(2026, 1, 5)
+    """Dates are Eastern, because that is what ESPN files events under.
+
+    Only the FIRST assertion changed when the convention was fixed, and it had
+    to: 2026-03-14T00:00Z is 7pm ET on the 13th, so ESPN files it under the
+    13th. The second was always right -- 19:30Z is 2:30pm ET the same day.
+    """
+    assert et_date("2026-03-14T00:00Z") == date(2026, 3, 13)
+    assert et_date("2026-01-05T19:30:00+00:00") == date(2026, 1, 5)
 
 
 def test_store_games_creates_teams_and_games(db_engine):

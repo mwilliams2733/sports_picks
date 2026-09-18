@@ -101,12 +101,16 @@ def test_two_legitimate_games_between_the_same_teams_stay_separate(
                         status="final", home_score=100, away_score=99))
     db_session.commit()
 
+    # The NEXT day's game in the series. Same pair, different event, different
+    # date -- which is what a series actually looks like. Two distinct games on
+    # the SAME date would defeat the (date, teams) fallback, and that is a real
+    # limitation for MLB doubleheaders, noted rather than tested here.
     httpx_mock.add_response(
-        url=f"{NBA_SB}?dates=20260314",
+        url=f"{NBA_SB}?dates=20260315",
         json={"events": [_event("401700002", "MIA", "ORL", "STATUS_FINAL",
-                                110, 105)]})
+                                110, 105, when="2026-03-15T23:00Z")]})
 
-    asyncio.run(fetch_and_store_games(db_session, ["nba"], ET_DAY,
+    asyncio.run(fetch_and_store_games(db_session, ["nba"], UTC_DAY,
                                       reconcile=False))
 
     db_session.expire_all()

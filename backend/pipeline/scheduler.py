@@ -23,7 +23,7 @@ from backend.models import (
 from backend.analysis.odds_utils import calculate_payout
 
 logger = logging.getLogger(__name__)
-ET = ZoneInfo("America/New_York")
+from backend.time_utils import ET  # noqa: F401  (re-exported)
 LEAD_TIME = timedelta(hours=2)
 
 

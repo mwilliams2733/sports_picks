@@ -4,6 +4,7 @@ from datetime import date, timedelta, datetime, timezone
 from sqlalchemy.orm import Session
 from backend.collectors.espn import ESPNCollector
 from backend.models import Team, Game, EloRating
+from backend.time_utils import et_date
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def store_games(session: Session, sport: str, season_year: int, games: list[dict
         # Skip duplicates by checking espn_id-like uniqueness (date + teams)
         existing = session.query(Game).filter(
             Game.sport == sport,
-            Game.date == _parse_date(g["date"]),
+            Game.date == et_date(g["date"]),
             Game.home_team_id == home_id,
             Game.away_team_id == away_id,
         ).first()
@@ -83,7 +84,7 @@ def store_games(session: Session, sport: str, season_year: int, games: list[dict
             continue
 
         game = Game(
-            sport=sport, season=season_label, date=_parse_date(g["date"]),
+            sport=sport, season=season_label, date=et_date(g["date"]),
             home_team_id=home_id, away_team_id=away_id,
             home_score=g["home_score"], away_score=g["away_score"],
             status=g["status"],
@@ -161,6 +162,4 @@ def _ensure_team(session: Session, cache: dict[str, int], abbr: str, name: str, 
     return team.id
 
 
-def _parse_date(date_str: str) -> date:
-    """Parse ESPN date format (ISO 8601) to a date object."""
-    return datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
+
