@@ -147,6 +147,39 @@ picks on a non-final game              647
 because most rows came from `historical.store_games`, which never set it. That
 rules out the obvious "same teams, same kickoff" approach.
 
+## What Task 1's backfill found (2026-09-17)
+
+Against a copy: **1320 of 1392 in-scope rows matched (95%)** — mlb 27/27,
+nba 1249/1262, ncaab 44/103. Identity-only verified by diffing every other
+column against production: 1664 rows both sides, **0 differing**.
+
+**It also proved the duplication, and broke an assumption this plan made.**
+**13 `espn_id` values appear twice, and all 13 span exactly one day:**
+
+```
+401810289   id=469   2025-12-27 final  NO vs PHX
+401810289   id=474   2025-12-28 final  NO vs PHX
+401810827   id=13    2026-03-14 sched  MIA vs ORL   (1 pick, 9 odds)
+401810827   id=1015  2026-03-15 sched  MIA vs ORL   (nothing)
+```
+
+These are no longer *suspected* duplicates — a shared ESPN event id makes them
+the same game. So `espn_id` is **not unique in the data**, while
+`_store_games` does `.first()` on it: Task 3 would pick a twin arbitrarily and
+correct its date onto the other's.
+
+**And 9 of the 13 pairs are final on both sides, so `backfill_elo_history`
+counted 9 real games twice.** Visible in the ratings:
+
+```
+game=469  2025-12-27  team=6  rating=1586.23
+game=474  2025-12-28  team=6  rating=1599.43   <- same game, applied again
+```
+
+Team 6 gained the same ~13 points twice for one game. Every Elo rating after
+2025-12-27 carries an accumulation of nine double-counted results, and
+`elo_history` is exactly what the calibrated model trains on.
+
 ## Order matters, and why
 
 **Do `espn_id` first.** If `_parse_date` is flipped to ET while matching is
@@ -173,6 +206,11 @@ it was stored under, and its date can be corrected in place.
 ---
 
 ### Task 1: Give `Game` the identity the collector already provides
+
+> **DONE 2026-09-17** — `eddf502` (column, migration, espn_id-first matching)
+> and `a5f9201` (backfill script). 605 -> 618 passing, five mutations proved.
+> See "What Task 1's backfill found" above: it also broke this plan's
+> uniqueness assumption, which is why Task 2 now exists.
 
 **Files:**
 - Modify: `backend/models.py` (class `Game`, lines 19-33)
@@ -288,10 +326,110 @@ for ncaab (see STOP condition 3).
 
 ---
 
-### Task 2: One `_parse_date`, in Eastern time
+### Task 2: Merge the 13 twin pairs
 
-Only after Task 1, and only after the `espn_id` backfill has run on the target
-database. Without it this task creates duplicates.
+Task 1 turned "probably duplicates" into "provably the same game". This removes
+them, and must land before Task 3.
+
+**Files:**
+- Create: `backend/scripts/merge_duplicate_games.py`
+- Test: `backend/tests/test_merge_duplicate_games.py` (new)
+
+**Interfaces:**
+- Consumes: Task 1's `espn_id`, populated on the target database.
+- Produces: at most one row per `(sport, espn_id)`.
+
+**The reference counts, measured on a copy.** Every pair falls into one of
+three shapes, which is what makes the rule decidable:
+
+| shape | pairs | survivor carries | loser carries |
+|---|---|---|---|
+| symmetric, both final | 9 | 16 `team_stats`, 2 `elo_history` | the same |
+| ET row has the bets | 3 | **1 pick, 4-9 odds**, no scores | nothing |
+| one side never finalized | 1 | 16 `team_stats`, 2 `elo_history`, final | nothing, scheduled |
+
+Nothing references these rows through `paper_picks`, `backtest_picks`,
+`player_props` or `pick_results`, which removes the hardest cases. Verify that
+again on the target database before relying on it.
+
+- [ ] **Step 1: Decide the survivor rule, and write it here first**
+
+Recommended, and what the shapes above support:
+
+1. **The row with `picks` attached wins.** Picks are user-facing and
+   irreplaceable; `team_stats` and `elo_history` are derived and regenerable.
+   That settles the 3 "ET row has the bets" pairs in favour of the ET-dated
+   row, which is also the correct date.
+2. **Otherwise the row with a `final` status wins** — it carries the scores.
+   That settles the asymmetric pair.
+3. **Otherwise the earlier date wins.** For the 9 symmetric pairs the earlier
+   date is the Eastern one, which is the convention Task 3 moves to.
+
+Then: copy `status`, `home_score`, `away_score` and `start_time` from the loser
+onto the survivor **only where the survivor's are NULL or non-final**, repoint
+`odds` and `player_props`, **delete** the loser's `team_stats` and
+`elo_history` rather than repointing them, and delete the loser.
+
+**Deleting rather than repointing the derived rows is deliberate**: repointing
+would preserve the double-count. They must be regenerated, which is Step 6.
+
+- [ ] **Step 2: Write the failing tests**
+
+Six cases, each stating what a wrong merge would cost:
+
+- `test_the_row_with_picks_survives_even_if_the_other_is_final` — picks are
+  user-facing and irreplaceable; `team_stats` and `elo_history` are derived.
+  Production has 3 pairs where the ET-dated row carries a pick and the
+  UTC-dated twin carries nothing.
+- `test_scores_are_copied_onto_the_survivor_when_it_has_none` — the surviving
+  row must not lose the result. Pair `401810867` has one side scheduled with no
+  scores and the other final with them.
+- `test_the_losers_elo_history_is_deleted_not_repointed` — repointing preserves
+  the double-count. 9 pairs are final on both sides, so
+  `backfill_elo_history` applied 9 real games twice: team 6 gained the same ~13
+  points at game 469 and again at game 474.
+- `test_a_pair_with_picks_on_BOTH_sides_is_refused` — not present in today's
+  data and not decidable by this rule; merging would silently move a pick
+  between games. Refuse and report it.
+- `test_dry_run_writes_nothing`
+- `test_run_refuses_a_db_path_that_does_not_exist`
+
+- [ ] **Step 3: Run them, watch them fail, implement.**
+
+`--db` required with no default, `--dry-run`, `FileNotFoundError` on a missing
+path — copy `backfill_espn_ids.py`, **including its `run_migrations` call**.
+That omission cost a failed run during Task 1: without it every real copy dies
+with `no such column: games.espn_id`, which in-memory test databases hide
+because `create_all` always has the column.
+
+- [ ] **Step 4: Mutation-prove** the survivor rule and the
+  delete-don't-repoint behaviour.
+
+- [ ] **Step 5: Dry-run, then run, against a copy.** Confirm afterwards:
+  - no `espn_id` appears more than once
+  - `picks` count unchanged at 708, `max(id)` still 708
+  - games = 1664 minus the number of losers deleted
+
+- [ ] **Step 6: Regenerate the derived data on the same copy**
+
+```
+.venv/Scripts/python.exe -m backend.scripts.backfill_team_stats --db <abs win path>
+```
+
+`backfill_elo_history` skips games that already have rows, so **the deletions
+in Step 1 are what let it recompute**. Confirm `elo_history` then has exactly
+two rows per final game, and report how far the ratings moved — that difference
+is the nine double-counted results being undone.
+
+- [ ] **Step 7: Commit.**
+
+---
+
+### Task 3: One `_parse_date`, in Eastern time
+
+Only after Tasks 1 and 2. Task 1 gives rows a stable id; Task 2 removes the
+13 pairs that share one. Running this before either creates duplicates, and
+running it before Task 2 would repoint one twin's date onto the other's.
 
 **Files:**
 - Create: `backend/time_utils.py`
@@ -402,7 +540,7 @@ Work each failing expectation out from its raw timestamp.
 
 ---
 
-### Task 3: Report duplicates; do not merge them
+### Task 4: Report any duplicates that remain
 
 **Files:**
 - Create: `backend/scripts/report_duplicate_games.py` (read-only)
@@ -428,19 +566,24 @@ That output is the input to a future merge decision. **This plan stops here.**
 
 ## STOP conditions
 
-1. **You are about to flip `_parse_date` before `espn_id` is populated on the
+1. **You are about to flip `_parse_date` before Task 2 has merged the twins.**
+   13 pairs share one `espn_id` and `_store_games` does `.first()` on it, so
+   the date correction would land on an arbitrary twin.
+2. **You are about to flip `_parse_date` before `espn_id` is populated on the
    target database.** That creates a duplicate for every evening game already
    stored under its UTC date — the opposite of the goal.
-2. **A test that asserts a date starts failing and you cannot say which
+3. **A test that asserts a date starts failing and you cannot say which
    convention is correct for it.** Work it out from the raw timestamp before
    touching the expectation.
-3. **The `espn_id` backfill match rate is low for ncaab.** Expected, and not
+4. **The `espn_id` backfill match rate is low for ncaab.** Expected, and not
    this plan's problem: those teams have display names in the `abbreviation`
    column (`"Pennsylvania Quakers"`), found during plan 013. Report and move
    on.
-4. **You are about to merge or delete a duplicate game row.** Out of scope.
-   Task 3 reports only.
-5. **The full suite drops below 599 passing** at any point.
+5. **A twin pair has picks on BOTH sides.** Not present today and not
+   decidable by Task 2's rule — merging would move a pick between games.
+   Refuse and report.
+6. **The full suite drops below 618 passing** at any point (Task 1 raised it
+   from 605).
 
 ## Verification
 
@@ -451,9 +594,6 @@ After Task 2, re-running plan 013's catch-up against a copy should finalize the
 
 ## Out of scope
 
-- **Merging historical duplicates.** It needs a rule for which row survives
-  when both carry picks or results, and Task 3's report is the input to that
-  decision. Its own plan.
 - **ncaab teams with display names in `abbreviation`.** 60 rows cannot match
   ESPN at all. Found in plan 013; needs a team-identity fix, not a date fix.
 - **`EspnStatsSource._find_team_id` does not exist**, so

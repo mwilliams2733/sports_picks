@@ -33,7 +33,7 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 011 | Importing `backend.api.main` must not touch a database | P2 | S | — | **DONE 2026-09-17** as `3246256`. `app` now comes from a PEP 562 module `__getattr__`, so importing the module is pure while `uvicorn backend.api.main:app` still resolves. No launch site changed. Verified by hand that the server starts and `/health` answers. |
 | 012 | Prop projections have never seen recent form | P1 | M | 010 — done | **OPEN** — written 2026-09-17. `recent_weight=0.6`, so recent form is 60% of every prop projection, and it has never been supplied: `game_log` was empty, so `use_distribution` has never been True and every prop used `abs(diff/line)*100` — not a probability, and it inflates small lines (a 0.5 line reports 140%). Plan 010's collector already supplies the data. **Invalidates plan 010's prop baseline.** |
 | 013 | Nobody asks ESPN about yesterday, so games never finalize | **P0** | M | — | **Tasks 1-2 DONE 2026-09-17** as `5603514` (3-day finalize-only lookback; ESPN_TEAM_SPORTS widened from nba/nfl). Task 3's catch-up script shipped as `1c75c11` and ran against a **copy only**: 250 of 334 finalized (nba 218/239, ncaab 21/81, mlb 11/14), 0 rows canceled. Production not yet caught up. |
-| 014 | ESPN dates are UTC, so every evening game is stored a day late | P1 | M | 013 — done | **OPEN** — written 2026-09-17. `_parse_date` takes `.date()` off the UTC timestamp, but ESPN groups its scoreboard by **Eastern** date, so anything after 8pm ET is filed a day late and the same game exists twice. Explains 013's 17 unfinalized NBA rows. `espn_id` must land **before** the date fix or it doubles the duplicates. |
+| 014 | ESPN dates are UTC, so every evening game is stored a day late | P1 | M | 013 — done | **Task 1 DONE 2026-09-17** (`eddf502`, `a5f9201`): `Game.espn_id` + espn_id-first matching + backfill, 1320/1392 rows matched on a copy. **It proved 13 twin pairs and found that `backfill_elo_history` counted 9 real games twice** — so Task 2 is now a merge, and Tasks 3-4 renumbered. Production untouched. |
 
 Current `master`: **549 backend tests passing**, 0 failed (360 at the start of
 the audit), verified by CI on Python **3.12 and 3.14**. Frontend: eslint 0/0,
@@ -43,7 +43,9 @@ Plans 001-011 are complete. **013 is done bar the production catch-up.**
 **Open: 014 (P1) then 012 (P1).**
 
 Do **014** before 012. 013 fixed the steady state, but 014 is why 17 NBA rows
-still would not finalize: the same game exists under two date conventions. 012
+still would not finalize: the same game exists under two date conventions. Its
+Task 1 is done and turned up something worse — **nine real games were counted
+twice in the Elo replay**, and `elo_history` is what the model trains on. 012
 then becomes observable, because it needs `game_log` rows that only exist once
 games finalize.
 
