@@ -33,21 +33,21 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 011 | Importing `backend.api.main` must not touch a database | P2 | S | — | **DONE 2026-09-17** as `3246256`. `app` now comes from a PEP 562 module `__getattr__`, so importing the module is pure while `uvicorn backend.api.main:app` still resolves. No launch site changed. Verified by hand that the server starts and `/health` answers. |
 | 012 | Prop projections have never seen recent form | P1 | M | 010 — done | **OPEN** — written 2026-09-17. `recent_weight=0.6`, so recent form is 60% of every prop projection, and it has never been supplied: `game_log` was empty, so `use_distribution` has never been True and every prop used `abs(diff/line)*100` — not a probability, and it inflates small lines (a 0.5 line reports 140%). Plan 010's collector already supplies the data. **Invalidates plan 010's prop baseline.** |
 | 013 | Nobody asks ESPN about yesterday, so games never finalize | **P0** | M | — | **Tasks 1-2 DONE 2026-09-17** as `5603514` (3-day finalize-only lookback; ESPN_TEAM_SPORTS widened from nba/nfl). Task 3's catch-up script shipped as `1c75c11` and ran against a **copy only**: 250 of 334 finalized (nba 218/239, ncaab 21/81, mlb 11/14), 0 rows canceled. Production not yet caught up. |
-| 014 | ESPN dates are UTC, so every evening game is stored a day late | P1 | M | 013 — done | **Tasks 1-3 DONE 2026-09-17** (`eddf502`, `a5f9201`, `e04fa24`, `822f5ef`): `Game.espn_id` + identity matching; 13 twin pairs merged; dates now Eastern via one shared `time_utils.et_date`. Found **9 games double-counted in the Elo replay** — a full replay moved 957 of 2098 ratings, max 20.64 points. Task 4 (duplicate report) open. **Production untouched: apply the backfill + merge BEFORE this code ingests there.** |
+| 014 | ESPN dates are UTC, so every evening game is stored a day late | P1 | M | 013 — done | **DONE 2026-09-17** (`eddf502`, `a5f9201`, `e04fa24`, `822f5ef`): `Game.espn_id` + identity matching; 13 twin pairs merged; dates now Eastern via one shared `time_utils.et_date`. Found **9 games double-counted in the Elo replay** — replay moved 957 of 2098 ratings, max 20.64 pts. Task 4 obsolete (0 same-id duplicates remain). **Production untouched: apply backfill + merge BEFORE this code ingests there.** |
 
 Current `master`: **549 backend tests passing**, 0 failed (360 at the start of
 the audit), verified by CI on Python **3.12 and 3.14**. Frontend: eslint 0/0,
 tsc clean, vitest 15/15.
 
-Plans 001-011 are complete. **013 is done bar the production catch-up.**
-**Open: 014 (P1) then 012 (P1).**
+Plans 001-011 and 014 are complete. **013 is done bar the production
+catch-up.** **Open: 012 (P1).**
 
-Do **014** before 012. 013 fixed the steady state, but 014 is why 17 NBA rows
-still would not finalize: the same game exists under two date conventions. Its
-Task 1 is done and turned up something worse — **nine real games were counted
-twice in the Elo replay**, and `elo_history` is what the model trains on. 012
-then becomes observable, because it needs `game_log` rows that only exist once
-games finalize.
+014 is done and turned up something worse than the date bug it was written for:
+**nine real games were counted twice in the Elo replay**, and `elo_history` is
+what the model trains on. A full replay moved 957 of 2098 pre-game ratings.
+
+**012 is next**, and it only becomes observable once games finalize — it needs
+`game_log` rows, which need box scores, which need `status='final'`.
 
 The digest's gate is no longer machinery — it is sample size. Plan 010 built
 and verified the whole grading chain; every prop number so far rests on two

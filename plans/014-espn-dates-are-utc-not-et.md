@@ -588,6 +588,23 @@ Work each failing expectation out from its raw timestamp.
 
 ### Task 4: Report any duplicates that remain
 
+> **NOT DONE — OBSOLETE 2026-09-17.** Its purpose was to classify duplicates
+> into same-id / different-id / unknown so a merge decision could be made.
+> Task 2 merged every same-id pair, and one query answers the rest:
+>
+> | bucket | count | |
+> |---|---|---|
+> | same `espn_id` | **0** | Task 2 merged all 13 |
+> | different ids — distinct games | 15 | 12 mlb series, 3 nba. No action. |
+> | unknown, id missing | 8 | all boxing/mma, **already out of scope** here |
+>
+> A script to print that would be ceremony. The 344 rows still lacking an
+> `espn_id` are boxing (no ESPN scoreboard exists), mma, and the ncaab rows
+> whose `abbreviation` column holds display names — all recorded in
+> "Out of scope". **If a same-id duplicate ever reappears it means the Task 1
+> matching regressed**, and `test_espn_game_identity` guards that.
+
+
 **Files:**
 - Create: `backend/scripts/report_duplicate_games.py` (read-only)
 - Test: `backend/tests/test_report_duplicate_games.py` (new)
