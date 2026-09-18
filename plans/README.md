@@ -29,14 +29,19 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 007 | Measure calibration before retuning `min_edge` or the ranking key | P1 | M | 002, 003 — merged | **MERGED** into `master` — tool built and verified; measurement itself was BLOCKED by the model having almost no features. Unblocked by 008. |
 | 008 | Populate the features the model actually trains on | P1 | L | 007 — merged | **MERGED** into `master` — `team_stats` 1 → 1058 game_ids, `elo_history` 0 → 2116 rows, all point-in-time. `pace` / `offensive_rating` / `defensive_rating` structurally refused (need possessions). Two review rounds closed a train/serve Elo skew. Backfill ran against a copy only; production DB untouched. |
 | 009 | Clear the frontend ESLint errors | P2 | M | — | **MERGED** into `master` as `0670d45` — eslint 0 errors / 0 warnings, tsc clean, vitest 15/15, all verified post-merge |
-| 010 | Make picks gradeable, then grade them | P1 | L | — | **OPEN** — written 2026-09-17. `pick_results` has 0 rows and `grade_pick` returns `("loss", -1.0)` for every prop. Latent: the next `morning_scout` run marks all 82 props as losses. Blocks `digest.enabled` and any ROI or prop-calibration claim. |
+| 010 | Make picks gradeable, then grade them | P1 | L | — | **DONE 2026-09-17** — all five tasks. Grading chain works end to end: 82 props resolved, box scores collected, 75 props graded (48W/27L) on a copy. First measurement: 5-star 75.0% vs 4-star 50.0%, but all from **2 games** (effective n 19.5→10.1), every tier flagged unreliable. **Grades nothing in production yet** — every prop's game is still `status='scheduled'`. |
+| 011 | Importing `backend.api.main` must not touch a database | P2 | S | — | **OPEN** — written 2026-09-17. `main.py:128` is a module-level `create_app(...)`, and `create_app` runs migrations, so importing any name from that module migrates whatever `sports_picks.db` is in the cwd. Proven. Latent: today's migrations are additive, but `migrate_api_usage` contains a `DROP TABLE`. |
 
 Current `master`: **549 backend tests passing**, 0 failed (360 at the start of
 the audit), verified by CI on Python **3.12 and 3.14**. Frontend: eslint 0/0,
 tsc clean, vitest 15/15.
 
-Plans 001-009 are all merged. **Plan 010 is open** — see the row above; it is
-the only thing standing between the digest and a decision on enabling it.
+Plans 001-009 are merged and **plan 010 is complete**. **Plan 011 is open**
+(P2, latent foot-gun).
+
+The digest's gate is no longer machinery — it is sample size. Plan 010 built
+and verified the whole grading chain; every prop number so far rests on two
+games. See `plans/HANDOFF.md`.
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) |
 REJECTED (one-line rationale).
