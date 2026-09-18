@@ -370,7 +370,17 @@ mean the same thing, and the digest sorts them together.
 - Modify: `backend/analysis/prop_analyzer.py:188-240`
 - Test: `backend/tests/test_prop_recent_form.py`
 
-- [ ] **Step 1: Decide, and record the decision in this plan before coding**
+- [x] **Step 1: Decide, and record the decision in this plan before coding**
+
+> **DECIDED 2026-09-17: option (a), require the distribution path.**
+> `analyze` returns `None` when fewer than `_MIN_VARIANCE_SAMPLES` usable
+> game-by-game values exist, so one formula, one scale, and one meaning for a
+> star. The accepted cost is fewer props — possibly none at all until the
+> box-score collector has three games for a player — which is the honest price
+> of having had no measurement. Option (b) was rejected for preserving a number
+> that is not a probability and pushing the complexity into the digest's
+> ranking.
+
 
 Two defensible options. **Recommended: (a).**
 

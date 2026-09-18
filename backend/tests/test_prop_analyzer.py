@@ -115,20 +115,25 @@ def test_analyze_finds_edge(session):
     assert result.confidence >= 1
 
 
-def test_analyze_season_avg_only(session):
-    """No recent games, season avg 27.0 vs line 25.5 → projection equals season avg."""
+def test_analyze_season_avg_only_is_refused(session):
+    """Season averages alone are no longer analysed -- INVERTED by plan 012.
+
+    This test used to assert the season-only branch produced a pick. That
+    branch computed edge as abs(diff / line) * 100, which is not a probability
+    and inflates small lines, while the distribution branch returns
+    (prob - 0.5) * 200. Both fed the same confidence thresholds and the digest
+    ranked them together, so one scale had to go. Without three game-by-game
+    values there is no variance estimate and therefore no probability, so the
+    prop is refused.
+    """
     team = _make_team(session)
     game = _make_game(session, team)
     season_avg = _make_season_avg(session, team, pts=27.0)
     prop = _make_prop(session, game, line=25.5, outcome="Over")
 
     analyzer = PropAnalyzer()
-    result = analyzer.analyze(prop, season_avg, [])
 
-    assert result is not None
-    assert result.projection == pytest.approx(27.0)
-    assert result.recent_avg is None
-    assert result.season_avg == pytest.approx(27.0)
+    assert analyzer.analyze(prop, season_avg, []) is None
 
 
 def test_analyze_under_pick(session):
@@ -140,8 +145,14 @@ def test_analyze_under_pick(session):
     season_avg = _make_season_avg(session, team, pts=27.0)
     prop = _make_prop(session, game, line=40.5, outcome="Under")
 
+    # Three game logs, because a probability needs a variance estimate. The
+    # behaviour under test -- that an Under clears on a projection well below
+    # the line -- is unchanged; only the input requirement is.
+    logs = [_make_game_log(session, team, pts, date(2026, 3, d))
+            for pts, d in ((26.0, 1), (28.0, 2), (27.0, 3))]
+
     analyzer = PropAnalyzer()
-    result = analyzer.analyze(prop, season_avg, [])
+    result = analyzer.analyze(prop, season_avg, logs)
 
     assert result is not None
     assert result.outcome == "Under"

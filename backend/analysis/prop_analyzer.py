@@ -127,6 +127,18 @@ class PropAnalyzer:
         if season_val is None and recent_val is None:
             return None
 
+        # A variance estimate needs _MIN_VARIANCE_SAMPLES usable game-by-game
+        # values. Without them the old code fell back to
+        # abs(diff / line) * 100, which is not a probability: it divides by the
+        # line, so a 0.5 line with a 1.2 projection reported a 140% "edge".
+        # The distribution branch returns (prob - 0.5) * 200, bounded 0-100.
+        # Both were fed to the same calculate_prop_confidence thresholds and
+        # ranked against each other in the digest, so a 5-star from one did not
+        # mean what a 5-star from the other meant. Refusing is the honest
+        # option: fewer props, but one scale and one meaning for a star.
+        if not _HAS_SCIPY or len(game_values) < _MIN_VARIANCE_SAMPLES:
+            return None
+
         # Compute projection as weighted blend
         if season_val is not None and recent_val is not None:
             projection = self.season_weight * season_val + self.recent_weight * recent_val
@@ -185,55 +197,28 @@ class PropAnalyzer:
         line = prop.line
 
         # --- Distribution-based edge computation ---
-        use_distribution = _HAS_SCIPY and len(game_values) >= _MIN_VARIANCE_SAMPLES
+        # Exceedance probability P(X > line), centred on the weighted
+        # projection with variance from the game-by-game values.
+        mean_val = sum(game_values) / len(game_values)
+        variance = sum((v - mean_val) ** 2 for v in game_values) / (len(game_values) - 1)
 
-        if use_distribution:
-            # Compute variance from game-by-game values
-            mean_val = sum(game_values) / len(game_values)
-            variance = sum((v - mean_val) ** 2 for v in game_values) / (len(game_values) - 1)
-
-            # Exceedance probability P(X > line) using the projection as center
-            # We use the projection (weighted mean) as the distribution center
-            # and the game-by-game variance for spread
-            exceedance_prob = _compute_exceedance_prob(
-                mean=projection, variance=variance, line=line, market=prop.market
-            )
-
-            # For Over bets, we want P(X > line) to be high
-            # For Under bets, we want P(X < line) = 1 - P(X > line) to be high
-            if prop.outcome == "Over":
-                directional_prob = exceedance_prob
-            else:
-                directional_prob = 1.0 - exceedance_prob
-
-            # Convert exceedance probability to edge percentage
-            # 0.5 = no edge, 0.75 = 50% edge, 1.0 = 100% edge
-            edge_pct = (directional_prob - 0.5) * 200
-
-            if edge_pct < 0:
-                return None
-            if edge_pct < self.min_edge:
-                return None
-
-            # Higher exceedance probability boosts confidence
-            confidence = calculate_prop_confidence(edge_pct, self.thresholds)
-
+        exceedance_prob = _compute_exceedance_prob(
+            mean=projection, variance=variance, line=line, market=prop.market
+        )
+        if prop.outcome == "Over":
+            directional_prob = exceedance_prob
         else:
-            # Fallback: simple average-based comparison
-            diff = projection - line
-            edge_pct = abs(diff / line) * 100
+            directional_prob = 1.0 - exceedance_prob
 
-            if prop.outcome == "Over":
-                signed_edge = diff
-            else:
-                signed_edge = -diff
+        # 0.5 = no edge, 0.75 = 50% edge, 1.0 = 100% edge.
+        edge_pct = (directional_prob - 0.5) * 200
 
-            if signed_edge < 0:
-                return None
-            if edge_pct < self.min_edge:
-                return None
+        if edge_pct < 0:
+            return None
+        if edge_pct < self.min_edge:
+            return None
 
-            confidence = calculate_prop_confidence(edge_pct, self.thresholds)
+        confidence = calculate_prop_confidence(edge_pct, self.thresholds)
 
         # Determine source/stale from season_avg or first recent game
         source = "unknown"

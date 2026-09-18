@@ -124,3 +124,71 @@ def test_recent_form_is_scoped_to_the_player(db_session):
     rows = _recent_form(db_session, "X", before=datetime.date(2026, 3, 10))
 
     assert [r.points for r in rows] == [10.0]
+
+
+# --- one edge formula, one scale ---------------------------------------------
+
+from backend.analysis.prop_analyzer import PropAnalyzer  # noqa: E402
+from backend.models import PlayerProp  # noqa: E402
+
+
+def _prop(line=20.5, outcome="Over", market="player_points", odds=-110):
+    return PlayerProp(game_id=1, bookmaker="dk", player_name="X", market=market,
+                      line=line, outcome=outcome, odds=odds)
+
+
+def _stat(points, stat_type="game_log"):
+    return PlayerStat(player_name="X", team_id=1, sport="nba",
+                      stat_type=stat_type, points=points, source="espn",
+                      game_date=datetime.date(2026, 3, 1),
+                      fetched_at=datetime.datetime.now(datetime.timezone.utc))
+
+
+def test_a_prop_with_too_little_history_is_not_analysed_at_all():
+    """Two edge formulas on different scales cannot share one threshold set.
+
+    `(prob - 0.5) * 200` is bounded 0-100; `abs(diff / line) * 100` is
+    unbounded and inflates small lines -- production reached 122, and a 0.5
+    line with a 1.2 projection reports 140. A 5-star from each does not mean
+    the same thing, and the digest ranks them together, so the fallback is
+    removed rather than tagged.
+    """
+    analyzer = PropAnalyzer()
+
+    assert analyzer.analyze(_prop(), _stat(24.0, "season_avg"), []) is None
+    assert analyzer.analyze(_prop(), _stat(24.0, "season_avg"),
+                            [_stat(18.0), _stat(22.0)]) is None
+
+
+def test_a_prop_with_enough_history_is_analysed_on_the_distribution():
+    """Three usable values is the minimum for a variance estimate
+    (_MIN_VARIANCE_SAMPLES), and the resulting edge is a probability."""
+    analyzer = PropAnalyzer()
+
+    result = analyzer.analyze(_prop(), _stat(24.0, "season_avg"),
+                              [_stat(18.0), _stat(22.0), _stat(25.0)])
+
+    assert result is not None
+    assert 0 <= result.edge_pct <= 100, "edge must be a bounded probability"
+    assert result.recent_avg is not None
+
+
+def test_a_small_line_no_longer_manufactures_a_huge_edge():
+    """The fallback divided by the line, so a 0.5 line with a 1.2 projection
+    reported a 140% edge at maximum confidence. Production's tier 5 had the
+    lowest median line (3.5) and tier 1 the highest (7.5)."""
+    analyzer = PropAnalyzer()
+
+    result = analyzer.analyze(_prop(line=0.5), _stat(1.2, "season_avg"),
+                              [_stat(1.0), _stat(1.0), _stat(2.0)])
+
+    assert result is None or result.edge_pct <= 100
+
+
+def test_history_without_the_market_s_stat_is_not_enough():
+    """Three rows whose relevant field is None yield no usable values, so no
+    variance can be estimated. Absent is not zero."""
+    analyzer = PropAnalyzer()
+
+    assert analyzer.analyze(_prop(), _stat(24.0, "season_avg"),
+                            [_stat(None), _stat(None), _stat(None)]) is None
