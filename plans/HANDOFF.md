@@ -3,88 +3,172 @@
 Everything below is recoverable from `git log` and `plans/`; nothing important
 lives only in a chat transcript.
 
+## READ THIS BEFORE STARTING THE PIPELINE
+
+Plans 013 and 014 changed how games are identified and dated. **The code is
+correct and production has not been prepared for it.** If the pipeline ingests
+before the preparation below, every evening game already stored under its UTC
+date will fail to match and **a twin row will be inserted** — the exact problem
+014 fixed.
+
+Production right now:
+
+| | |
+|---|---|
+| `games.espn_id` column | **absent** until migrations run; then all NULL |
+| twin pairs merged | **no** (13 pairs, done on a copy only) |
+| past games still non-final | **570** (nba 239, mma 126, boxing 110, ncaab 81, mlb 14) |
+| `pick_results` | **0 rows** — nothing has ever been graded |
+| `player_stats` `stat_type='game_log'` | **0 rows** |
+| props with `prop_player` / `prop_market` | **0 of 82** (NULL) |
+| picks / max id | 708 / 708 |
+
+The scheduler is **not running**, so nothing is ingesting today and nothing is
+at risk. Launching plain uvicorn is safe (it only runs additive migrations).
+
+**Order to prepare production, all against a verified backup:**
+
+```bash
+cp sports_picks.db "sports_picks.backup-$(date +%Y%m%d-%H%M%S).db"
+# verify: pragma integrity_check, and picks count == 708
+```
+
+1. `python -m backend.scripts.backfill_espn_ids --db <abs win path> --dry-run`
+   then for real. Matched **1320 of 1392** in-scope rows on a copy (95%);
+   ncaab's residual is the display-name problem in "Out of scope".
+2. `python -m backend.scripts.merge_duplicate_games --db <abs win path>`
+   — 13 pairs on a copy, 0 refused, picks untouched.
+3. Delete and replay the Elo, because step 2 alone does **not** undo the
+   double-count (`backfill_elo_history` skips games that already have rows):
+   ```sql
+   DELETE FROM elo_history WHERE game_id IN
+       (SELECT id FROM games WHERE sport = 'nba');
+   ```
+   then `python -m backend.scripts.backfill_team_stats --db <abs win path>`.
+4. `python -m backend.scripts.catch_up_finals --db <abs win path>` — finalized
+   **250 of 334** in-scope games on a copy (nba 218/239, ncaab 21/81,
+   mlb 11/14), 0 rows canceled. The residual is 6 genuinely `postponed`, 60
+   ncaab with display names in `abbreviation`, and the rest.
+5. `python -m backend.scripts.backfill_prop_fields --db <abs win path>` —
+   82 of 82 resolved on a copy.
+6. Only then start the scheduler. It will collect box scores and grade.
+
+**Everything in steps 1-5 was run and verified against copies. Production has
+had none of it.**
+
 ## Where things stand
 
-`master` is at `8a286c3` and **pushed** — local, `origin/master` and the last
-CI run all agree on that SHA. Test baseline: **592 passing backend, 0 failed**,
-identical on Python **3.12 and 3.14**; frontend eslint 0/0, `tsc` clean,
-vitest 15/15. Started this session at 545.
+`master` is at `e90049a` and **pushed** — local, `origin/master` and the last
+CI run agree. Test baseline: **642 passing backend, 0 failed**, identical on
+Python **3.12 and 3.14**; frontend eslint 0/0, `tsc` clean, vitest 15/15.
+Started this session at 545.
 
-**CI is live** (`.github/workflows/ci.yml`) and is now the fastest way to get
-that baseline — ~50s for all three jobs, versus ~1-4 min locally. Local command
-is unchanged:
+**CI is live** (`.github/workflows/ci.yml`), ~50s for all three jobs. Local:
 
 ```
 .venv/Scripts/python.exe -m pytest backend/tests -q
 ```
 
-`master` is the repository's only branch and its default. The `main` scaffold
-and all 13 merged `advisor/*` and `feature/*` branches were deleted on
-2026-09-17; every commit they held is reachable from `master`.
+`master` is the repository's only branch and its default.
+
+### The app runs
+
+```
+.venv/Scripts/python.exe -m uvicorn backend.api.main:app --host 127.0.0.1 --port 8000
+```
+
+`/health` answers, the React bundle serves from `frontend/dist`, and
+`/games/today`, `/picks/today` and `/users/feed` all return 200. Empty arrays
+are correct — there are no games dated today.
+
+**Do not use `start-server.bat`**: it `cd`s to
+`C:\Users\mwill\OneDrive\...`, the path that died in July 2026. **And be
+careful with `start.sh`**: it also launches `python -m backend.pipeline.scheduler`,
+which ingests — see the deploy-order warning below. The scheduler is off by
+default (`ENABLE_SCHEDULER` unset), so plain uvicorn is safe.
 
 ### This session (2026-09-16 evening → 09-17)
 
 The session crossed local midnight, so timestamps differ by source: the DB
-backup is stamped `20260916-231622` (local) while the CI runs log `06:xxZ`
-(UTC) the next day. Same session.
+backup is stamped `20260916-231622` (local) while CI logs `06:xxZ` (UTC) the
+next day. Same session.
 
 | Commit | What landed |
 |---|---|
-| `c292068` | `compute_historical_elo` no longer implements its own Elo replay |
+| `c292068` | `compute_historical_elo` stopped implementing its own Elo replay |
 | `9de96b8` | Calibration report stopped printing a false "LOWER BOUND" caveat |
 | `fc9a3f4` | **Live `sports_picks.db` backfilled** — production had never had the 008 data |
-| `9ff809e` | CI wired: backend matrix 3.12/3.14 + frontend lint/test/build |
+| `9ff809e` | CI wired: backend matrix 3.12/3.14 + frontend |
 | `e5e083d` | Dependencies pinned via `constraints.txt` |
 | `72416da` | `sports_picks.egg-info` untracked |
-| `25bdb09` | Handoff brought current |
-| `94ab58b` | **Plan 010 written** — make picks gradeable, then grade them |
-| `6117d5e` | 010 Task 1 — `grade_pick` refuses instead of inventing a loss |
-| `88a91fd` | 010 Task 3 spike — ESPN works, free, no purchase needed |
-| `e047953` | 010 Task 3 rewritten around ESPN |
-| `fb50170` | 010 Task 3 — ESPN post-game box-score collector |
-| `cfb276d` | 010 Task 2 — `PickModel` carries prop player and market |
-| `935ed15` | 010 Task 4 — props routed to the prop grader, payouts priced |
-| `8a286c3` | 010 Task 5 — prop confidence measured against outcomes |
+| `6117d5e` | **010 T1** — `grade_pick` refuses instead of inventing a loss |
+| `fb50170` | **010 T3** — ESPN post-game box-score collector |
+| `cfb276d` | **010 T2** — `PickModel` carries prop player and market |
+| `935ed15` | **010 T4** — props routed to the prop grader, payouts priced |
+| `8a286c3` | **010 T5** — prop confidence measured against outcomes |
+| `3246256` | **011** — the ASGI app builds on access, not at import |
+| `5603514` | **013 T1-2** — finalize games played since the last run |
+| `1c75c11` | **013 T3** — one-off catch-up for games never marked final |
+| `eddf502` | **014 T1** — `Game.espn_id`, identity matching |
+| `a5f9201` | **014 T1** — `espn_id` backfill script |
+| `e04fa24` | **014 T2** — merge games stored twice, once per date convention |
+| `822f5ef` | **014 T3** — dates are Eastern, via one shared `time_utils.et_date` |
+| `adb66d8` | **012 T1** — dead recent-form fetch removed |
+| `033d712` | **012 T2** — recent form bounded to before the game |
+| `6c8c62e` | **012 T3** — one edge formula, on one scale |
+| `e90049a` | **WebSocket transport installed** — `/ws` can finally upgrade |
 
-**Plan 010 is complete: all five tasks executed.** The grading chain works end
-to end. See "Plan 010" below for what it measured and what still blocks it.
+**Plans 001-011 and 014 are complete. 013 is done bar the production
+catch-up. 012's Tasks 1-3 are done and Task 4 is blocked on data.**
 
-Findings from this session worth carrying forward:
+### The findings worth carrying forward
 
-1. **Production was still running the pre-008 model.** Plan 008 fixed the code
-   but ran its backfill against copies only, so the live DB kept `team_stats`
-   for 1 game and 0 `elo_history` rows. Every pick generated between 008
-   landing and 2026-09-17 came from the degenerate model. Fixed; see the
-   database section below.
-2. **The local venv was the stale environment, not CI.** `pyproject.toml` has
-   floors only, and both `Dockerfile` and CI ran a bare `pip install -e .`, so
+Every one of these is the same shape: **a well-formed wrong value, or a
+component that works while the composition does not.** None raised, none
+logged an error, and several had passing tests.
+
+1. **Nobody asked ESPN about yesterday.** `morning_scout` fetched `today` at
+   8/9/10am ET — before that day's games were played — and nothing ever
+   revisited a past date. **570 games with past dates were stuck non-final**,
+   so grading, box scores, `game_log` and `elo_history` growth were all
+   dormant. The upsert that finalizes a game was correct and unreachable.
+   Fixed in `5603514` (3-day finalize-only lookback).
+2. **ESPN dates are UTC; its scoreboard is Eastern.** Every game after 8pm ET
+   was filed a day late, so the same game existed twice — once per convention.
+   Fixed in `822f5ef`, but only after `eddf502`/`e04fa24`, because flipping the
+   date first would have *doubled* the duplicates.
+3. **Nine real games were counted twice in the Elo replay.** Both halves of a
+   twin pair were final, so `backfill_elo_history` applied nine results twice.
+   A full replay moved **957 of 2098 pre-game ratings**, median 0.32, p90 6.81,
+   **max 20.64 points** — and `elo_history` is what the calibrated model trains
+   on. **Every Brier number measured before that replay describes corrupted
+   ratings.**
+4. **Prop projections never saw recent form.** `recent_weight` is 0.6, so it is
+   60% of every projection, and `game_log` was empty — every prop ever
+   generated used 100% season average. The probability model never ran either:
+   `use_distribution` needs three game-by-game values and has always been
+   `False`, so every prop used `abs(diff / line) * 100`, which is not a
+   probability and inflates small lines (a 0.5 line reported a 140% "edge").
+   Fixed in `6c8c62e`.
+5. **Importing `backend.api.main` migrated whatever `sports_picks.db` was in
+   the cwd.** Running pytest from the repo root was enough. Harmless only
+   because migrations are additive — `migrate_api_usage` contains a
+   `DROP TABLE`. Fixed in `3246256`.
+6. **The WebSocket feature was dead everywhere it actually runs**, and no
+   functional test could have caught it. `uvicorn` was declared without a
+   WebSocket library, so `/ws` answered the upgrade with a plain 200.
+   `TestClient` implements WebSocket **in-process** using Starlette's own code
+   and never touches uvicorn's transport, so plan 004's 15 tests all passed
+   against a path production never uses. Found by launching the app; fixed in
+   `e90049a` with a **dependency** guard rather than a functional one.
+7. **The local venv was the stale environment, not CI.** `pyproject.toml` had
+   floors only and both `Dockerfile` and CI ran a bare `pip install -e .`, so
    both tracked latest while the venv sat months behind — starlette 0.52.1
-   locally against 1.6.0 everywhere else. A local green said nothing about the
-   image being built. `constraints.txt` now pins all four environments to one
-   set, and the 3.12/3.14 matrix validates it.
-3. **The deployed runtime had never run the test suite.** `Dockerfile:17` pins
+   locally against 1.6.0 everywhere else. `constraints.txt` now pins all four
+   environments to one set.
+8. **The deployed runtime had never run the test suite.** `Dockerfile:17` pins
    `python:3.12-slim`; the venv is 3.14. The matrix closed that, and 3.12
    passes — the risk was latent, not active.
-4. **Importing `backend.api.main` migrates whatever `sports_picks.db` is in
-   the cwd.** `main.py:128` is a module-level
-   `app = create_app(os.environ.get("DATABASE_PATH", "sports_picks.db"))`,
-   needed so `uvicorn backend.api.main:app` works, and `create_app` calls
-   `run_migrations`. **Proven**, not inferred: dropping two columns from a copy
-   and merely importing the module put them back. That is how production
-   gained `picks.prop_player` during plan 010 with nobody backfilling it —
-   running the test suite from the repo root is enough. The container is
-   unaffected (`DATABASE_PATH=/tmp/...`). Today's migrations are additive so
-   nothing broke, **but `migrate_api_usage` does `DROP TABLE api_usage`** under
-   a schema condition, so an import statement is one condition away from
-   dropping a production table with no command and no confirmation. **Deserves
-   its own plan.**
-5. **Plan 010's three most dangerous bugs were all plausible values, not
-   crashes.** Props graded as losses, box scores stored against ESPN's date
-   instead of ours, and winners booked at a flat 1.0 unit regardless of price.
-   None of them raise, none appear in logs, and all three produce a clean
-   ROI table that is wrong. Worth treating as a design rule here: wherever a
-   value is persisted, ask what a *wrong but well-formed* value looks like
-   downstream.
 
 ### Merged into `master`
 
@@ -101,7 +185,7 @@ Findings from this session worth carrying forward:
 | 009 | Frontend ESLint clean — 6 errors / 2 warnings → 0 / 0 |
 | — | Daily picks digest (six-task feature, dry-run by default) |
 
-### All nine plans are now merged
+### All nine plans are now merged (historical — 010-014 came later)
 
 **`advisor/008-populate-team-stats` — MERGED** as `bb99490`. Seven commits: the
 original five, plus two review rounds. Report:
@@ -244,8 +328,8 @@ the 3.12/3.14 matrix confirm the new set before trusting it.
 
 ## Open plans
 
-**None open.** Plans 001-009 are merged and **plan 010 is complete — all five
-tasks executed.** `plans/README.md` has the full status table, every finding
+**Plans 001-011 and 014 are complete.** 013 is done bar the production
+catch-up. **012's Tasks 1-3 are done; its Task 4 is blocked on data.** `plans/README.md` has the full status table, every finding
 that was *not* turned into a plan, and a "considered and rejected" section so
 nothing gets re-audited.
 
@@ -325,6 +409,29 @@ Of the five "natural next pieces" listed on 2026-09-16, three are done:
    change.**
 4. **Migrate `PaperTrading.tsx` to React Query** — 009 left a documented
    suppression there naming this as the real fix.
+5. **Prepare production and start the pipeline.** See the block at the top of
+   this file. Until then nothing grades, no box scores accumulate, and 012's
+   Task 4 cannot measure anything.
+6. **012 Task 4 needs volume, not code.** Box scores exist for 2 games, so all
+   52 players have exactly one `game_log` row and **zero props clear the three
+   values Task 3 now requires**. Running the report today returns 0 analysed
+   and the calibration tool correctly refuses.
+7. **Make `espn_box_score` use `game.espn_id`** before that collection run.
+   It still calls `resolve_espn_event`, which searches the scoreboard on three
+   dates per game, because it predates the column — and its module docstring
+   now asserts something 014 made false ("ESPN shares no id with our Game").
+   Using the id turns ~4000 requests into ~1014 for a 1014-game run.
+8. **ncaab teams hold display names in `abbreviation`** (`"Pennsylvania
+   Quakers"`), so 60 rows can never match ESPN. Needs a team-identity fix.
+9. **`EspnStatsSource._find_team_id` does not exist**, so
+   `fetch_season_averages` raises `AttributeError` and the season-average
+   fallback is dead. P1 in its own right, given `nba_api` cannot reach
+   `stats.nba.com` from here.
+10. **`MARKET_STAT_MAP` is duplicated** in `grader.py:13` and
+    `prop_analyzer.py:12` (as `MARKET_TO_STAT`). A real drift risk.
+11. **Guard `migrate_api_usage`'s `DROP TABLE`.** It is the sharpest object in
+    the repo and the reason 011 mattered; an explicit opt-in for destructive
+    migrations would shrink the blast radius of every future mistake.
 5. **Let the scheduler run, then re-measure props.** This is the gate on the
    digest now. The grading chain is built and verified; it needs games
    carrying props to reach `final`. Until then the prop numbers rest on two
@@ -560,7 +667,13 @@ The daily pipeline keeps both tables current from here
 | `picks.prop_player` column | present, added by a stray import (finding 4) |
 
 Plan 010 wrote nothing to production. Everything it proved ran against copies.
-To actually grade in production, in order:
+
+> **Superseded.** The ordered steps below covered plan 010 only. Plans 013 and
+> 014 added more, and the authoritative list is now
+> **"READ THIS BEFORE STARTING THE PIPELINE"** at the top of this file. Follow
+> that one; these three are a subset of it.
+
+To grade in production, in order (subset — see above):
 
 1. Let the scheduler run so the two games reach `status='final'` with scores —
    or, if you want it now, `morning_scout` does box-score collection and
