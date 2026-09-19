@@ -1,4 +1,6 @@
+import logging
 import re
+
 import httpx
 
 _APIKEY_RE = re.compile(r"(apiKey=)[^&\s'\"]+", re.IGNORECASE)
@@ -15,6 +17,43 @@ def redact_api_key(text: str) -> str:
     return _APIKEY_RE.sub(r"\1<redacted>", text)
 
 
+class _RedactingFilter(logging.Filter):
+    """Strip apiKey values from every log record that passes through.
+
+    ``redact_api_key`` covers text we format ourselves. It does not cover
+    httpx, which logs the full request URL at INFO on every call -- and the
+    Odds API accepts its key only as a query parameter, so each odds fetch
+    wrote the live key into scheduler.log in plaintext. Found in production
+    on 2026-09-19.
+
+    The record is collapsed to its formatted message first: httpx logs with
+    %-style arguments, so the URL lives in ``record.args`` and never in
+    ``record.msg``. Redacting ``msg`` alone would miss it entirely.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.args:
+            record.msg = record.getMessage()
+            record.args = ()
+        if isinstance(record.msg, str) and "apikey=" in record.msg.lower():
+            record.msg = redact_api_key(record.msg)
+        return True
+
+
+def install_log_redaction() -> None:
+    """Attach the redacting filter to the root logger and its handlers.
+
+    A logger's filters apply only to records logged through it directly, not
+    to propagated ones, so the handlers are filtered too -- that is where
+    every propagated record actually lands. Idempotent: a second call does
+    not stack a second filter.
+    """
+    root = logging.getLogger()
+    for target in (root, *root.handlers):
+        if not any(isinstance(f, _RedactingFilter) for f in target.filters):
+            target.addFilter(_RedactingFilter())
+
+
 SPORT_KEYS = {
     "nba": "basketball_nba",
     "nfl": "americanfootball_nfl",
@@ -29,6 +68,11 @@ class OddsAPICollector:
     BASE_URL = "https://api.the-odds-api.com/v4/sports"
 
     def __init__(self, api_key: str):
+        # Installed here rather than at an entrypoint so that no caller can
+        # forget it: the key only ever leaves this process through a client
+        # built right here, so this is the one place guaranteed to run before
+        # httpx can log a URL containing it.
+        install_log_redaction()
         self.api_key = api_key
         self.client = httpx.AsyncClient(timeout=30.0)
         self.requests_remaining: int | None = None
