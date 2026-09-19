@@ -18,30 +18,11 @@ async def test_espn_unsupported_sport(source):
     assert result == []
 
 
-@pytest.mark.asyncio
-async def test_espn_parse_basketball_stats(source):
-    data = {"statistics": [{"splits": [{"categories": [
-        {"stats": [
-            {"abbreviation": "PTS", "value": 25.0},
-            {"abbreviation": "REB", "value": 8.0},
-            {"abbreviation": "AST", "value": 5.0},
-            {"abbreviation": "MIN", "value": 35.0},
-        ]}
-    ]}]}]}
-    result = source._parse_basketball_stats(data)
-    assert result["points"] == 25.0
-    assert result["rebounds"] == 8.0
-
-
-@pytest.mark.asyncio
-async def test_espn_parse_football_stats(source):
-    data = {"statistics": [{"splits": [{"categories": [
-        {"stats": [
-            {"abbreviation": "PYDS", "value": 285.0},
-            {"abbreviation": "TD", "value": 2.0},
-            {"abbreviation": "RYDS", "value": 25.0},
-        ]}
-    ]}]}]}
-    result = source._parse_football_stats(data)
-    assert result["pass_yards"] == 285.0
-    assert result["touchdowns"] == 2.0
+# The two parser tests that lived here built ESPN payloads by hand in the
+# shape `statistics[].splits[].categories[].stats[]`, with abbreviation/value
+# objects. The endpoint that returned that shape --
+# site.api.../v2/.../athletes/{id}/statistics -- 404s for every athlete, so
+# those tests passed for months while the production path collected nothing.
+#
+# Parser coverage now lives in tests/test_espn_v3_stats_parser.py, against
+# trimmed copies of real v3 responses.

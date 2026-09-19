@@ -101,6 +101,25 @@ def _normalise(label: str) -> str:
     return _ST.sub("State", label)
 
 
+@functools.lru_cache(maxsize=None)
+def _espn_ids(sport: str) -> dict[str, str]:
+    return {r["abbreviation"]: r["espn_id"] for r in _table(sport)}
+
+
+def espn_id_for(sport: str, abbreviation: str) -> str | None:
+    """ESPN's own numeric team id for an abbreviation.
+
+    Read from the committed snapshot rather than fetched, so it is offline,
+    instant, and cannot disagree with the abbreviations the rest of the
+    pipeline resolves to -- both come from the same file.
+
+    Returns None for an unknown abbreviation or a sport with no snapshot
+    (mma and boxing have no team concept). A miss usually means the snapshot
+    is stale: re-run ``backend.scripts.refresh_team_tables --sport <sport>``.
+    """
+    return _espn_ids(sport).get(abbreviation)
+
+
 def resolution_of(sport: str, label: str) -> tuple[str | None, str]:
     """Resolve ``label`` to an ESPN abbreviation, reporting how.
 

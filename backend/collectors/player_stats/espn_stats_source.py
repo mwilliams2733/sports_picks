@@ -35,12 +35,104 @@ ESPN_SPORT_URLS: dict[str, dict[str, str]] = {
 
 FOOTBALL_SPORTS = {"nfl", "ncaaf"}
 
+#: Athlete season stats live on a different host and API version from
+#: everything else here. The site v2 ".../athletes/{id}/statistics" path the
+#: collector used returns 404 for every athlete.
+ESPN_V3_STATS: dict[str, str] = {
+    "nba": "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba",
+    "ncaab": "https://site.web.api.espn.com/apis/common/v3/sports/basketball/mens-college-basketball",
+    "nfl": "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl",
+    "ncaaf": "https://site.web.api.espn.com/apis/common/v3/sports/football/college-football",
+}
+
+#: Basketball: one "averages" category whose labels line up with its stats.
+_BASKETBALL_LABELS = {
+    "MIN": "minutes", "PTS": "points", "REB": "rebounds", "AST": "assists",
+    "3PT": "threes", "STL": "steals", "BLK": "blocks", "TO": "turnovers",
+}
+
+#: Football: keyed by (category, label), because "YDS" appears under
+#: passing, rushing AND receiving. A flat label map would report whichever
+#: category happened to come last as all three.
+_FOOTBALL_LABELS = {
+    ("passing", "YDS"): "pass_yards",
+    ("rushing", "YDS"): "rush_yards",
+    ("receiving", "YDS"): "rec_yards",
+    ("scoring", "TD"): "touchdowns",
+}
+
+
+def _to_number(raw: Any) -> float | None:
+    """ESPN stat string -> float, or None when it is not a number.
+
+    Handles two real shapes: thousands separators ("1,912") and
+    made-attempted pairs ("2.5-6.0"), where the made half is the statistic
+    and the attempted half is not. A leading minus is preserved, so "-2"
+    receiving yards survives.
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip().replace(",", "")
+    if not text or text in {"-", "--"}:
+        return None
+    if "-" in text[1:]:
+        text = text[0] + text[1:].split("-", 1)[0]
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _empty_stat_row() -> dict:
+    return {
+        "player_name": None, "minutes": None, "points": None,
+        "rebounds": None, "assists": None, "threes": None, "steals": None,
+        "blocks": None, "turnovers": None, "pass_yards": None,
+        "rush_yards": None, "rec_yards": None, "touchdowns": None,
+    }
+
+
+def _latest_row(category: dict) -> list:
+    """The most recent season's values for a v3 category.
+
+    Rows run oldest to newest, so the last one is the current season. Taking
+    the first would report a player's rookie year as their form.
+    """
+    rows = category.get("statistics") or []
+    if not rows:
+        return []
+    return rows[-1].get("stats") or []
+
 
 class EspnStatsSource(PlayerStatsSource):
     name = "espn"
 
     def __init__(self):
         self._client = httpx.AsyncClient(timeout=15.0)
+
+    async def _find_team_id(self, sport: str, team_abbr: str) -> str | None:
+        """ESPN's numeric team id for ``team_abbr``, or None.
+
+        This method was called by fetch_season_averages but never written, so
+        every season-average fetch raised AttributeError. The collector caught
+        it and logged a warning, which is why it survived: 284 warnings per
+        scheduled run and stats_fetched: 0, with nothing ever failing loudly.
+
+        Resolved from the committed team snapshot rather than ESPN's /teams
+        endpoint: no network call, and it cannot drift from the abbreviations
+        team_identity resolves to, because both read the same file.
+        """
+        from backend.team_identity import espn_id_for
+
+        team_id = espn_id_for(sport, team_abbr)
+        if team_id is None:
+            logger.warning(
+                "ESPN: no team id for %r in %s. If the team is real, the "
+                "snapshot is stale -- re-run "
+                "backend.scripts.refresh_team_tables --sport %s",
+                team_abbr, sport, sport,
+            )
+        return team_id
 
     async def fetch_season_averages(self, sport: str, team_abbr: str) -> list[dict]:
         sport = sport.lower()
@@ -75,7 +167,10 @@ class EspnStatsSource(PlayerStatsSource):
             if not athlete_id:
                 continue
 
-            stats_url = f"{base}/athletes/{athlete_id}/statistics"
+            stats_base = ESPN_V3_STATS.get(sport)
+            if not stats_base:
+                continue
+            stats_url = f"{stats_base}/athletes/{athlete_id}/stats"
             try:
                 resp = await self._client.get(stats_url)
                 resp.raise_for_status()
@@ -152,58 +247,30 @@ class EspnStatsSource(PlayerStatsSource):
         return results
 
     def _parse_basketball_stats(self, data: dict) -> dict:
-        """Extract basketball stats from ESPN statistics response."""
-        stat_map = {
-            "PTS": "points",
-            "REB": "rebounds",
-            "AST": "assists",
-            "MIN": "minutes",
-            "3PM": "threes",
-            "STL": "steals",
-            "BLK": "blocks",
-            "TO": "turnovers",
-        }
-        return self._extract_stats(data, stat_map)
+        """Season averages from a v3 payload's "averages" category."""
+        result = _empty_stat_row()
+        for category in data.get("categories") or []:
+            if category.get("name") != "averages":
+                continue
+            labels = category.get("labels") or []
+            values = _latest_row(category)
+            for label, value in zip(labels, values):
+                field = _BASKETBALL_LABELS.get(label)
+                if field:
+                    result[field] = _to_number(value)
+        return result
 
     def _parse_football_stats(self, data: dict) -> dict:
-        """Extract football stats from ESPN statistics response."""
-        stat_map = {
-            "PYDS": "pass_yards",
-            "RYDS": "rush_yards",
-            "RECYDS": "rec_yards",
-            "TD": "touchdowns",
-            "MIN": "minutes",
-        }
-        return self._extract_stats(data, stat_map)
-
-    def _extract_stats(self, data: dict, stat_map: dict[str, str]) -> dict:
-        result: dict[str, Any] = {
-            "player_name": None,
-            "minutes": None,
-            "points": None,
-            "rebounds": None,
-            "assists": None,
-            "threes": None,
-            "steals": None,
-            "blocks": None,
-            "turnovers": None,
-            "pass_yards": None,
-            "rush_yards": None,
-            "rec_yards": None,
-            "touchdowns": None,
-        }
-
-        statistics = data.get("statistics", [])
-        for stat_group in statistics:
-            splits = stat_group.get("splits", [])
-            for split in splits:
-                categories = split.get("categories", [])
-                for category in categories:
-                    for stat in category.get("stats", []):
-                        abbr = stat.get("abbreviation", "")
-                        if abbr in stat_map:
-                            result[stat_map[abbr]] = stat.get("value")
-
+        """Season totals, keyed by (category, label) to disambiguate YDS."""
+        result = _empty_stat_row()
+        for category in data.get("categories") or []:
+            name = category.get("name")
+            labels = category.get("labels") or []
+            values = _latest_row(category)
+            for label, value in zip(labels, values):
+                field = _FOOTBALL_LABELS.get((name, label))
+                if field:
+                    result[field] = _to_number(value)
         return result
 
     async def is_available(self) -> bool:

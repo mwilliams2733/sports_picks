@@ -527,6 +527,82 @@ in production on every scheduled run.
 - `Credits today: 0` is consistent: every call 401'd, so nothing was billed.
 - The scheduler itself, the logon task and the log rotation all behaved.
 
+## Season averages collect again — 2026-09-19
+
+Two defects in a chain. The first hid the second.
+
+### `_find_team_id` was never written
+
+`fetch_season_averages` called `self._find_team_id(sport, team_abbr)` and the
+method existed nowhere on the class. Every call raised `AttributeError`, the
+collector caught it and logged a warning, and nothing failed loudly: **284
+warnings in one scheduled run**, `stats_fetched: 0` every time.
+
+It is now `backend.team_identity.espn_id_for(sport, abbreviation)`, reading
+ESPN's numeric id from the **committed snapshots** rather than fetching
+`/teams`. No network call, and it cannot drift from the abbreviations the
+rest of the pipeline resolves to, because both read the same file. A test
+runs it against a client that raises on any use, so reaching for the network
+fails the suite.
+
+### Fixing that exposed a dead endpoint
+
+With the `AttributeError` gone, execution reached the next call — which 404s
+for every athlete:
+
+| endpoint | |
+|---|---|
+| `site.api.../v2/.../athletes/{id}/statistics` | **404** (what the code used) |
+| `site.web.api.../common/v3/.../athletes/{id}/stats` | **200** |
+
+The v3 shape is different, not just the URL: parallel arrays, with
+`categories[].labels` alongside `categories[].statistics[].stats`. The old
+parser walked `statistics[].splits[].categories[].stats[]`, which that
+endpoint no longer returns.
+
+**Basketball**: one `averages` category, one row per season, **oldest
+first** — so the last row is the current season. Taking `[0]` would report a
+player's rookie year as their form.
+
+**Football**: categories are `passing` / `rushing` / `receiving` / `scoring`,
+and **`YDS` appears in three of them**. The map is keyed by
+`(category, label)` for exactly that reason; a flat label map would report
+whichever category came last as all three yardage figures. Touchdowns come
+from `scoring.TD` (27), not `passing.TD` (21) or `rushing.TD` (6).
+
+Two value shapes needed handling: thousands separators (`"1,912"`) and
+made-attempted pairs (`"2.5-6.0"`, where the made half is the statistic). A
+leading minus survives, so `-2` receiving yards is not mangled.
+
+Verified against a live payload:
+
+```
+  parsed: minutes 33.2, points 20.9, rebounds 6.1, assists 7.2,
+          threes 1.3, steals 1.2, blocks 0.6, turnovers 3.0
+```
+
+### Not verified end to end
+
+ESPN began returning **403** on the roster endpoint partway through this
+work — the same URL had returned a full roster minutes earlier, so it is
+rate limiting, not a defect. Roster → stats → parsed values has therefore
+**not** been run as one live chain. Each leg is verified separately: the
+roster endpoint returned real athletes before the 403, the v3 stats endpoint
+returns 200, and the parser produces correct values from a real payload.
+
+**Confirm at the next scheduled run.** `scheduler.log` should show the 284
+`_find_team_id` warnings gone and `stats_fetched` above zero. If it does not,
+the 403 is persistent and the collector needs a backoff, which it does not
+currently have.
+
+### A splice accident worth knowing about
+
+Replacing the parser methods by index removed `is_available` and `close`
+along with them, which made `EspnStatsSource` abstract and unconstructible.
+Caught by the tests immediately and restored from `HEAD`. Editing Python by
+locating "the next `def`" is unreliable when the file mixes `def` and
+`async def`.
+
 ## Where things stand
 
 `master` is at `cc9eee2` and **pushed**. Test baseline: **646 passing backend,
