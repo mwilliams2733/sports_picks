@@ -135,14 +135,23 @@ def test_a_label_that_is_already_an_abbreviation_resolves(session):
     assert session.query(Game).count() == 1
 
 
-def test_a_sport_without_a_snapshot_still_refuses_junk(session):
-    """nfl is an ABBREVIATION_SPORT but has no committed table yet.
+def test_a_sport_without_a_snapshot_still_refuses_junk(session, monkeypatch):
+    """Adding a sport to ABBREVIATION_SPORTS without shipping its team table
+    must refuse, not fall back to creating display-name rows.
 
-    It must refuse rather than fall back to creating a display-name row --
-    otherwise adding a sport to the set silently reopens this bug.
+    Originally written against nfl, which had no snapshot at the time. It
+    does now (as do all five members), so the sport is faked instead --
+    otherwise this test would quietly stop exercising the rule the moment a
+    snapshot was added, which is exactly what happened.
     """
+    from backend.pipeline import full_pipeline
+
+    monkeypatch.setattr(
+        full_pipeline, "ABBREVIATION_SPORTS",
+        frozenset({"nba", "nfl", "ncaab", "ncaaf", "mlb", "quidditch"}),
+    )
     _ensure_game_from_odds(
-        session, "nfl", event("Dallas Cowboys", "New York Giants"))
+        session, "quidditch", event("Chudley Cannons", "Holyhead Harpies"))
 
     assert session.query(Team).count() == 0
     assert session.query(Game).count() == 0

@@ -104,3 +104,43 @@ def test_an_all_star_team_stays_unresolved():
     """
     assert canonical_abbr("nba", "Team Stripes") is None
     assert canonical_abbr("nba", "STRIPES") is None
+
+
+def test_apostrophes_are_folded_before_matching():
+    """ESPN writes "Louisiana Ragin' Cajuns"; the Odds API drops the apostrophe."""
+    assert canonical_abbr("ncaaf", "Louisiana Ragin Cajuns") == "UL"
+    assert resolution_of("ncaaf", "Louisiana Ragin Cajuns")[1] == "folded"
+
+
+def test_accents_are_folded_before_matching():
+    """ESPN writes "San Jose State Spartans" with an acute accent."""
+    assert canonical_abbr("ncaaf", "San Jose State Spartans") == "SJSU"
+
+
+def test_an_exact_name_still_wins_over_folding():
+    # The exact tier must not be bypassed by the looser folded tier.
+    assert resolution_of("ncaaf", "Louisiana Ragin' Cajuns")[1] == "exact"
+
+
+def test_folding_introduces_no_collisions_in_any_snapshot():
+    """Two distinct schools must never fold to the same key.
+
+    Folding is only safe because it does not merge anything: verified across
+    all 954 teams in the committed snapshots.
+    """
+    from backend.team_identity import _fold, _table
+
+    for sport in ("ncaaf", "ncaab", "nba", "nfl", "mlb"):
+        rows = _table(sport)
+        if not rows:
+            continue
+        folded = [_fold(r["display_name"]) for r in rows]
+        assert len(folded) == len(set(folded)), f"{sport} has a folding collision"
+
+
+def test_the_other_sports_have_snapshots_now():
+    """Without one, ABBREVIATION_SPORTS members silently skip every game."""
+    from backend.team_identity import ABBREVIATION_SPORTS, _table
+
+    for sport in ABBREVIATION_SPORTS:
+        assert len(_table(sport)) > 0, f"{sport} has no committed team snapshot"

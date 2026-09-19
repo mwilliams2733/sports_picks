@@ -1,0 +1,194 @@
+[
+  {
+    "abbreviation": "ARI",
+    "display_name": "Arizona Cardinals",
+    "espn_id": "22",
+    "location": "Arizona"
+  },
+  {
+    "abbreviation": "ATL",
+    "display_name": "Atlanta Falcons",
+    "espn_id": "1",
+    "location": "Atlanta"
+  },
+  {
+    "abbreviation": "BAL",
+    "display_name": "Baltimore Ravens",
+    "espn_id": "33",
+    "location": "Baltimore"
+  },
+  {
+    "abbreviation": "BUF",
+    "display_name": "Buffalo Bills",
+    "espn_id": "2",
+    "location": "Buffalo"
+  },
+  {
+    "abbreviation": "CAR",
+    "display_name": "Carolina Panthers",
+    "espn_id": "29",
+    "location": "Carolina"
+  },
+  {
+    "abbreviation": "CHI",
+    "display_name": "Chicago Bears",
+    "espn_id": "3",
+    "location": "Chicago"
+  },
+  {
+    "abbreviation": "CIN",
+    "display_name": "Cincinnati Bengals",
+    "espn_id": "4",
+    "location": "Cincinnati"
+  },
+  {
+    "abbreviation": "CLE",
+    "display_name": "Cleveland Browns",
+    "espn_id": "5",
+    "location": "Cleveland"
+  },
+  {
+    "abbreviation": "DAL",
+    "display_name": "Dallas Cowboys",
+    "espn_id": "6",
+    "location": "Dallas"
+  },
+  {
+    "abbreviation": "DEN",
+    "display_name": "Denver Broncos",
+    "espn_id": "7",
+    "location": "Denver"
+  },
+  {
+    "abbreviation": "DET",
+    "display_name": "Detroit Lions",
+    "espn_id": "8",
+    "location": "Detroit"
+  },
+  {
+    "abbreviation": "GB",
+    "display_name": "Green Bay Packers",
+    "espn_id": "9",
+    "location": "Green Bay"
+  },
+  {
+    "abbreviation": "HOU",
+    "display_name": "Houston Texans",
+    "espn_id": "34",
+    "location": "Houston"
+  },
+  {
+    "abbreviation": "IND",
+    "display_name": "Indianapolis Colts",
+    "espn_id": "11",
+    "location": "Indianapolis"
+  },
+  {
+    "abbreviation": "JAX",
+    "display_name": "Jacksonville Jaguars",
+    "espn_id": "30",
+    "location": "Jacksonville"
+  },
+  {
+    "abbreviation": "KC",
+    "display_name": "Kansas City Chiefs",
+    "espn_id": "12",
+    "location": "Kansas City"
+  },
+  {
+    "abbreviation": "LAC",
+    "display_name": "Los Angeles Chargers",
+    "espn_id": "24",
+    "location": "Los Angeles"
+  },
+  {
+    "abbreviation": "LAR",
+    "display_name": "Los Angeles Rams",
+    "espn_id": "14",
+    "location": "Los Angeles"
+  },
+  {
+    "abbreviation": "LV",
+    "display_name": "Las Vegas Raiders",
+    "espn_id": "13",
+    "location": "Las Vegas"
+  },
+  {
+    "abbreviation": "MIA",
+    "display_name": "Miami Dolphins",
+    "espn_id": "15",
+    "location": "Miami"
+  },
+  {
+    "abbreviation": "MIN",
+    "display_name": "Minnesota Vikings",
+    "espn_id": "16",
+    "location": "Minnesota"
+  },
+  {
+    "abbreviation": "NE",
+    "display_name": "New England Patriots",
+    "espn_id": "17",
+    "location": "New England"
+  },
+  {
+    "abbreviation": "NO",
+    "display_name": "New Orleans Saints",
+    "espn_id": "18",
+    "location": "New Orleans"
+  },
+  {
+    "abbreviation": "NYG",
+    "display_name": "New York Giants",
+    "espn_id": "19",
+    "location": "New York"
+  },
+  {
+    "abbreviation": "NYJ",
+    "display_name": "New York Jets",
+    "espn_id": "20",
+    "location": "New York"
+  },
+  {
+    "abbreviation": "PHI",
+    "display_name": "Philadelphia Eagles",
+    "espn_id": "21",
+    "location": "Philadelphia"
+  },
+  {
+    "abbreviation": "PIT",
+    "display_name": "Pittsburgh Steelers",
+    "espn_id": "23",
+    "location": "Pittsburgh"
+  },
+  {
+    "abbreviation": "SEA",
+    "display_name": "Seattle Seahawks",
+    "espn_id": "26",
+    "location": "Seattle"
+  },
+  {
+    "abbreviation": "SF",
+    "display_name": "San Francisco 49ers",
+    "espn_id": "25",
+    "location": "San Francisco"
+  },
+  {
+    "abbreviation": "TB",
+    "display_name": "Tampa Bay Buccaneers",
+    "espn_id": "27",
+    "location": "Tampa Bay"
+  },
+  {
+    "abbreviation": "TEN",
+    "display_name": "Tennessee Titans",
+    "espn_id": "10",
+    "location": "Tennessee"
+  },
+  {
+    "abbreviation": "WSH",
+    "display_name": "Washington Commanders",
+    "espn_id": "28",
+    "location": "Washington"
+  }
+]

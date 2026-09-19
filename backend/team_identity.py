@@ -15,6 +15,7 @@ import functools
 import json
 import pathlib
 import re
+import unicodedata
 
 _DATA = pathlib.Path(__file__).resolve().parent / "data"
 
@@ -59,6 +60,27 @@ def _by_display(sport: str) -> dict[str, str]:
     return {r["display_name"]: r["abbreviation"] for r in _table(sport)}
 
 
+def _fold(label: str) -> str:
+    """Drop accents and apostrophes so two spellings of one name compare equal.
+
+    ESPN writes "Louisiana Ragin' Cajuns" and "San Jose State Spartans" (with
+    an acute e); the Odds API strips both marks. Folding is safe only because
+    it merges nothing: across all 954 teams in the committed snapshots it
+    produces zero collisions, and a test asserts that so a future snapshot
+    cannot quietly break it.
+    """
+    decomposed = unicodedata.normalize("NFD", label)
+    without_marks = "".join(
+        c for c in decomposed if unicodedata.category(c) != "Mn"
+    )
+    return without_marks.replace("’", "").replace("'", "")
+
+
+@functools.lru_cache(maxsize=None)
+def _by_folded(sport: str) -> dict[str, str]:
+    return {_fold(r["display_name"]): r["abbreviation"] for r in _table(sport)}
+
+
 @functools.lru_cache(maxsize=None)
 def _abbrs(sport: str) -> frozenset[str]:
     return frozenset(r["abbreviation"] for r in _table(sport))
@@ -97,6 +119,10 @@ def resolution_of(sport: str, label: str) -> tuple[str | None, str]:
     normalised = _normalise(label)
     if normalised in display:
         return display[normalised], "normalised"
+
+    folded = _by_folded(sport).get(_fold(label))
+    if folded:
+        return folded, "folded"
 
     alias = _ALIASES.get(sport, {}).get(label)
     if alias and alias in display:
