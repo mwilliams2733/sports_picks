@@ -3,6 +3,7 @@ from typing import Any
 
 import httpx
 
+from backend import team_identity
 from backend.collectors.player_stats.base import PlayerStatsSource
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,9 @@ class EspnStatsSource(PlayerStatsSource):
 
     def __init__(self):
         self._client = httpx.AsyncClient(timeout=15.0)
+        #: sport -> {ABBREVIATION: espn_id}, filled only for sports with no
+        #: committed snapshot. One request per sport per process, not per team.
+        self._team_ids: dict[str, dict[str, str]] = {}
 
     async def fetch_season_averages(self, sport: str, team_abbr: str) -> list[dict]:
         sport = sport.lower()
@@ -93,6 +97,76 @@ class EspnStatsSource(PlayerStatsSource):
             results.append(parsed)
 
         return results
+
+    async def _find_team_id(self, sport: str, team_abbr: str) -> str | None:
+        """ESPN's numeric team id for ``team_abbr``, or None if unresolvable.
+
+        This method was called but never defined, so every call to
+        ``fetch_season_averages`` raised AttributeError and the collector's
+        blanket ``except`` recorded it as a source failure.
+
+        Who that actually cost, counted against the sports whose props the
+        pipeline analyses rather than against the chain table: **nfl, ncaab
+        and ncaaf** list ESPN as their only source, so season averages were
+        unreachable there, not merely degraded. nba lost only its third
+        fallback, behind nba_api and balldontlie. boxing and mma sit in the
+        chain but ``odds_api.PROP_MARKETS`` is empty for both, so no prop is
+        ever fetched for them and nothing downstream depended on this.
+
+        Offline first: ``backend/data/<sport>_teams.json`` is committed and
+        carries every id, so nba and ncaab resolve with no request at all.
+        Sports with no snapshot fall back to ESPN's teams endpoint, cached per
+        sport. Combat sports have no teams endpoint and resolve to None --
+        a fighter is not a team, so that is the right answer, not an error.
+        """
+        espn_id = team_identity.espn_team_id(sport, team_abbr)
+        if espn_id:
+            return espn_id
+
+        teams_url = ESPN_SPORT_URLS[sport].get("teams")
+        if not teams_url:
+            return None
+
+        table = await self._teams_table(sport, teams_url)
+        return table.get(team_abbr.upper())
+
+    async def _teams_table(self, sport: str, teams_url: str) -> dict[str, str]:
+        """{ABBREVIATION: espn_id} for one sport, fetched at most once.
+
+        A failed fetch is deliberately not cached, so a transient outage does
+        not blank the table for the life of the process.
+        """
+        cached = self._team_ids.get(sport)
+        if cached is not None:
+            return cached
+
+        try:
+            # limit=500: ESPN pages at 50 by default, which silently truncates
+            # ncaaf and ncaab. refresh_team_tables.py passes the same.
+            resp = await self._client.get(teams_url, params={"limit": 500})
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as e:
+            logger.error(f"ESPN: failed to fetch team table for {sport}: {e}")
+            return {}
+
+        table: dict[str, str] = {}
+        # Walked rather than indexed: refresh_team_tables.py reads
+        # payload["sports"][0]["leagues"][0]["teams"], which raises on an
+        # empty or reshaped response. Here an unexpected shape must degrade
+        # to "team not found", not to an exception inside a fallback chain.
+        for sport_block in payload.get("sports", []):
+            for league in sport_block.get("leagues", []):
+                for entry in league.get("teams", []):
+                    team = entry.get("team", {})
+                    abbr, team_id = team.get("abbreviation"), team.get("id")
+                    if abbr and team_id:
+                        table[abbr.upper()] = str(team_id)
+
+        if not table:
+            logger.warning(f"ESPN: team table for {sport} parsed to nothing")
+        self._team_ids[sport] = table
+        return table
 
     async def fetch_recent_games(self, sport: str, player_name: str, n: int = 5) -> list[dict]:
         sport = sport.lower()
