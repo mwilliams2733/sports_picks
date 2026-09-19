@@ -230,3 +230,55 @@ def test_a_game_already_collected_is_skipped(db_session, monkeypatch):
 
     assert ebs.collect_box_scores_for_final_games(db_session, "nba") == 0
     assert calls == []          # never even looked the event up
+
+
+# --- use the stored event id instead of searching ----------------------------
+
+def test_a_game_with_an_espn_id_is_collected_without_searching_the_scoreboard(
+        db_session, monkeypatch):
+    """Plan 014 gave every game ESPN's event id. This collector predates it and
+    still calls resolve_espn_event, which requests the scoreboard on three
+    dates per game -- roughly 4000 requests for a 1014-game run instead of
+    1014, and it reintroduces the date guesswork the id makes unnecessary.
+    """
+    game = _seed_final_game(db_session)
+    game.espn_id = "401700777"
+    db_session.commit()
+
+    monkeypatch.setattr(ebs, "resolve_espn_event",
+                        lambda **kw: pytest.fail(
+                            "searched the scoreboard despite a stored espn_id"))
+    seen = {}
+    monkeypatch.setattr(ebs, "fetch_summary",
+                        lambda sport, event_id, **k: seen.setdefault("id", event_id) and None
+                        or {"boxscore": {"players": [
+                            {"team": {"abbreviation": "OKC"},
+                             "statistics": [{"labels": ["PTS"],
+                                             "athletes": [{"athlete": {"displayName": "P"},
+                                                           "stats": ["10"]}]}]}]}})
+
+    written = ebs.collect_box_scores_for_final_games(db_session, "nba")
+
+    assert seen["id"] == "401700777"
+    assert written == 1
+
+
+def test_a_game_without_an_espn_id_still_falls_back_to_searching(
+        db_session, monkeypatch):
+    """Rows the backfill could not identify -- 336 in production, mostly ncaab
+    and boxing -- must still be collectable."""
+    _seed_final_game(db_session)          # no espn_id
+
+    monkeypatch.setattr(ebs, "resolve_espn_event", lambda **kw: "401700888")
+    seen = {}
+    monkeypatch.setattr(ebs, "fetch_summary",
+                        lambda sport, event_id, **k: seen.setdefault("id", event_id) and None
+                        or {"boxscore": {"players": [
+                            {"team": {"abbreviation": "OKC"},
+                             "statistics": [{"labels": ["PTS"],
+                                             "athletes": [{"athlete": {"displayName": "P"},
+                                                           "stats": ["10"]}]}]}]}})
+
+    ebs.collect_box_scores_for_final_games(db_session, "nba")
+
+    assert seen["id"] == "401700888"

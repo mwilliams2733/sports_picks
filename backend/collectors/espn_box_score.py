@@ -6,11 +6,17 @@ which is a prediction feature. Grading needs the opposite -- "what did this
 player actually do in that game" -- so this module is keyed on a Game and only
 ever runs after one is final.
 
-ESPN shares no id with our ``Game`` (there is no ``espn_id`` column), so an
-event is resolved by date plus team abbreviations. Our dates run one day ahead
-of ESPN's for most games (UTC vs ET): of 8 sampled final NBA games, 7 matched
-at ESPN offset -1 and 1 matched exactly. The search therefore covers a +/-1 day
-window, ordered so an exact match always wins.
+``Game.espn_id`` carries ESPN's event id since plan 014, so a game that has
+one is fetched directly -- one request instead of up to four, and no date
+guesswork at all.
+
+Rows without an id fall back to searching the scoreboard by date plus team
+abbreviations, over a +/-1 day window. That window exists because ESPN
+timestamps in UTC while filing its scoreboard by Eastern date: of 8 sampled
+final NBA games, 7 matched at offset -1 and 1 matched exactly. The order is
+0, -1, +1 so an exact match always wins. Plan 014 fixed the storage side, but
+rows predating it -- 336 in production, mostly ncaab and boxing -- still need
+the search.
 """
 import logging
 from datetime import date, timedelta
@@ -193,10 +199,13 @@ def collect_box_scores_for_final_games(session, sport: str | None = None) -> int
         if not home or not away:
             continue
 
-        event_id = resolve_espn_event(
-            sport=game.sport, game_date=game.date,
-            home_abbr=home.abbreviation, away_abbr=away.abbreviation,
-        )
+        # Prefer the stored id: exact, and one request instead of up to four.
+        event_id = game.espn_id
+        if event_id is None:
+            event_id = resolve_espn_event(
+                sport=game.sport, game_date=game.date,
+                home_abbr=home.abbreviation, away_abbr=away.abbreviation,
+            )
         if event_id is None:
             logger.info("No ESPN event for %s %s @ %s on %s",
                         game.sport, away.abbreviation, home.abbreviation, game.date)
