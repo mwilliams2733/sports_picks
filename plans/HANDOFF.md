@@ -378,6 +378,99 @@ app -- all three confirmed present before anything was removed. The
 docstring at `backend/api/main.py:138` listed two of the deleted files as
 live launch sites and has been corrected.
 
+## Why the moneyline picks lose — 2026-09-19
+
+142 graded moneyline picks across **54 games**. ncaab loses 51.14 units at
+-0.457 ROI; nba *makes* 23.84 at +0.795. That split is the clue.
+
+### The claimed edge is inverted
+
+Holding price roughly constant, inside big underdogs only:
+
+```
+  edge  0-20%   n=6    50.0% win   avg price +787   roi +3.213
+  edge 20-35%   n=24   20.8% win   avg price +359   roi -0.123
+  edge 35-50%   n=36    0.0% win   avg price +907   roi -1.000
+```
+
+**36 picks claiming a 35-50% edge, at an average price of +907, won zero
+times.** The comparable +787 group with a *smaller* claimed edge won half. A
+larger claimed edge does not merely fail to predict return — it predicts
+return in the wrong direction. This is not the big-underdog concentration:
+price is held roughly constant across the top and bottom rows.
+
+### The mechanism: one home-advantage intercept for every sport
+
+`CalibratedModel.train_from_db` (`backend/analysis/calibrated_model.py:97`)
+selects every `status='final'` game with **no sport filter**, and fits one
+logistic regression. `sport` appears in that module only at lines 75-76,
+inside `_fallback_probability` — the heuristic used when the model is *not*
+trained. The trained model has no notion of sport at all.
+
+`extract_features` sets **`"home_flag": 1`** — a constant, in training and at
+prediction. So home advantage cannot be a learned coefficient; it lives
+entirely in the intercept, and there is only one.
+
+```
+  sport     final games   actual home win%
+  nba              1248              0.554
+  ncaab              72              0.708
+  mlb                54              0.519
+  POOLED           1374              0.561   <- the single intercept
+```
+
+nba is **91%** of the pool, so the intercept is effectively nba's 0.554,
+applied to ncaab whose reality is 0.708 — a **~15 point** underestimate of
+home advantage. Away teams in ncaab are therefore overrated by roughly that
+much, which manufactures exactly the edges observed: large, concentrated on
+away underdogs, and wrong.
+
+### Three independent corroborations
+
+1. **Side split.** AWAY n=112 at 24.1% (-0.264 ROI); HOME n=30 at 46.7%
+   (+0.077). And big-dog AWAY n=61 wins **6.6%** while big-dog HOME n=5 wins
+   80%.
+2. **The generator prefers home.** Pick generation is
+   `if home_edge >= min_edge: ... elif away_edge >= min_edge:` — home is
+   tested first, so home picks are structurally favoured. Away still
+   outnumbers home **112 to 30**. That only happens if `away_edge` is
+   systematically much larger.
+3. **nba is profitable, ncaab is not.** A natural experiment: the pooled
+   intercept happens to fit nba (0.554 vs pooled 0.561) and misfit ncaab
+   (0.708). nba moneyline returns +0.795 ROI; ncaab -0.457.
+
+### Caveats
+
+- **Effective n is ~54, not 142.** Picks cluster within games.
+- **ncaab's 0.708 rests on 72 games** (±~5 points). Even the low end of that
+  interval sits far above 0.561, so the direction is safe; the magnitude is
+  not precise.
+- The 0-for-36 group is concentrated in a small number of game-days.
+- nba's +0.795 is 30 picks. Directional.
+
+### Two data gaps found on the way
+
+- **`model_prob` is NULL on all 708 picks**, every type. Not a live bug: the
+  wiring landed 2026-09-16 (`4bb2cf2`) and the newest pick is 2026-05-24.
+  Future picks will carry it. Until then the model's own predicted
+  probability cannot be compared against outcomes directly — which is the
+  measurement that would confirm the above rather than infer it.
+- **`home_flag` is a fourth dead feature**, alongside the three
+  (`offensive_rating`, `defensive_rating`, `pace`) the calibration report
+  already names.
+
+### What would fix it
+
+Train per sport, or add sport as a feature so the intercept can differ. Given
+ncaab has only 72 final games — well above `MIN_TRAINING_GAMES = 30` but thin
+— per-sport training would make ncaab's model very small. A sport dummy in
+the pooled fit keeps the sample and lets the baseline move. Either way the
+fix is testable offline: assert the fitted home baseline for ncaab lands near
+0.70 rather than 0.56.
+
+**Do not re-tune `min_edge` first.** The edge estimate is inverted above 10%;
+raising the threshold selects harder for the defect.
+
 ## Where things stand
 
 `master` is at `cc9eee2` and **pushed**. Test baseline: **646 passing backend,
