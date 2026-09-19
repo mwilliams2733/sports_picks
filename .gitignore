@@ -14,3 +14,8 @@ uvicorn.log
 *.egg-info/
 codebase_export.txt
 digest_preview.html
+
+# scheduler runtime logs (rotated by scripts/start_scheduler.ps1)
+scheduler.log
+scheduler.out.log
+scheduler*.prev
