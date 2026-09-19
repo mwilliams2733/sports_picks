@@ -95,3 +95,27 @@ def test_average_odds_never_returns_invalid_band():
     result = strat._average_odds(game)
     assert abs(result["moneyline_home"]) >= 100
     assert abs(result["moneyline_away"]) >= 100
+
+
+def test_average_odds_straddling_books_do_not_average_into_the_band():
+    """The case that actually produced invalid prices in production.
+
+    Books on opposite sides of pick'em (-150 and +140) have an arithmetic
+    mean of -5, which is not a price at all. Averaging in probability space
+    gives p = (0.600 + 0.417) / 2 = 0.508 -> -103.
+
+    The pick'em test above does NOT catch this: its two books average to
+    exactly +100 under either method, so it passes even with arithmetic
+    averaging restored. 34 moneyline picks created 2026-03-15..21 carry
+    values in this band (-87..-61) and book 0.0 payout on a win.
+    """
+    strat = _ConcreteStrategy("test", {})
+    game = _make_game(odds=[_odds("book1", -150, 130), _odds("book2", 140, -160)])
+    result = strat._average_odds(game)
+
+    for side in ("moneyline_home", "moneyline_away"):
+        price = result[side]
+        assert not (-100 < price < 100), (
+            f"{side}={price} is inside the invalid band; "
+            "prices were averaged arithmetically, not in probability space")
+    assert result["moneyline_home"] == -103
