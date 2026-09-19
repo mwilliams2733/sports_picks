@@ -144,3 +144,52 @@ def test_the_other_sports_have_snapshots_now():
 
     for sport in ABBREVIATION_SPORTS:
         assert len(_table(sport)) > 0, f"{sport} has no committed team snapshot"
+
+
+# --------------------------------------------------------------------------
+# ncaaf aliases. The Odds API spells some schools out where ESPN abbreviates,
+# and vice versa. Each of these was observed unresolved in a production odds
+# fetch on 2026-09-19, skipping the game rather than creating an unmatchable
+# row.
+# --------------------------------------------------------------------------
+
+import pytest
+
+from backend.team_identity import canonical_abbr, resolution_of
+
+
+@pytest.mark.parametrize("odds_name", [
+    "UMass Minutemen",                  # ESPN: Massachusetts Minutemen
+    "Southeastern Louisiana Lions",     # ESPN: SE Louisiana Lions
+    "Appalachian State Mountaineers",   # ESPN: App State Mountaineers
+])
+def test_an_ncaaf_school_the_odds_api_names_differently_resolves(odds_name):
+    abbr, how = resolution_of("ncaaf", odds_name)
+    assert abbr is not None, f"{odds_name} still unresolved ({how})"
+
+
+@pytest.mark.parametrize("odds_name", [
+    "Sam Houston State Bearkats",       # truncated out of the 500-team page
+    "Southern Mississippi Golden Eagles",
+])
+def test_a_school_beyond_the_first_page_resolves(odds_name):
+    """These needed BOTH the paginated snapshot and an alias.
+
+    ESPN calls them "Sam Houston Bearkats" and "Southern Miss Golden Eagles",
+    so an alias alone would have pointed at a name the 500-team snapshot did
+    not contain -- and a dead alias fails silently.
+    """
+    assert canonical_abbr("ncaaf", odds_name) is not None
+
+
+def test_the_aliases_point_at_names_that_actually_exist():
+    """An alias naming a display_name absent from the snapshot is dead.
+
+    resolution_of falls through to unresolved when the target is missing, so
+    a typo'd alias fails silently rather than raising.
+    """
+    from backend.team_identity import _ALIASES, _by_display
+    for sport, table in _ALIASES.items():
+        known = _by_display(sport)
+        for label, target in table.items():
+            assert target in known, f"{sport}: alias {label!r} -> {target!r} not in snapshot"

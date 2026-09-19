@@ -36,6 +36,12 @@
     "location": "Air Force"
   },
   {
+    "abbreviation": "AFST",
+    "display_name": "Alfred State Pioneers",
+    "espn_id": "3162",
+    "location": "Alfred State"
+  },
+  {
     "abbreviation": "AGSU",
     "display_name": "Angelo State Rams",
     "espn_id": "2025",
@@ -58,6 +64,12 @@
     "display_name": "Alabama Crimson Tide",
     "espn_id": "333",
     "location": "Alabama"
+  },
+  {
+    "abbreviation": "ALBI",
+    "display_name": "Albion Britons",
+    "espn_id": "2790",
+    "location": "Albion"
   },
   {
     "abbreviation": "ALBR",
@@ -84,6 +96,12 @@
     "location": "Allegheny"
   },
   {
+    "abbreviation": "ALMA",
+    "display_name": "Alma Scots",
+    "espn_id": "2800",
+    "location": "Alma"
+  },
+  {
     "abbreviation": "ALNU",
     "display_name": "Allen Yellow Jackets",
     "espn_id": "2019",
@@ -96,10 +114,22 @@
     "location": "Alabama State"
   },
   {
+    "abbreviation": "ALVR",
+    "display_name": "Alvernia Golden Wolves",
+    "espn_id": "111674",
+    "location": "Alvernia"
+  },
+  {
     "abbreviation": "AMH",
     "display_name": "Amherst Mammoths",
     "espn_id": "7",
     "location": "Amherst"
+  },
+  {
+    "abbreviation": "AND",
+    "display_name": "Andrew Fighting Tigers",
+    "espn_id": "134002",
+    "location": "Andrew"
   },
   {
     "abbreviation": "ANIN",
@@ -108,10 +138,22 @@
     "location": "Anderson (IN)"
   },
   {
+    "abbreviation": "ANSC",
+    "display_name": "Anderson (SC) Trojans",
+    "espn_id": "129469",
+    "location": "Anderson (SC)"
+  },
+  {
     "abbreviation": "APP",
     "display_name": "App State Mountaineers",
     "espn_id": "2026",
     "location": "App State"
+  },
+  {
+    "abbreviation": "APPRE",
+    "display_name": "Apprentice School Builders",
+    "espn_id": "3111",
+    "location": "Apprentice School"
   },
   {
     "abbreviation": "APSU",
@@ -124,6 +166,12 @@
     "display_name": "Azusa Pacific Cougars",
     "espn_id": "2049",
     "location": "Azusa Pacific"
+  },
+  {
+    "abbreviation": "ARBA",
+    "display_name": "Arkansas Baptist Buffaloes",
+    "espn_id": "124386",
+    "location": "Arkansas Baptist"
   },
   {
     "abbreviation": "ARIZ",
@@ -210,6 +258,12 @@
     "location": "Augustana (SD)"
   },
   {
+    "abbreviation": "AVE M",
+    "display_name": "Ave Maria University Gyrenes",
+    "espn_id": "3178",
+    "location": "Ave Maria University"
+  },
+  {
     "abbreviation": "AVER",
     "display_name": "Averett Cougars",
     "espn_id": "2047",
@@ -222,6 +276,12 @@
     "location": "Avila University"
   },
   {
+    "abbreviation": "AZCH",
+    "display_name": "Arizona Christian Firestorm",
+    "espn_id": "108358",
+    "location": "Arizona Christian"
+  },
+  {
     "abbreviation": "BAK",
     "display_name": "Baker University Baker",
     "espn_id": "488",
@@ -232,6 +292,12 @@
     "display_name": "Ball State Cardinals",
     "espn_id": "2050",
     "location": "Ball State"
+  },
+  {
+    "abbreviation": "BART",
+    "display_name": "Barton Bulldogs",
+    "espn_id": "122666",
+    "location": "Barton"
   },
   {
     "abbreviation": "BATE",
@@ -294,10 +360,22 @@
     "location": "Benedict"
   },
   {
+    "abbreviation": "BENC",
+    "display_name": "Benedictine College Ravens",
+    "espn_id": "16111",
+    "location": "Benedictine College"
+  },
+  {
     "abbreviation": "BENT",
     "display_name": "Bentley Falcons",
     "espn_id": "2060",
     "location": "Bentley"
+  },
+  {
+    "abbreviation": "BERR",
+    "display_name": "Berry Vikings",
+    "espn_id": "2757",
+    "location": "Berry"
   },
   {
     "abbreviation": "BGSU",
@@ -324,6 +402,12 @@
     "location": "BLUEFIELD"
   },
   {
+    "abbreviation": "BLUS",
+    "display_name": "Bluefield State Big Blue",
+    "espn_id": "124180",
+    "location": "Bluefield State"
+  },
+  {
     "abbreviation": "BNIL",
     "display_name": "Benedictine (IL) Eagles",
     "espn_id": "2283",
@@ -348,6 +432,12 @@
     "location": "Bowie State"
   },
   {
+    "abbreviation": "BRE",
+    "display_name": "Brevard Tornados",
+    "espn_id": "2913",
+    "location": "Brevard"
+  },
+  {
     "abbreviation": "BRI",
     "display_name": "Bridgewater Eagles",
     "espn_id": "2079",
@@ -360,10 +450,22 @@
     "location": "Bridgewater State"
   },
   {
+    "abbreviation": "BRO",
+    "display_name": "Brockport Golden Eagles",
+    "espn_id": "2781",
+    "location": "Brockport"
+  },
+  {
     "abbreviation": "BRWN",
     "display_name": "Brown Bears",
     "espn_id": "225",
     "location": "Brown"
+  },
+  {
+    "abbreviation": "BRY",
+    "display_name": "Bryant Bulldogs",
+    "espn_id": "2803",
+    "location": "Bryant"
   },
   {
     "abbreviation": "BST",
@@ -402,6 +504,12 @@
     "location": "Buffalo"
   },
   {
+    "abbreviation": "BUMN",
+    "display_name": "Bethel (MN) Royals",
+    "espn_id": "2802",
+    "location": "Bethel (MN)"
+  },
+  {
     "abbreviation": "BVU",
     "display_name": "Buena Vista Beavers",
     "espn_id": "63",
@@ -432,10 +540,22 @@
     "location": "California"
   },
   {
+    "abbreviation": "CALU",
+    "display_name": "Calvin Knights",
+    "espn_id": "129738",
+    "location": "Calvin"
+  },
+  {
     "abbreviation": "CAM",
     "display_name": "Campbell Fighting Camels",
     "espn_id": "2097",
     "location": "Campbell"
+  },
+  {
+    "abbreviation": "CAPA",
+    "display_name": "California (PA) Vulcans",
+    "espn_id": "2858",
+    "location": "California (PA)"
   },
   {
     "abbreviation": "CAPU",
@@ -510,6 +630,12 @@
     "location": "Carthage"
   },
   {
+    "abbreviation": "CDF",
+    "display_name": "Central Methodist Eagles",
+    "espn_id": "2860",
+    "location": "Central Methodist"
+  },
+  {
     "abbreviation": "CGMU",
     "display_name": "Carnegie Mellon Tartans",
     "espn_id": "2102",
@@ -550,6 +676,18 @@
     "display_name": "Cincinnati Bearcats",
     "espn_id": "2132",
     "location": "Cincinnati"
+  },
+  {
+    "abbreviation": "CIT",
+    "display_name": "The Citadel Bulldogs",
+    "espn_id": "2643",
+    "location": "The Citadel"
+  },
+  {
+    "abbreviation": "CKGA",
+    "display_name": "Clark Atlanta Panthers",
+    "espn_id": "2805",
+    "location": "Clark Atlanta"
   },
   {
     "abbreviation": "CLBY",
@@ -624,16 +762,46 @@
     "location": "Central State"
   },
   {
+    "abbreviation": "CNTC",
+    "display_name": "Central College Dutch",
+    "espn_id": "2964",
+    "location": "Central College"
+  },
+  {
+    "abbreviation": "CNU",
+    "display_name": "Christopher Newport Captains",
+    "espn_id": "3112",
+    "location": "Christopher Newport"
+  },
+  {
     "abbreviation": "COE",
     "display_name": "Coe Kohawks",
     "espn_id": "2141",
     "location": "Coe"
   },
   {
+    "abbreviation": "COI",
+    "display_name": "College of Idaho Yotes",
+    "espn_id": "108382",
+    "location": "College of Idaho"
+  },
+  {
+    "abbreviation": "COLE",
+    "display_name": "Cole College Jaguars",
+    "espn_id": "3210",
+    "location": "Cole College"
+  },
+  {
     "abbreviation": "COLG",
     "display_name": "Colgate Raiders",
     "espn_id": "2142",
     "location": "Colgate"
+  },
+  {
+    "abbreviation": "COLLE",
+    "display_name": "Charlotte Saints",
+    "espn_id": "3253",
+    "location": "Charlotte"
   },
   {
     "abbreviation": "COLO",
@@ -658,6 +826,12 @@
     "display_name": "Concord Mountain Lions",
     "espn_id": "2148",
     "location": "Concord"
+  },
+  {
+    "abbreviation": "CONCMI",
+    "display_name": "Concordia-Michigan Cardinals",
+    "espn_id": "2985",
+    "location": "Concordia-Michigan"
   },
   {
     "abbreviation": "CONCONE",
@@ -696,6 +870,12 @@
     "location": "Crown"
   },
   {
+    "abbreviation": "CSP",
+    "display_name": "Concordia St. Paul Golden Bears",
+    "espn_id": "3066",
+    "location": "Concordia St. Paul"
+  },
+  {
     "abbreviation": "CSS",
     "display_name": "St. Scholastica Saints",
     "espn_id": "375",
@@ -706,6 +886,18 @@
     "display_name": "Colorado State Rams",
     "espn_id": "36",
     "location": "Colorado State"
+  },
+  {
+    "abbreviation": "CSUP",
+    "display_name": "CSU Pueblo ThunderWolves",
+    "espn_id": "2570",
+    "location": "CSU Pueblo"
+  },
+  {
+    "abbreviation": "CTLA",
+    "display_name": "Centenary (LA) Gentlemen",
+    "espn_id": "101442",
+    "location": "Centenary (LA)"
   },
   {
     "abbreviation": "CUC",
@@ -732,10 +924,22 @@
     "location": "Concordia (WI)"
   },
   {
+    "abbreviation": "CWAN",
+    "display_name": "Chowan Hawks",
+    "espn_id": "2804",
+    "location": "Chowan"
+  },
+  {
     "abbreviation": "CWAU",
     "display_name": "Central Washington Wildcats",
     "espn_id": "2120",
     "location": "Central Washington"
+  },
+  {
+    "abbreviation": "CWRU",
+    "display_name": "Case Western Reserve Spartans",
+    "espn_id": "2963",
+    "location": "Case Western Reserve"
   },
   {
     "abbreviation": "DAKOT",
@@ -766,6 +970,12 @@
     "display_name": "Dubuque Spartans",
     "espn_id": "49",
     "location": "Dubuque"
+  },
+  {
+    "abbreviation": "DEAN",
+    "display_name": "Dean Bulldogs",
+    "espn_id": "110438",
+    "location": "Dean"
   },
   {
     "abbreviation": "DEF",
@@ -832,6 +1042,12 @@
     "display_name": "Duquesne Dukes",
     "espn_id": "2184",
     "location": "Duquesne"
+  },
+  {
+    "abbreviation": "DVU",
+    "display_name": "Delaware Valley Aggies",
+    "espn_id": "2808",
+    "location": "Delaware Valley"
   },
   {
     "abbreviation": "DWU",
@@ -936,10 +1152,22 @@
     "location": "Eureka"
   },
   {
+    "abbreviation": "ERSK",
+    "display_name": "Erskine Flying Fleet",
+    "espn_id": "101784",
+    "location": "Erskine"
+  },
+  {
     "abbreviation": "ESU",
     "display_name": "East Stroudsburg Warriors",
     "espn_id": "2188",
     "location": "East Stroudsburg"
+  },
+  {
+    "abbreviation": "ETAM",
+    "display_name": "East Texas A&M Lions",
+    "espn_id": "2837",
+    "location": "East Texas A&M"
   },
   {
     "abbreviation": "ETBU",
@@ -954,10 +1182,28 @@
     "location": "East Tennessee State"
   },
   {
+    "abbreviation": "EU",
+    "display_name": "Eastern Eagles",
+    "espn_id": "127954",
+    "location": "Eastern"
+  },
+  {
+    "abbreviation": "EVA",
+    "display_name": "Evangel University Crusaders",
+    "espn_id": "2865",
+    "location": "Evangel University"
+  },
+  {
     "abbreviation": "EWU",
     "display_name": "Eastern Washington Eagles",
     "espn_id": "331",
     "location": "Eastern Washington"
+  },
+  {
+    "abbreviation": "FAI",
+    "display_name": "West Memphis Crusaders",
+    "espn_id": "3211",
+    "location": "West Memphis"
   },
   {
     "abbreviation": "FAMU",
@@ -1032,10 +1278,28 @@
     "location": "Franklin & Marshall"
   },
   {
+    "abbreviation": "FMSU",
+    "display_name": "Fairmont State Falcons",
+    "espn_id": "2986",
+    "location": "Fairmont State"
+  },
+  {
+    "abbreviation": "FMU",
+    "display_name": "Florida Memorial Lions",
+    "espn_id": "125762",
+    "location": "Florida Memorial"
+  },
+  {
     "abbreviation": "FOR",
     "display_name": "Fordham Rams",
     "espn_id": "2230",
     "location": "Fordham"
+  },
+  {
+    "abbreviation": "FP",
+    "display_name": "Franklin Pierce Ravens",
+    "espn_id": "112334",
+    "location": "Franklin Pierce"
   },
   {
     "abbreviation": "FRES",
@@ -1062,6 +1326,12 @@
     "location": "Ferris State"
   },
   {
+    "abbreviation": "FRSU",
+    "display_name": "Framingham State Rams",
+    "espn_id": "2967",
+    "location": "Framingham State"
+  },
+  {
     "abbreviation": "FSTU",
     "display_name": "Frostburg State Bobcats",
     "espn_id": "341",
@@ -1084,6 +1354,12 @@
     "display_name": "Fort Valley State Wildcats",
     "espn_id": "2232",
     "location": "Fort Valley State"
+  },
+  {
+    "abbreviation": "GAC",
+    "display_name": "Gustavus Adolphus Golden Gusties",
+    "espn_id": "2968",
+    "location": "Gustavus Adolphus"
   },
   {
     "abbreviation": "GANN",
@@ -1132,6 +1408,12 @@
     "display_name": "George Mason University Patriots",
     "espn_id": "2244",
     "location": "George Mason University"
+  },
+  {
+    "abbreviation": "GRAM",
+    "display_name": "Grambling Tigers",
+    "espn_id": "2755",
+    "location": "Grambling"
   },
   {
     "abbreviation": "GRANDVIEW",
@@ -1284,6 +1566,12 @@
     "location": "Hiram"
   },
   {
+    "abbreviation": "HLBT",
+    "display_name": "Hilbert Hawks",
+    "espn_id": "125974",
+    "location": "Hilbert"
+  },
+  {
     "abbreviation": "HLDL",
     "display_name": "Hillsdale Chargers",
     "espn_id": "2273",
@@ -1296,10 +1584,28 @@
     "location": "Hamline"
   },
   {
+    "abbreviation": "HNTC",
+    "display_name": "Huntingdon Hawks",
+    "espn_id": "2938",
+    "location": "Huntingdon"
+  },
+  {
     "abbreviation": "HNVR",
     "display_name": "Hanover Panthers",
     "espn_id": "2262",
     "location": "Hanover"
+  },
+  {
+    "abbreviation": "HOL",
+    "display_name": "Holland College Hurricanes",
+    "espn_id": "108354",
+    "location": "Holland College"
+  },
+  {
+    "abbreviation": "HOPE",
+    "display_name": "Hope Flying Dutchmen",
+    "espn_id": "2812",
+    "location": "Hope"
   },
   {
     "abbreviation": "HOU",
@@ -1332,10 +1638,28 @@
     "location": "Henderson State"
   },
   {
+    "abbreviation": "HSU",
+    "display_name": "Hardin Simmons Cowboys",
+    "espn_id": "2810",
+    "location": "Hardin Simmons"
+  },
+  {
     "abbreviation": "HUSS",
     "display_name": "Husson Eagles",
     "espn_id": "2280",
     "location": "Husson"
+  },
+  {
+    "abbreviation": "HVCC",
+    "display_name": "Troy Vikings",
+    "espn_id": "3237",
+    "location": "Troy"
+  },
+  {
+    "abbreviation": "HWPU",
+    "display_name": "Howard Payne Yellow Jackets",
+    "espn_id": "2758",
+    "location": "Howard Payne"
   },
   {
     "abbreviation": "IDHO",
@@ -1384,6 +1708,12 @@
     "display_name": "Indiana State Sycamores",
     "espn_id": "282",
     "location": "Indiana State"
+  },
+  {
+    "abbreviation": "INWESL",
+    "display_name": "Indiana Wesleyan Wildcats",
+    "espn_id": "111756",
+    "location": "Indiana Wesleyan"
   },
   {
     "abbreviation": "IOWA",
@@ -1446,6 +1776,12 @@
     "location": "James Madison"
   },
   {
+    "abbreviation": "JUDSO",
+    "display_name": "Elgin Eagles",
+    "espn_id": "122775",
+    "location": "Elgin"
+  },
+  {
     "abbreviation": "JUN",
     "display_name": "Juniata Eagles",
     "espn_id": "246",
@@ -1468,6 +1804,18 @@
     "display_name": "Kansas Wesleyan Ks Wesleyan",
     "espn_id": "547",
     "location": "Kansas Wesleyan"
+  },
+  {
+    "abbreviation": "KEAN",
+    "display_name": "Kean Cougars",
+    "espn_id": "2871",
+    "location": "Kean"
+  },
+  {
+    "abbreviation": "KEISER",
+    "display_name": "Keiser University Keiser",
+    "espn_id": "126110",
+    "location": "Keiser University"
   },
   {
     "abbreviation": "KENN",
@@ -1522,6 +1870,18 @@
     "display_name": "Kentucky Wesleyan Panthers",
     "espn_id": "2316",
     "location": "Kentucky Wesleyan"
+  },
+  {
+    "abbreviation": "KYCHR",
+    "display_name": "Kentucky Christian Knights",
+    "espn_id": "3077",
+    "location": "Kentucky Christian"
+  },
+  {
+    "abbreviation": "KYSN",
+    "display_name": "Keystone Giants",
+    "espn_id": "122774",
+    "location": "Keystone"
   },
   {
     "abbreviation": "KYSU",
@@ -1602,6 +1962,18 @@
     "location": "Liberty"
   },
   {
+    "abbreviation": "LIN",
+    "display_name": "Lindenwood Lions",
+    "espn_id": "2815",
+    "location": "Lindenwood"
+  },
+  {
+    "abbreviation": "LINB",
+    "display_name": "Lindenwood Belleville Lynx",
+    "espn_id": "3209",
+    "location": "Lindenwood Belleville"
+  },
+  {
     "abbreviation": "LINF",
     "display_name": "Linfield Wildcats",
     "espn_id": "203",
@@ -1614,16 +1986,40 @@
     "location": "Long Island University"
   },
   {
+    "abbreviation": "LIV",
+    "display_name": "Livingstone Blue Bears",
+    "espn_id": "2940",
+    "location": "Livingstone"
+  },
+  {
     "abbreviation": "LKER",
     "display_name": "Lake Erie Storm",
     "espn_id": "437",
     "location": "Lake Erie"
   },
   {
+    "abbreviation": "LKLD",
+    "display_name": "Lakeland Muskies",
+    "espn_id": "6353",
+    "location": "Lakeland"
+  },
+  {
+    "abbreviation": "LNCA",
+    "display_name": "Lincoln (CA) Oaklanders",
+    "espn_id": "124179",
+    "location": "Lincoln (CA)"
+  },
+  {
     "abbreviation": "LNGT",
     "display_name": "Langston Lions",
     "espn_id": "2324",
     "location": "Langston"
+  },
+  {
+    "abbreviation": "LNMO",
+    "display_name": "Lincoln (MO) Blue Tigers",
+    "espn_id": "2876",
+    "location": "Lincoln (MO)"
   },
   {
     "abbreviation": "LNPA",
@@ -1668,10 +2064,22 @@
     "location": "Lebanon Valley"
   },
   {
+    "abbreviation": "LWU",
+    "display_name": "Lindsey Wilson LINDSEY",
+    "espn_id": "2877",
+    "location": "Lindsey Wilson"
+  },
+  {
     "abbreviation": "LYCO",
     "display_name": "Lycoming Warriors",
     "espn_id": "2354",
     "location": "Lycoming"
+  },
+  {
+    "abbreviation": "LYON",
+    "display_name": "Lyon Scots",
+    "espn_id": "101161",
+    "location": "Lyon"
   },
   {
     "abbreviation": "M-OH",
@@ -1698,6 +2106,24 @@
     "location": "Massachusetts"
   },
   {
+    "abbreviation": "MB",
+    "display_name": "MANITOBA",
+    "espn_id": "2770",
+    "location": "Manitoba"
+  },
+  {
+    "abbreviation": "MCD",
+    "display_name": "McDaniel Green Terror",
+    "espn_id": "2700",
+    "location": "McDaniel"
+  },
+  {
+    "abbreviation": "MCK",
+    "display_name": "McKendree Bearcats",
+    "espn_id": "2816",
+    "location": "McKendree"
+  },
+  {
     "abbreviation": "MCM",
     "display_name": "McMurry War Hawks",
     "espn_id": "241",
@@ -1708,6 +2134,12 @@
     "display_name": "McNeese Cowboys",
     "espn_id": "2377",
     "location": "McNeese"
+  },
+  {
+    "abbreviation": "MCST",
+    "display_name": "Montclair State Red Hawks",
+    "espn_id": "2818",
+    "location": "Montclair State"
   },
   {
     "abbreviation": "MCTN",
@@ -1726,6 +2158,12 @@
     "display_name": "UMass Dartmouth Corsairs",
     "espn_id": "379",
     "location": "UMass Dartmouth"
+  },
+  {
+    "abbreviation": "MDNN",
+    "display_name": "MADONNA",
+    "espn_id": "126146",
+    "location": "Madonna"
   },
   {
     "abbreviation": "ME",
@@ -1818,6 +2256,12 @@
     "location": "Minot State"
   },
   {
+    "abbreviation": "MISE",
+    "display_name": "Misericordia Cougars",
+    "espn_id": "2969",
+    "location": "Misericordia"
+  },
+  {
     "abbreviation": "MISS",
     "display_name": "Ole Miss Rebels",
     "espn_id": "145",
@@ -1828,6 +2272,12 @@
     "display_name": "MIT Engineers",
     "espn_id": "109",
     "location": "MIT"
+  },
+  {
+    "abbreviation": "MITE",
+    "display_name": "Monterrey Tech Borregos",
+    "espn_id": "3100",
+    "location": "Monterrey Tech"
   },
   {
     "abbreviation": "MIZ",
@@ -1878,6 +2328,12 @@
     "location": "Morningside"
   },
   {
+    "abbreviation": "MNIL",
+    "display_name": "Monmouth (IL) Fighting Scots",
+    "espn_id": "2919",
+    "location": "Monmouth (IL)"
+  },
+  {
     "abbreviation": "MNMO",
     "display_name": "Minnesota Morris Cougars",
     "espn_id": "2399",
@@ -1888,6 +2344,18 @@
     "display_name": "Minnesota State Mavericks",
     "espn_id": "2364",
     "location": "Minnesota State"
+  },
+  {
+    "abbreviation": "MOBU",
+    "display_name": "Missouri Baptist Spartans",
+    "espn_id": "2880",
+    "location": "Missouri Baptist"
+  },
+  {
+    "abbreviation": "MON",
+    "display_name": "Monroe Mustangs",
+    "espn_id": "134001",
+    "location": "Monroe"
   },
   {
     "abbreviation": "MONM",
@@ -1920,6 +2388,12 @@
     "location": "Morgan State"
   },
   {
+    "abbreviation": "MOST",
+    "display_name": "Missouri State Bears",
+    "espn_id": "2623",
+    "location": "Missouri State"
+  },
+  {
     "abbreviation": "MOWE",
     "display_name": "Missouri Western Griffons",
     "espn_id": "137",
@@ -1930,6 +2404,12 @@
     "display_name": "Morehouse Maroon Tigers",
     "espn_id": "60",
     "location": "Morehouse"
+  },
+  {
+    "abbreviation": "MRMK",
+    "display_name": "Merrimack Warriors",
+    "espn_id": "2771",
+    "location": "Merrimack"
   },
   {
     "abbreviation": "MRSH",
@@ -1984,6 +2464,12 @@
     "display_name": "Michigan State Spartans",
     "espn_id": "127",
     "location": "Michigan State"
+  },
+  {
+    "abbreviation": "MSUM",
+    "display_name": "Minnesota St Moorhead Dragons",
+    "espn_id": "2817",
+    "location": "Minnesota St Moorhead"
   },
   {
     "abbreviation": "MTST",
@@ -2052,6 +2538,12 @@
     "location": "Mayville State"
   },
   {
+    "abbreviation": "NAMU",
+    "display_name": "North American Stallions",
+    "espn_id": "123086",
+    "location": "North American"
+  },
+  {
     "abbreviation": "NAU",
     "display_name": "Northern Arizona Lumberjacks",
     "espn_id": "2464",
@@ -2074,6 +2566,12 @@
     "display_name": "North Carolina A&T Aggies",
     "espn_id": "2448",
     "location": "North Carolina A&T"
+  },
+  {
+    "abbreviation": "NCC",
+    "display_name": "North Central College Cardinals",
+    "espn_id": "3071",
+    "location": "North Central College"
   },
   {
     "abbreviation": "NCCU",
@@ -2118,6 +2616,12 @@
     "location": "Nebraska Kearney"
   },
   {
+    "abbreviation": "NEL",
+    "display_name": "Nelson (TX) Lions",
+    "espn_id": "2904",
+    "location": "Nelson (TX)"
+  },
+  {
     "abbreviation": "NESU",
     "display_name": "Northeastern State RiverHawks",
     "espn_id": "196",
@@ -2130,10 +2634,22 @@
     "location": "Nevada"
   },
   {
+    "abbreviation": "NGU",
+    "display_name": "North Greenville Trailblazers",
+    "espn_id": "2822",
+    "location": "North Greenville"
+  },
+  {
     "abbreviation": "NHVN",
     "display_name": "New Haven Chargers",
     "espn_id": "2441",
     "location": "New Haven"
+  },
+  {
+    "abbreviation": "NICC",
+    "display_name": "Nichols Bison",
+    "espn_id": "2884",
+    "location": "Nichols"
   },
   {
     "abbreviation": "NICH",
@@ -2196,16 +2712,64 @@
     "location": "Norwich"
   },
   {
+    "abbreviation": "NWD",
+    "display_name": "Northwood Timberwolves",
+    "espn_id": "2886",
+    "location": "Northwood"
+  },
+  {
+    "abbreviation": "NWOK",
+    "display_name": "Northwestern (OK) Rangers",
+    "espn_id": "2823",
+    "location": "Northwestern (OK)"
+  },
+  {
     "abbreviation": "NWST",
     "display_name": "Northwestern State Demons",
     "espn_id": "2466",
     "location": "Northwestern State"
   },
   {
+    "abbreviation": "NWU",
+    "display_name": "Nebraska Wesleyan Prairie Wolves",
+    "espn_id": "6845",
+    "location": "Nebraska Wesleyan"
+  },
+  {
+    "abbreviation": "NYCL",
+    "display_name": "SUNY Cortland Red Dragons",
+    "espn_id": "2782",
+    "location": "SUNY Cortland"
+  },
+  {
+    "abbreviation": "NYER",
+    "display_name": "SUNY Erie Kats",
+    "espn_id": "3236",
+    "location": "SUNY Erie"
+  },
+  {
+    "abbreviation": "NYMS",
+    "display_name": "SUNY Morrisville Mustangs",
+    "espn_id": "3110",
+    "location": "SUNY Morrisville"
+  },
+  {
+    "abbreviation": "NYMT",
+    "display_name": "SUNY Maritime Privateers",
+    "espn_id": "2951",
+    "location": "SUNY Maritime"
+  },
+  {
     "abbreviation": "OBE",
     "display_name": "Oberlin Yeomen",
     "espn_id": "391",
     "location": "Oberlin"
+  },
+  {
+    "abbreviation": "OBU",
+    "display_name": "Ouachita Baptist Tigers",
+    "espn_id": "2888",
+    "location": "Ouachita Baptist"
   },
   {
     "abbreviation": "ODU",
@@ -2250,6 +2814,12 @@
     "location": "St. Olaf"
   },
   {
+    "abbreviation": "OPSU",
+    "display_name": "Oklahoma Panhandle OK PANHANDLE ST",
+    "espn_id": "2824",
+    "location": "Oklahoma Panhandle"
+  },
+  {
     "abbreviation": "ORE",
     "display_name": "Oregon Ducks",
     "espn_id": "2483",
@@ -2278,6 +2848,12 @@
     "display_name": "Oklahoma Sooners",
     "espn_id": "201",
     "location": "Oklahoma"
+  },
+  {
+    "abbreviation": "OWU",
+    "display_name": "Ohio Wesleyan Battling Bishops",
+    "espn_id": "2980",
+    "location": "Ohio Wesleyan"
   },
   {
     "abbreviation": "PACE",
@@ -2316,6 +2892,36 @@
     "location": "Pittsburgh"
   },
   {
+    "abbreviation": "PLYM",
+    "display_name": "Plymouth State Panthers",
+    "espn_id": "2972",
+    "location": "Plymouth State"
+  },
+  {
+    "abbreviation": "POINT",
+    "display_name": "Point University Skyhawks",
+    "espn_id": "3179",
+    "location": "Point University"
+  },
+  {
+    "abbreviation": "POPI",
+    "display_name": "Pomona Pitzer Sagehens",
+    "espn_id": "2923",
+    "location": "Pomona Pitzer"
+  },
+  {
+    "abbreviation": "POST",
+    "display_name": "Post Eagles",
+    "espn_id": "126086",
+    "location": "Post"
+  },
+  {
+    "abbreviation": "PRES",
+    "display_name": "Presbyterian Blue Hose",
+    "espn_id": "2506",
+    "location": "Presbyterian"
+  },
+  {
     "abbreviation": "PRIN",
     "display_name": "Princeton Tigers",
     "espn_id": "163",
@@ -2340,10 +2946,52 @@
     "location": "Pittsburg State"
   },
   {
+    "abbreviation": "PUG",
+    "display_name": "Puget Sound Loggers",
+    "espn_id": "2508",
+    "location": "Puget Sound"
+  },
+  {
+    "abbreviation": "PUR",
+    "display_name": "Purdue Boilermakers",
+    "espn_id": "2509",
+    "location": "Purdue"
+  },
+  {
+    "abbreviation": "PV",
+    "display_name": "Prairie View A&M Panthers",
+    "espn_id": "2504",
+    "location": "Prairie View A&M"
+  },
+  {
+    "abbreviation": "QUI",
+    "display_name": "Quincy Hawks",
+    "espn_id": "2825",
+    "location": "Quincy"
+  },
+  {
     "abbreviation": "REDL",
     "display_name": "Redlands Bulldogs",
     "espn_id": "29",
     "location": "Redlands"
+  },
+  {
+    "abbreviation": "RFU",
+    "display_name": "Rockford Regents",
+    "espn_id": "2524",
+    "location": "Rockford"
+  },
+  {
+    "abbreviation": "RHDS",
+    "display_name": "Rhodes Lynx",
+    "espn_id": "2519",
+    "location": "Rhodes"
+  },
+  {
+    "abbreviation": "RHDT",
+    "display_name": "Reinhardt Eagles",
+    "espn_id": "2890",
+    "location": "Reinhardt"
   },
   {
     "abbreviation": "RHIT",
@@ -2364,6 +3012,36 @@
     "location": "Richmond"
   },
   {
+    "abbreviation": "RIP",
+    "display_name": "Ripon Red Hawks",
+    "espn_id": "2891",
+    "location": "Ripon"
+  },
+  {
+    "abbreviation": "RMC",
+    "display_name": "Randolph Macon Yellow Jackets",
+    "espn_id": "2516",
+    "location": "Randolph Macon"
+  },
+  {
+    "abbreviation": "RMU",
+    "display_name": "Robert Morris Colonials",
+    "espn_id": "2523",
+    "location": "Robert Morris"
+  },
+  {
+    "abbreviation": "ROW",
+    "display_name": "Rowan Profs",
+    "espn_id": "2827",
+    "location": "Rowan"
+  },
+  {
+    "abbreviation": "RPI",
+    "display_name": "Rensselaer Engineers",
+    "espn_id": "2528",
+    "location": "Rensselaer"
+  },
+  {
     "abbreviation": "RSVT",
     "display_name": "Roosevelt Lakers",
     "espn_id": "599",
@@ -2382,6 +3060,66 @@
     "location": "Sacramento State"
   },
   {
+    "abbreviation": "SAL",
+    "display_name": "Salisbury Sea Gulls",
+    "espn_id": "2532",
+    "location": "Salisbury"
+  },
+  {
+    "abbreviation": "SALV",
+    "display_name": "Salve Regina Seahawks",
+    "espn_id": "2776",
+    "location": "Salve Regina"
+  },
+  {
+    "abbreviation": "SAM",
+    "display_name": "Samford Bulldogs",
+    "espn_id": "2535",
+    "location": "Samford"
+  },
+  {
+    "abbreviation": "SANS",
+    "display_name": "Saint Anselm Hawks",
+    "espn_id": "2830",
+    "location": "Saint Anselm"
+  },
+  {
+    "abbreviation": "SAR",
+    "display_name": "Southern Arkansas Muleriders",
+    "espn_id": "2568",
+    "location": "Southern Arkansas"
+  },
+  {
+    "abbreviation": "SAV",
+    "display_name": "Savannah State Tigers",
+    "espn_id": "2542",
+    "location": "Savannah State"
+  },
+  {
+    "abbreviation": "SC",
+    "display_name": "South Carolina Gamecocks",
+    "espn_id": "2579",
+    "location": "South Carolina"
+  },
+  {
+    "abbreviation": "SCIA",
+    "display_name": "Simpson (IA) Storm",
+    "espn_id": "2564",
+    "location": "Simpson (IA)"
+  },
+  {
+    "abbreviation": "SCST",
+    "display_name": "South Carolina State Bulldogs",
+    "espn_id": "2569",
+    "location": "South Carolina State"
+  },
+  {
+    "abbreviation": "SCTS",
+    "display_name": "Southern Connecticut State Owls",
+    "espn_id": "2583",
+    "location": "Southern Connecticut State"
+  },
+  {
     "abbreviation": "SDAK",
     "display_name": "South Dakota Coyotes",
     "espn_id": "233",
@@ -2392,6 +3130,12 @@
     "display_name": "South Dakota Mines Hardrockers",
     "espn_id": "613",
     "location": "South Dakota Mines"
+  },
+  {
+    "abbreviation": "SDST",
+    "display_name": "South Dakota State Jackrabbits",
+    "espn_id": "2571",
+    "location": "South Dakota State"
   },
   {
     "abbreviation": "SDSU",
@@ -2406,6 +3150,18 @@
     "location": "Seton Hill"
   },
   {
+    "abbreviation": "SELA",
+    "display_name": "SE Louisiana Lions",
+    "espn_id": "2545",
+    "location": "SE Louisiana"
+  },
+  {
+    "abbreviation": "SEMO",
+    "display_name": "Southeast Missouri State Redhawks",
+    "espn_id": "2546",
+    "location": "Southeast Missouri State"
+  },
+  {
     "abbreviation": "SEOK",
     "display_name": "Southeastern Oklahoma State Savage Storm",
     "espn_id": "199",
@@ -2416,6 +3172,90 @@
     "display_name": "Southeastern Fires",
     "espn_id": "267",
     "location": "Southeastern"
+  },
+  {
+    "abbreviation": "SEWA",
+    "display_name": "Sewanee Tigers",
+    "espn_id": "2553",
+    "location": "Sewanee"
+  },
+  {
+    "abbreviation": "SFA",
+    "display_name": "Stephen F. Austin Lumberjacks",
+    "espn_id": "2617",
+    "location": "Stephen F. Austin"
+  },
+  {
+    "abbreviation": "SFIL",
+    "display_name": "St. Francis (IL) Fighting Saints",
+    "espn_id": "2595",
+    "location": "St. Francis (IL)"
+  },
+  {
+    "abbreviation": "SFIN",
+    "display_name": "Saint Francis (IN) Cougars",
+    "espn_id": "2831",
+    "location": "Saint Francis (IN)"
+  },
+  {
+    "abbreviation": "SFPA",
+    "display_name": "Saint Francis Red Flash",
+    "espn_id": "2598",
+    "location": "Saint Francis"
+  },
+  {
+    "abbreviation": "SFU",
+    "display_name": "Sioux Falls Cougars",
+    "espn_id": "2894",
+    "location": "Sioux Falls"
+  },
+  {
+    "abbreviation": "SHAW",
+    "display_name": "Shaw Bears",
+    "espn_id": "2551",
+    "location": "Shaw"
+  },
+  {
+    "abbreviation": "SHEN",
+    "display_name": "Shenandoah Hornets",
+    "espn_id": "2828",
+    "location": "Shenandoah"
+  },
+  {
+    "abbreviation": "SHEP",
+    "display_name": "Shepherd Rams",
+    "espn_id": "2974",
+    "location": "Shepherd"
+  },
+  {
+    "abbreviation": "SHIP",
+    "display_name": "Shippensburg Raiders",
+    "espn_id": "2559",
+    "location": "Shippensburg"
+  },
+  {
+    "abbreviation": "SHOU",
+    "display_name": "Shorter Hawks",
+    "espn_id": "2560",
+    "location": "Shorter"
+  },
+  {
+    "abbreviation": "SHSU",
+    "display_name": "Sam Houston Bearkats",
+    "espn_id": "2534",
+    "location": "Sam Houston"
+  },
+  {
+    "abbreviation": "SHTU",
+    "display_name": "Siena Heights Saints",
+    "espn_id": "2562",
+    "location": "Siena Heights"
+  },
+  {
+    "abbreviation": "SHU",
+    "display_name": "Sacred Heart Pioneers",
+    "espn_id": "2529",
+    "location": "Sacred Heart"
   },
   {
     "abbreviation": "SIU",
@@ -2430,10 +3270,40 @@
     "location": "San Jos\u00e9 State"
   },
   {
+    "abbreviation": "SMU",
+    "display_name": "SMU Mustangs",
+    "espn_id": "2567",
+    "location": "SMU"
+  },
+  {
     "abbreviation": "SNU",
     "display_name": "Southern Nazarene Crimson Storm",
     "espn_id": "200",
     "location": "Southern Nazarene"
+  },
+  {
+    "abbreviation": "SOR",
+    "display_name": "Southern Oregon Raiders",
+    "espn_id": "2584",
+    "location": "Southern Oregon"
+  },
+  {
+    "abbreviation": "SOSU",
+    "display_name": "Southwestern Oklahoma State Bulldogs",
+    "espn_id": "2927",
+    "location": "Southwestern Oklahoma State"
+  },
+  {
+    "abbreviation": "SOU",
+    "display_name": "Southern Jaguars",
+    "espn_id": "2582",
+    "location": "Southern"
+  },
+  {
+    "abbreviation": "SOVA",
+    "display_name": "Southern Virginia Knights",
+    "espn_id": "2896",
+    "location": "Southern Virginia"
   },
   {
     "abbreviation": "SPR",
@@ -2442,16 +3312,40 @@
     "location": "Springfield"
   },
   {
+    "abbreviation": "SRST",
+    "display_name": "Sul Ross State Lobos",
+    "espn_id": "2834",
+    "location": "Sul Ross State"
+  },
+  {
     "abbreviation": "SRU",
     "display_name": "Slippery Rock The Rock",
     "espn_id": "215",
     "location": "Slippery Rock"
   },
   {
+    "abbreviation": "STAM",
+    "display_name": "St. Ambrose Fighting Bees",
+    "espn_id": "2591",
+    "location": "St. Ambrose"
+  },
+  {
     "abbreviation": "STAN",
     "display_name": "Stanford Cardinal",
     "espn_id": "24",
     "location": "Stanford"
+  },
+  {
+    "abbreviation": "STAU",
+    "display_name": "St. Andrews Knights",
+    "espn_id": "111610",
+    "location": "St. Andrews"
+  },
+  {
+    "abbreviation": "STBK",
+    "display_name": "Stony Brook Seawolves",
+    "espn_id": "2619",
+    "location": "Stony Brook"
   },
   {
     "abbreviation": "STET",
@@ -2466,10 +3360,28 @@
     "location": "St. John Fisher"
   },
   {
+    "abbreviation": "STJM",
+    "display_name": "Saint John's (MN) Johnnies",
+    "espn_id": "2600",
+    "location": "Saint John's (MN)"
+  },
+  {
     "abbreviation": "STLG",
     "display_name": "Sterling STERLING KS",
     "espn_id": "618",
     "location": "Sterling"
+  },
+  {
+    "abbreviation": "STMN",
+    "display_name": "St. Thomas Tommies",
+    "espn_id": "2900",
+    "location": "St. Thomas"
+  },
+  {
+    "abbreviation": "STNC",
+    "display_name": "St. Norbert Green Knights",
+    "espn_id": "2832",
+    "location": "St. Norbert"
   },
   {
     "abbreviation": "STO",
@@ -2484,6 +3396,18 @@
     "location": "Stevenson"
   },
   {
+    "abbreviation": "STX",
+    "display_name": "Saint Xavier Cougars",
+    "espn_id": "2615",
+    "location": "Saint Xavier"
+  },
+  {
+    "abbreviation": "SUCA",
+    "display_name": "Simpson (CA) Red Hawks",
+    "espn_id": "129758",
+    "location": "Simpson (CA)"
+  },
+  {
     "abbreviation": "SUSQ",
     "display_name": "Susquehanna River Hawks",
     "espn_id": "216",
@@ -2496,16 +3420,40 @@
     "location": "Southern Utah"
   },
   {
+    "abbreviation": "SVC",
+    "display_name": "Saint Vincent Bearcats",
+    "espn_id": "2614",
+    "location": "Saint Vincent"
+  },
+  {
     "abbreviation": "SVSU",
     "display_name": "Saginaw Valley State Cardinals",
     "espn_id": "129",
     "location": "Saginaw Valley State"
   },
   {
+    "abbreviation": "SWBU",
+    "display_name": "Southwest Baptist Bearcats",
+    "espn_id": "2586",
+    "location": "Southwest Baptist"
+  },
+  {
     "abbreviation": "SWKS",
     "display_name": "Southwestern (KS) Moundbuilders",
     "espn_id": "616",
     "location": "Southwestern (KS)"
+  },
+  {
+    "abbreviation": "SWMS",
+    "display_name": "Southwest Minnesota State Mustangs",
+    "espn_id": "2587",
+    "location": "Southwest Minnesota State"
+  },
+  {
+    "abbreviation": "SWU",
+    "display_name": "Southwestern U Pirates",
+    "espn_id": "2588",
+    "location": "Southwestern U"
   },
   {
     "abbreviation": "SYR",
@@ -2520,10 +3468,40 @@
     "location": "Texas A&M"
   },
   {
+    "abbreviation": "TAMK",
+    "display_name": "Texas A&M-Kingsville Javelinas",
+    "espn_id": "2658",
+    "location": "Texas A&M-Kingsville"
+  },
+  {
+    "abbreviation": "TAR",
+    "display_name": "Tarleton State Texans",
+    "espn_id": "2627",
+    "location": "Tarleton State"
+  },
+  {
+    "abbreviation": "TBIB",
+    "display_name": "Trinity Bible Lions",
+    "espn_id": "3214",
+    "location": "Trinity Bible"
+  },
+  {
+    "abbreviation": "TCCT",
+    "display_name": "Trinity (CT) Bantams",
+    "espn_id": "2977",
+    "location": "Trinity (CT)"
+  },
+  {
     "abbreviation": "TCNJ",
     "display_name": "The College of New Jersey Lions",
     "espn_id": "2442",
     "location": "The College of New Jersey"
+  },
+  {
+    "abbreviation": "TCU",
+    "display_name": "TCU Horned Frogs",
+    "espn_id": "2628",
+    "location": "TCU"
   },
   {
     "abbreviation": "TEM",
@@ -2532,10 +3510,34 @@
     "location": "Temple"
   },
   {
+    "abbreviation": "TENN",
+    "display_name": "Tennessee Volunteers",
+    "espn_id": "2633",
+    "location": "Tennessee"
+  },
+  {
     "abbreviation": "TEX",
     "display_name": "Texas Longhorns",
     "espn_id": "251",
     "location": "Texas"
+  },
+  {
+    "abbreviation": "THI",
+    "display_name": "Thiel Tomcats",
+    "espn_id": "2644",
+    "location": "Thiel"
+  },
+  {
+    "abbreviation": "THO",
+    "display_name": "Thomas Night Hawks",
+    "espn_id": "134000",
+    "location": "Thomas"
+  },
+  {
+    "abbreviation": "TIFF",
+    "display_name": "Tiffin Dragons",
+    "espn_id": "2838",
+    "location": "Tiffin"
   },
   {
     "abbreviation": "TLRU",
@@ -2550,10 +3552,58 @@
     "location": "Tulsa"
   },
   {
+    "abbreviation": "TMOR",
+    "display_name": "Thomas More Saints",
+    "espn_id": "2646",
+    "location": "Thomas More"
+  },
+  {
+    "abbreviation": "TNST",
+    "display_name": "Tennessee State Tigers",
+    "espn_id": "2634",
+    "location": "Tennessee State"
+  },
+  {
+    "abbreviation": "TNTC",
+    "display_name": "Tennessee Tech Golden Eagles",
+    "espn_id": "2635",
+    "location": "Tennessee Tech"
+  },
+  {
+    "abbreviation": "TOL",
+    "display_name": "Toledo Rockets",
+    "espn_id": "2649",
+    "location": "Toledo"
+  },
+  {
     "abbreviation": "TOW",
     "display_name": "Towson Tigers",
     "espn_id": "119",
     "location": "Towson"
+  },
+  {
+    "abbreviation": "TRNE",
+    "display_name": "Trine Thunder",
+    "espn_id": "2651",
+    "location": "Trine"
+  },
+  {
+    "abbreviation": "TROY",
+    "display_name": "Troy Trojans",
+    "espn_id": "2653",
+    "location": "Troy"
+  },
+  {
+    "abbreviation": "TRST",
+    "display_name": "Truman State Bulldogs",
+    "espn_id": "2654",
+    "location": "Truman State"
+  },
+  {
+    "abbreviation": "TTU",
+    "display_name": "Texas Tech Red Raiders",
+    "espn_id": "2641",
+    "location": "Texas Tech"
   },
   {
     "abbreviation": "TUFT",
@@ -2562,10 +3612,46 @@
     "location": "Tufts"
   },
   {
+    "abbreviation": "TULN",
+    "display_name": "Tulane Green Wave",
+    "espn_id": "2655",
+    "location": "Tulane"
+  },
+  {
+    "abbreviation": "TUSC",
+    "display_name": "Tusculum Pioneers",
+    "espn_id": "2839",
+    "location": "Tusculum"
+  },
+  {
+    "abbreviation": "TUSK",
+    "display_name": "Tuskegee Golden Tigers",
+    "espn_id": "2657",
+    "location": "Tuskegee"
+  },
+  {
     "abbreviation": "TUTX",
     "display_name": "Trinity (TX) Tigers",
     "espn_id": "386",
     "location": "Trinity (TX)"
+  },
+  {
+    "abbreviation": "TXCL",
+    "display_name": "Texas College Steers",
+    "espn_id": "2637",
+    "location": "Texas College"
+  },
+  {
+    "abbreviation": "TXLU",
+    "display_name": "Texas Lutheran Bulldogs",
+    "espn_id": "2639",
+    "location": "Texas Lutheran"
+  },
+  {
+    "abbreviation": "TXSO",
+    "display_name": "Texas Southern Tigers",
+    "espn_id": "2640",
+    "location": "Texas Southern"
   },
   {
     "abbreviation": "TXST",
@@ -2640,6 +3726,12 @@
     "location": "Findlay"
   },
   {
+    "abbreviation": "UFFL",
+    "display_name": "St. Petersburg Glory Eagles",
+    "espn_id": "3254",
+    "location": "St. Petersburg"
+  },
+  {
     "abbreviation": "UGA",
     "display_name": "Georgia Bulldogs",
     "espn_id": "61",
@@ -2650,6 +3742,18 @@
     "display_name": "Upper Iowa Peacocks",
     "espn_id": "389",
     "location": "Upper Iowa"
+  },
+  {
+    "abbreviation": "UIW",
+    "display_name": "Incarnate Word Cardinals",
+    "espn_id": "2916",
+    "location": "Incarnate Word"
+  },
+  {
+    "abbreviation": "UJ",
+    "display_name": "Jamestown Jimmies",
+    "espn_id": "2939",
+    "location": "Jamestown"
   },
   {
     "abbreviation": "UK",
@@ -2694,10 +3798,22 @@
     "location": "Mount Union"
   },
   {
+    "abbreviation": "UMW",
+    "display_name": "Montana Western Bulldogs",
+    "espn_id": "2701",
+    "location": "Montana Western"
+  },
+  {
     "abbreviation": "UNA",
     "display_name": "North Alabama Lions",
     "espn_id": "2453",
     "location": "North Alabama"
+  },
+  {
+    "abbreviation": "UNAM",
+    "display_name": "University of Mexico MEXICO U",
+    "espn_id": "3212",
+    "location": "University of Mexico"
   },
   {
     "abbreviation": "UNC",
@@ -2712,10 +3828,22 @@
     "location": "Northern Colorado"
   },
   {
+    "abbreviation": "UNCP",
+    "display_name": "UNC Pembroke Braves",
+    "espn_id": "2882",
+    "location": "UNC Pembroke"
+  },
+  {
     "abbreviation": "UND",
     "display_name": "North Dakota Fighting Hawks",
     "espn_id": "155",
     "location": "North Dakota"
+  },
+  {
+    "abbreviation": "UNE",
+    "display_name": "New England Nor'easters",
+    "espn_id": "111675",
+    "location": "New England"
   },
   {
     "abbreviation": "UNH",
@@ -2778,6 +3906,12 @@
     "location": "Rochester (NY)"
   },
   {
+    "abbreviation": "URSN",
+    "display_name": "Ursinus Bears",
+    "espn_id": "2667",
+    "location": "Ursinus"
+  },
+  {
     "abbreviation": "USA",
     "display_name": "South Alabama Jaguars",
     "espn_id": "6",
@@ -2790,6 +3924,12 @@
     "location": "USC"
   },
   {
+    "abbreviation": "USCG",
+    "display_name": "Coast Guard Bears",
+    "espn_id": "2557",
+    "location": "Coast Guard"
+  },
+  {
     "abbreviation": "USD",
     "display_name": "San Diego Toreros",
     "espn_id": "301",
@@ -2800,6 +3940,18 @@
     "display_name": "South Florida Bulls",
     "espn_id": "58",
     "location": "South Florida"
+  },
+  {
+    "abbreviation": "USL",
+    "display_name": "St. Lawrence Saints",
+    "espn_id": "2779",
+    "location": "St. Lawrence"
+  },
+  {
+    "abbreviation": "USM",
+    "display_name": "Southern Miss Golden Eagles",
+    "espn_id": "2572",
+    "location": "Southern Miss"
   },
   {
     "abbreviation": "USU",
@@ -2820,16 +3972,76 @@
     "location": "Chattanooga"
   },
   {
+    "abbreviation": "UTEP",
+    "display_name": "UTEP Miners",
+    "espn_id": "2638",
+    "location": "UTEP"
+  },
+  {
     "abbreviation": "UTIC",
     "display_name": "Utica Pioneers",
     "espn_id": "390",
     "location": "Utica"
   },
   {
+    "abbreviation": "UTM",
+    "display_name": "UT Martin Skyhawks",
+    "espn_id": "2630",
+    "location": "UT Martin"
+  },
+  {
+    "abbreviation": "UTPB",
+    "display_name": "UT Permian Basin Falcons",
+    "espn_id": "110243",
+    "location": "UT Permian Basin"
+  },
+  {
+    "abbreviation": "UTSA",
+    "display_name": "UTSA Roadrunners",
+    "espn_id": "2636",
+    "location": "UTSA"
+  },
+  {
+    "abbreviation": "UTU",
+    "display_name": "Utah Tech Trailblazers",
+    "espn_id": "3101",
+    "location": "Utah Tech"
+  },
+  {
     "abbreviation": "UVA",
     "display_name": "Virginia Cavaliers",
     "espn_id": "258",
     "location": "Virginia"
+  },
+  {
+    "abbreviation": "UVAW",
+    "display_name": "UVA Wise Cavaliers",
+    "espn_id": "2842",
+    "location": "UVA Wise"
+  },
+  {
+    "abbreviation": "UWA",
+    "display_name": "West Alabama Tigers",
+    "espn_id": "2695",
+    "location": "West Alabama"
+  },
+  {
+    "abbreviation": "UWEC",
+    "display_name": "Wisconsin Eau Claire Blugolds",
+    "espn_id": "2738",
+    "location": "Wisconsin Eau Claire"
+  },
+  {
+    "abbreviation": "UWF",
+    "display_name": "West Florida Argonauts",
+    "espn_id": "110242",
+    "location": "West Florida"
+  },
+  {
+    "abbreviation": "UWL",
+    "display_name": "Wisconsin La Crosse Eagles",
+    "espn_id": "2740",
+    "location": "Wisconsin La Crosse"
   },
   {
     "abbreviation": "UWO",
@@ -2842,6 +4054,42 @@
     "display_name": "Wisconsin Platteville Pioneers",
     "espn_id": "272",
     "location": "Wisconsin Platteville"
+  },
+  {
+    "abbreviation": "UWRF",
+    "display_name": "Wisconsin River Falls Falcons",
+    "espn_id": "2723",
+    "location": "Wisconsin River Falls"
+  },
+  {
+    "abbreviation": "UWSP",
+    "display_name": "Wisconsin Stevens Point Pointers",
+    "espn_id": "2743",
+    "location": "Wisconsin Stevens Point"
+  },
+  {
+    "abbreviation": "UWST",
+    "display_name": "Wisconsin Stout Blue Devils",
+    "espn_id": "2744",
+    "location": "Wisconsin Stout"
+  },
+  {
+    "abbreviation": "UWW",
+    "display_name": "Wisconsin Whitewater Warhawks",
+    "espn_id": "2745",
+    "location": "Wisconsin Whitewater"
+  },
+  {
+    "abbreviation": "VAL",
+    "display_name": "Valparaiso Beacons",
+    "espn_id": "2674",
+    "location": "Valparaiso"
+  },
+  {
+    "abbreviation": "VALD",
+    "display_name": "Valdosta State Blazers",
+    "espn_id": "2673",
+    "location": "Valdosta State"
   },
   {
     "abbreviation": "VAN",
@@ -2860,6 +4108,12 @@
     "display_name": "Villanova Wildcats",
     "espn_id": "222",
     "location": "Villanova"
+  },
+  {
+    "abbreviation": "VMI",
+    "display_name": "VMI Keydets",
+    "espn_id": "2678",
+    "location": "VMI"
   },
   {
     "abbreviation": "VSU",
@@ -2886,10 +4140,40 @@
     "location": "Virginia Lynchburg"
   },
   {
+    "abbreviation": "VUU",
+    "display_name": "Virginia Union Panthers",
+    "espn_id": "2676",
+    "location": "Virginia Union"
+  },
+  {
+    "abbreviation": "W&J",
+    "display_name": "Washington & Jefferson Presidents",
+    "espn_id": "2686",
+    "location": "Washington & Jefferson"
+  },
+  {
+    "abbreviation": "W&L",
+    "display_name": "Washington and Lee Generals",
+    "espn_id": "2688",
+    "location": "Washington and Lee"
+  },
+  {
+    "abbreviation": "W&M",
+    "display_name": "William & Mary Tribe",
+    "espn_id": "2729",
+    "location": "William & Mary"
+  },
+  {
     "abbreviation": "WAB",
     "display_name": "Wabash Little Giants",
     "espn_id": "89",
     "location": "Wabash"
+  },
+  {
+    "abbreviation": "WAG",
+    "display_name": "Wagner Seahawks",
+    "espn_id": "2681",
+    "location": "Wagner"
   },
   {
     "abbreviation": "WAKE",
@@ -2902,6 +4186,12 @@
     "display_name": "Washington Huskies",
     "espn_id": "264",
     "location": "Washington"
+  },
+  {
+    "abbreviation": "WAYN",
+    "display_name": "Waynesburg Yellow Jackets",
+    "espn_id": "2845",
+    "location": "Waynesburg"
   },
   {
     "abbreviation": "WCHT",
@@ -2922,10 +4212,94 @@
     "location": "Westminster (MO)"
   },
   {
+    "abbreviation": "WCOH",
+    "display_name": "Wilmington (OH) Fightin' Quakers",
+    "espn_id": "2733",
+    "location": "Wilmington (OH)"
+  },
+  {
+    "abbreviation": "WCOL",
+    "display_name": "Western Colorado Mountaineers",
+    "espn_id": "2714",
+    "location": "Western Colorado"
+  },
+  {
+    "abbreviation": "WCPA",
+    "display_name": "Westminster (PA) Titans",
+    "espn_id": "2849",
+    "location": "Westminster (PA)"
+  },
+  {
+    "abbreviation": "WCSU",
+    "display_name": "Western Connecticut State Wolves",
+    "espn_id": "2843",
+    "location": "Western Connecticut State"
+  },
+  {
+    "abbreviation": "WCU",
+    "display_name": "Western Carolina Catamounts",
+    "espn_id": "2717",
+    "location": "Western Carolina"
+  },
+  {
+    "abbreviation": "WEB",
+    "display_name": "Weber State Wildcats",
+    "espn_id": "2692",
+    "location": "Weber State"
+  },
+  {
+    "abbreviation": "WES",
+    "display_name": "Westgate Christian University Ravens",
+    "espn_id": "134087",
+    "location": "Westgate Christian University"
+  },
+  {
+    "abbreviation": "WFST",
+    "display_name": "Westfield State Owls",
+    "espn_id": "2909",
+    "location": "Westfield State"
+  },
+  {
+    "abbreviation": "WGA",
+    "display_name": "West Georgia Wolves",
+    "espn_id": "2698",
+    "location": "West Georgia"
+  },
+  {
+    "abbreviation": "WHIW",
+    "display_name": "Whitworth Pirates",
+    "espn_id": "2721",
+    "location": "Whitworth"
+  },
+  {
+    "abbreviation": "WHLG",
+    "display_name": "Wheeling Cardinals",
+    "espn_id": "112335",
+    "location": "Wheeling"
+  },
+  {
+    "abbreviation": "WHTR",
+    "display_name": "Whittier Poets",
+    "espn_id": "2850",
+    "location": "Whittier"
+  },
+  {
+    "abbreviation": "WIDE",
+    "display_name": "Widener Pride",
+    "espn_id": "2725",
+    "location": "Widener"
+  },
+  {
     "abbreviation": "WILK",
     "display_name": "Wilkes Colonels",
     "espn_id": "398",
     "location": "Wilkes"
+  },
+  {
+    "abbreviation": "WINT",
+    "display_name": "Webber International Warriors",
+    "espn_id": "2691",
+    "location": "Webber International"
   },
   {
     "abbreviation": "WINU",
@@ -2940,16 +4314,154 @@
     "location": "Wisconsin"
   },
   {
+    "abbreviation": "WITT",
+    "display_name": "Wittenberg Tigers",
+    "espn_id": "2746",
+    "location": "Wittenberg"
+  },
+  {
+    "abbreviation": "WIU",
+    "display_name": "Western Illinois Leathernecks",
+    "espn_id": "2710",
+    "location": "Western Illinois"
+  },
+  {
+    "abbreviation": "WJC",
+    "display_name": "William Jewell Cardinals",
+    "espn_id": "2911",
+    "location": "William Jewell"
+  },
+  {
     "abbreviation": "WKU",
     "display_name": "Western Kentucky Hilltoppers",
     "espn_id": "98",
     "location": "Western Kentucky"
   },
   {
+    "abbreviation": "WLC",
+    "display_name": "Wisconsin Lutheran Warriors",
+    "espn_id": "2741",
+    "location": "Wisconsin Lutheran"
+  },
+  {
+    "abbreviation": "WLDF",
+    "display_name": "Waldorf Warriors",
+    "espn_id": "3080",
+    "location": "Waldorf"
+  },
+  {
+    "abbreviation": "WLM",
+    "display_name": "Williams Ephs",
+    "espn_id": "2731",
+    "location": "Williams"
+  },
+  {
+    "abbreviation": "WLMT",
+    "display_name": "Willamette Bearcats",
+    "espn_id": "2930",
+    "location": "Willamette"
+  },
+  {
+    "abbreviation": "WLSH",
+    "display_name": "Walsh Cavaliers",
+    "espn_id": "2682",
+    "location": "Walsh"
+  },
+  {
+    "abbreviation": "WLU",
+    "display_name": "West Liberty Hilltoppers",
+    "espn_id": "2699",
+    "location": "West Liberty"
+  },
+  {
+    "abbreviation": "WLWD",
+    "display_name": "William Woods Owls",
+    "espn_id": "129741",
+    "location": "William Woods"
+  },
+  {
+    "abbreviation": "WMSN",
+    "display_name": "Williamson Mechanics",
+    "espn_id": "3130",
+    "location": "Williamson"
+  },
+  {
+    "abbreviation": "WMU",
+    "display_name": "Western Michigan Broncos",
+    "espn_id": "2711",
+    "location": "Western Michigan"
+  },
+  {
+    "abbreviation": "WNE",
+    "display_name": "Western New England Golden Bears",
+    "espn_id": "2702",
+    "location": "Western New England"
+  },
+  {
+    "abbreviation": "WNMU",
+    "display_name": "Western New Mexico Mustangs",
+    "espn_id": "2703",
+    "location": "Western New Mexico"
+  },
+  {
+    "abbreviation": "WNST",
+    "display_name": "Winona State Warriors",
+    "espn_id": "2851",
+    "location": "Winona State"
+  },
+  {
+    "abbreviation": "WOF",
+    "display_name": "Wofford Terriers",
+    "espn_id": "2747",
+    "location": "Wofford"
+  },
+  {
+    "abbreviation": "WOO",
+    "display_name": "Wooster Fighting Scots",
+    "espn_id": "2748",
+    "location": "Wooster"
+  },
+  {
     "abbreviation": "WORC",
     "display_name": "Worcester State Lancers",
     "espn_id": "402",
     "location": "Worcester State"
+  },
+  {
+    "abbreviation": "WORU",
+    "display_name": "Western Oregon Wolves",
+    "espn_id": "2848",
+    "location": "Western Oregon"
+  },
+  {
+    "abbreviation": "WPEN",
+    "display_name": "William Penn Statesmen",
+    "espn_id": "2912",
+    "location": "William Penn"
+  },
+  {
+    "abbreviation": "WPI",
+    "display_name": "WPI Engineers",
+    "espn_id": "2749",
+    "location": "WPI"
+  },
+  {
+    "abbreviation": "WPU",
+    "display_name": "William Paterson Pioneers",
+    "espn_id": "2970",
+    "location": "William Paterson"
+  },
+  {
+    "abbreviation": "WRNR",
+    "display_name": "Warner Royals",
+    "espn_id": "2683",
+    "location": "Warner"
+  },
+  {
+    "abbreviation": "WSBN",
+    "display_name": "Washburn Ichabods",
+    "espn_id": "2687",
+    "location": "Washburn"
   },
   {
     "abbreviation": "WSCT",
@@ -2964,10 +4476,34 @@
     "location": "Wayne State (MI)"
   },
   {
+    "abbreviation": "WSNE",
+    "display_name": "Wayne State (NE) Wildcats",
+    "espn_id": "2844",
+    "location": "Wayne State (NE)"
+  },
+  {
+    "abbreviation": "WSSU",
+    "display_name": "Winston-Salem State Rams",
+    "espn_id": "2736",
+    "location": "Winston-Salem State"
+  },
+  {
     "abbreviation": "WSU",
     "display_name": "Washington State Cougars",
     "espn_id": "265",
     "location": "Washington State"
+  },
+  {
+    "abbreviation": "WTAM",
+    "display_name": "West Texas Buffaloes",
+    "espn_id": "2704",
+    "location": "West Texas"
+  },
+  {
+    "abbreviation": "WTBG",
+    "display_name": "Wartburg Knights",
+    "espn_id": "2685",
+    "location": "Wartburg"
   },
   {
     "abbreviation": "WUMO",
@@ -2976,10 +4512,22 @@
     "location": "Washington St. Louis"
   },
   {
+    "abbreviation": "WVSU",
+    "display_name": "West Virginia State Yellow Jackets",
+    "espn_id": "2707",
+    "location": "West Virginia State"
+  },
+  {
     "abbreviation": "WVU",
     "display_name": "West Virginia Mountaineers",
     "espn_id": "277",
     "location": "West Virginia"
+  },
+  {
+    "abbreviation": "WVUT",
+    "display_name": "WVU Tech Golden Bears",
+    "espn_id": "2706",
+    "location": "WVU Tech"
   },
   {
     "abbreviation": "WVWC",
@@ -2994,9 +4542,21 @@
     "location": "Wayland Baptist"
   },
   {
+    "abbreviation": "WYO",
+    "display_name": "Wyoming Cowboys",
+    "espn_id": "2751",
+    "location": "Wyoming"
+  },
+  {
     "abbreviation": "YALE",
     "display_name": "Yale Bulldogs",
     "espn_id": "43",
     "location": "Yale"
+  },
+  {
+    "abbreviation": "YSU",
+    "display_name": "Youngstown State Penguins",
+    "espn_id": "2754",
+    "location": "Youngstown State"
   }
 ]

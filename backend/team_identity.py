@@ -36,6 +36,19 @@ _ALIASES: dict[str, dict[str, str]] = {
         "Seattle Redhawks": "Seattle U Redhawks",
         "GW Revolutionaries": "George Washington Revolutionaries",
     },
+    "ncaaf": {
+        # The Odds API and ESPN disagree about how to spell these five. Each
+        # was observed unresolved in a production odds fetch on 2026-09-19,
+        # which skips the game rather than creating a row that can never
+        # match ESPN. Two of them (Sam Houston, Southern Miss) also needed
+        # the snapshot to be paginated past 500 teams before the target
+        # existed to alias to at all.
+        "UMass Minutemen": "Massachusetts Minutemen",
+        "Southeastern Louisiana Lions": "SE Louisiana Lions",
+        "Appalachian State Mountaineers": "App State Mountaineers",
+        "Sam Houston State Bearkats": "Sam Houston Bearkats",
+        "Southern Mississippi Golden Eagles": "Southern Miss Golden Eagles",
+    },
     "nba": {
         # The Odds API spells the city out; ESPN does not. Same franchise --
         # note ESPN keeps "Los Angeles Lakers" in full, so this is a genuine
