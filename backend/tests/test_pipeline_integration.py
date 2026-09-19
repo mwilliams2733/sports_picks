@@ -1,11 +1,43 @@
 from datetime import datetime, date, timezone
+from unittest.mock import AsyncMock, MagicMock
+import pytest
 from fastapi.testclient import TestClient
+from backend.api import pipeline_api
 from backend.api.main import create_app
 from backend.models import Base, ApiUsage
 from backend.database import get_session
 
+_CONFIG = {
+    "database_path": ":memory:",
+    "seasons": {"nba": {"start": "10-22", "end": "06-20"}},
+    "odds_budget": {"monthly_limit": 20000, "daily_target": 600, "reserve": 2000},
+}
 
-def test_full_pipeline_with_credits():
+
+@pytest.fixture()
+def offline_pipeline(monkeypatch):
+    """Stop /pipeline/run reaching ESPN.
+
+    These two tests used to run the entire real pipeline -- live requests for
+    every in-season sport -- which is why backend/tests/ stalled here for
+    minutes at a time. They assert the endpoint's contract, not the
+    collectors', so the collectors are mocked.
+    """
+    monkeypatch.setattr(pipeline_api, "load_config", lambda _p: dict(_CONFIG))
+    monkeypatch.setattr(pipeline_api, "fetch_and_store_games",
+                        AsyncMock(return_value=4))
+    monkeypatch.setattr(pipeline_api, "fetch_and_store_odds",
+                        AsyncMock(return_value=0))
+    monkeypatch.setattr(pipeline_api, "fetch_and_store_props",
+                        AsyncMock(return_value=0))
+    monkeypatch.setattr(pipeline_api, "generate_and_store_picks",
+                        MagicMock(return_value=0))
+    monkeypatch.setattr(pipeline_api, "run_prop_pipeline",
+                        AsyncMock(return_value={"props_analyzed": 0,
+                                                "picks_generated": 0}))
+
+
+def test_full_pipeline_with_credits(offline_pipeline):
     app = create_app(":memory:")
     Base.metadata.create_all(app.state.engine)
     client = TestClient(app)
@@ -13,12 +45,13 @@ def test_full_pipeline_with_credits():
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"
+    assert data["games_stored"] == 4
     assert "credits_used" in data
     assert "credits_remaining_month" in data
     assert "props_analyzed" in data
 
 
-def test_pipeline_with_sport_filter():
+def test_pipeline_with_sport_filter(offline_pipeline):
     app = create_app(":memory:")
     Base.metadata.create_all(app.state.engine)
     client = TestClient(app)
@@ -52,7 +85,6 @@ def test_all_sports_includes_mlb():
     assert "mlb" in ALL_SPORTS
 
 
-import pytest
 
 @pytest.mark.asyncio
 async def test_run_mlb_window_fetches_pitcher_scores(httpx_mock):
