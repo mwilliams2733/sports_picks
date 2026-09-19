@@ -97,6 +97,86 @@ it imagined and blind to the one that mattered.**
 - **More games.** Everything above rests on two nights of props. The scheduler
   is still not running; starting it is now safe for nba/mlb.
 
+## ncaab team identity repaired in production — 2026-09-19
+
+Plan 015 run end to end against `sports_picks.db`. Scheduler stopped first
+(PIDs 11760/8460 under `nohup`); backup taken after a
+`wal_checkpoint(TRUNCATE)`: **`sports_picks.backup-20260919-002602.db`**
+(`integrity_check: ok`, 1713 games, 708 picks, 629 teams). It is the only
+rollback.
+
+| | before | after |
+|---|---|---|
+| ncaab team rows | 147 | **87** |
+| — holding a display name | 78 | **1** |
+| ncaab games | 120 | **86** |
+| — final | 61 | **72** |
+| — still not final | 59 | **14** |
+| — missing `espn_id` | 59 | **12** |
+| ncaab picks | 429 | 429 |
+| — **graded** | **16** | **348** |
+| total games | 1713 | 1679 |
+| total picks / `pick_results` | 708 / 173 | 708 / **505** |
+
+`integrity_check: ok`, 0 duplicate ncaab fixtures, abbreviations unique,
+0 orphaned picks. **No picks and no final games were lost** — the 34 games
+removed were empty duplicate rows.
+
+### What was actually wrong
+
+`_ensure_game_from_odds` created missing teams as
+`Team(abbreviation=<display name>)` for every sport, though its docstring
+limited that to sports without ESPN coverage. ESPN sends `PENN`; a row
+holding `'Pennsylvania Quakers'` never matched, so those games never got an
+`espn_id` and never finalised. Fixed in `a18bae8`: labels now resolve through
+`backend/team_identity.py`, and a game whose team cannot be identified is
+skipped rather than backed by a row that can never match.
+
+**Two corrections to what this file previously claimed:**
+
+1. It said ncaab's problem was "~10 real games now exist twice". The measured
+   shape is **59 stranded originals**, and separately **34 duplicates** that
+   only become visible once the team rows merge — while the two schools hold
+   different team ids, a same-teams/same-date scan reads the twins as
+   different fixtures. Both were true at once.
+2. A survey identifying bad rows as `length(abbreviation) > 5` missed team
+   327, which holds `'QUC'`. Short is not the same as valid.
+
+### The survivor rule, measured
+
+`resolve_duplicate_games` keeps the **final** row. All 34 groups were
+`('final', 'scheduled')`: the final row carries the score, `espn_id`,
+`team_stats` and `elo_history`; the scheduled twin carries the picks and odds.
+**In 27 of 34 the picks sit on the non-final row**, so
+`merge_duplicate_games.py`'s "row with picks wins" would have discarded real
+scores in 79% of these cases. Do not reuse it here.
+
+### Two open items this surfaced
+
+1. **33 graded picks carry invalid `odds_at_pick`** (−99..−61; valid American
+   odds are ≤ −100 or ≥ +100). `payout_for` correctly refuses to price them
+   and books 0.0. Because a loss books −1.0 regardless of odds, only the
+   **16 wins** are zeroed — so **ncaab ROI is biased downward, not merely
+   noisy**. Any unit figure below is a floor. Where `odds_at_pick` acquires
+   these values is not yet traced.
+2. **12 ncaab games still have no `espn_id` and 14 remain non-final.**
+   `unknown_team` in `backfill_espn_ids` dropped from 7 to **0**, so the
+   identity problem is gone; what is left is ESPN genuinely not listing
+   those fixtures on the dates we hold.
+
+### First ncaab grading
+
+```
+  ncaab picks graded : 348 of 429   (141 win / 207 loss = 40.5%)
+  units              : -83.8   <- understated; 16 wins booked at 0
+```
+
+**Do not read 40.5% as a model verdict yet.** 348 picks sit across 72 games —
+about 4.8 per game, and picks within a game are correlated, so the effective
+sample is far smaller than 348. Quote effective n, as
+`backend/analysis/prop_calibration.py` already does. `digest.enabled` stays
+`false`.
+
 ## Where things stand
 
 `master` is at `cc9eee2` and **pushed**. Test baseline: **646 passing backend,
