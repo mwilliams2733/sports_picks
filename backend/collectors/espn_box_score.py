@@ -184,19 +184,26 @@ def collect_box_scores_for_final_games(session, sport: str | None = None) -> int
     written = 0
 
     for game in games:
+        home = session.get(Team, game.home_team_id)
+        away = session.get(Team, game.away_team_id)
+        if not home or not away:
+            continue
+
+        # Per GAME, not per date. Checking only (sport, date) meant that on any
+        # date with more than one game only the first was ever collected -- on
+        # production that was 176 of 1248 final games, and it is why a game's
+        # props could not be graded when another game shared its date.
+        # PlayerStat has no game_id, but two games on one date have different
+        # teams, so team_id is what distinguishes them.
         already = (
             session.query(PlayerStat.id)
             .filter(PlayerStat.stat_type == "game_log",
                     PlayerStat.sport == game.sport,
-                    PlayerStat.game_date == game.date)
+                    PlayerStat.game_date == game.date,
+                    PlayerStat.team_id.in_((home.id, away.id)))
             .first()
         )
         if already is not None:
-            continue
-
-        home = session.get(Team, game.home_team_id)
-        away = session.get(Team, game.away_team_id)
-        if not home or not away:
             continue
 
         # Prefer the stored id: exact, and one request instead of up to four.

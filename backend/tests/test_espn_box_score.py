@@ -282,3 +282,42 @@ def test_a_game_without_an_espn_id_still_falls_back_to_searching(
     ebs.collect_box_scores_for_final_games(db_session, "nba")
 
     assert seen["id"] == "401700888"
+
+
+def test_a_second_game_on_the_same_date_is_still_collected(db_session, monkeypatch):
+    """The resumability check was per-DATE, so on any date with more than one
+    game only the first was ever collected.
+
+    Found on production: 1248 final NBA games across 176 dates produced 3826
+    rows -- about 22 per date, i.e. one game each, where the true figure is
+    nearer 25,000. Game 1603's props could not be graded because its date
+    already held a different game's box score.
+
+    PlayerStat has no game_id, but it has team_id, and two games on one date
+    have different teams. That is what makes the check per-game.
+    """
+    game = _seed_final_game(db_session)          # teams 1 and 2, OKC/SA
+    # A DIFFERENT game's box score already exists on the same date.
+    db_session.add_all([
+        Team(id=10, name="New York Knicks", abbreviation="NY", sport="nba"),
+        Team(id=11, name="Boston Celtics", abbreviation="BOS", sport="nba"),
+    ])
+    db_session.flush()
+    db_session.add(PlayerStat(
+        player_name="Jalen Brunson", team_id=10, sport="nba",
+        stat_type="game_log", game_date=game.date, points=30.0,
+        source="espn", fetched_at=datetime.datetime.now(datetime.timezone.utc)))
+    db_session.commit()
+
+    monkeypatch.setattr(ebs, "resolve_espn_event", lambda **kw: "400")
+    monkeypatch.setattr(ebs, "fetch_summary", lambda *a, **k: {"boxscore": {"players": [
+        {"team": {"abbreviation": "OKC"},
+         "statistics": [{"labels": ["PTS"],
+                         "athletes": [{"athlete": {"displayName": "Chet Holmgren"},
+                                       "stats": ["22"]}]}]}]}})
+
+    written = ebs.collect_box_scores_for_final_games(db_session, "nba")
+
+    assert written == 1, "the second game on this date was skipped"
+    names = {p.player_name for p in db_session.query(PlayerStat).all()}
+    assert "Chet Holmgren" in names
