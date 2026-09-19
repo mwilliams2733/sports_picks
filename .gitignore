@@ -6,6 +6,14 @@ dist/
 *.db
 *.db-shm
 *.db-wal
+# Database backups taken before a migration or repair. `*.db` does not match
+# these -- the suffix comes after the extension -- so a `git add -A` would
+# otherwise stage a 6 MB binary holding every pick and user row.
+*.db.bak-*
+# Rotated and hand-preserved scheduler logs. These have held an Odds API key
+# in a request URL; see backend/collectors/odds_api.install_log_redaction.
+*.log
+*.log.*
 .env
 config.yaml
 .superpowers/

@@ -1369,3 +1369,74 @@ tuning now.
 intercept. The number barely moved from the old 0.702, but its provenance
 changed completely: it is now "almost no information" rather than "71 neutral
 games said 0.71". There is no data to move it toward until November.
+
+## Picks are flowing again — 2026-09-19 afternoon
+
+**824 picks, newest today.** The previous newest was 2026-05-24; the drought
+was nearly four months. Today's run produced 116 ncaaf picks: 41 over/under,
+38 spread, 37 moneyline.
+
+### What was actually stopping it
+
+The running scheduler was **stale**. It started at 08:22 and every fix from
+that morning was committed after: `0131318` at 08:29, `ae412df` at 09:22.
+Its last real run logged ~17 repetitions of `'EspnStatsSource' object has no
+attribute '_find_team_id'` — the bug `ae412df` fixed — and ended with
+`{'games': 86, 'stats_fetched': 0, 'picks_generated': 0}`. The 08:22 restart
+also landed just after the 08:00 window, so nothing had run on new code at
+all. **Restarting the scheduler is part of shipping a fix here**; the code
+being committed and green does not put it in production.
+
+### The Odds API key was being written to scheduler.log
+
+httpx logs the full request URL at INFO and the Odds API takes its key as a
+query parameter, so every odds fetch wrote it in plaintext. `redact_api_key`
+only ever guarded exception strings. Fixed in `7c50ffb` with a logging filter
+installed from `OddsAPICollector.__init__` — the one place guaranteed to run
+before httpx can log a URL carrying the key.
+
+The existing log files have been scrubbed and `*.log` is now gitignored.
+**The key that appeared in them should still be rotated**: it sat in
+plaintext on disk, and scrubbing the file afterwards does not undo that.
+
+### ncaaf: two separate causes, both needed
+
+`refresh_team_tables` asked ESPN for `?limit=500` and took what came back.
+ESPN caps the page there and exposes no page count, so college football —
+762 teams — was silently truncated. The snapshot is now paged: ncaaf 500 →
+760, every other sport byte-identical.
+
+Five schools also needed aliases, because the Odds API and ESPN genuinely
+disagree: UMass/Massachusetts, Southeastern Louisiana/SE Louisiana,
+Appalachian State/App State, Sam Houston State/Sam Houston, Southern
+Mississippi/Southern Miss. Pagination alone would not have fixed them, and
+aliases alone would have pointed at names the truncated snapshot lacked.
+
+### mlb's missing odds were not a collector bug
+
+`scheduled_sports` is `['nfl', 'ncaaf', 'mlb']`. `morning_scout` ran the
+already-due ncaaf window **inline**, that pipeline spent over 25 minutes
+fetching player stats one athlete at a time, and the loop never reached mlb.
+14 scheduled mlb games went the day with zero odds and nothing logged an
+error — the loop was simply still inside the earlier call.
+
+Due windows are now collected and run after every sport is scheduled, still
+serialised. A failure in one no longer abandons the rest.
+
+### ESPN throttling is real
+
+The forced scout made **3172 requests and collected 128 403/429 responses**.
+ESPN publishes no rate limit and sends no `Retry-After`, but it does start
+refusing. `espn_http.get_with_retry` is now the single policy for both
+collectors: 429/403/5xx only (a 404 is a real answer), full jitter, bounded
+attempts.
+
+### Still open
+
+- **Rotate the Odds API key.**
+- The player-stats collector is sequential, one request per athlete. Retry
+  makes it more correct, not faster; a ncaaf slate is still ~25 minutes.
+- `ubuntu-latest` moves to Ubuntu 26 on 2026-10-19. Left unpinned.
+- Three dead model features (`offensive_rating`, `defensive_rating`, `pace`)
+  still need possession counts no collector supplies.
+- November: re-measure the neutral slot's 0.693 and ncaab's hosted baseline.
