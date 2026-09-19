@@ -314,6 +314,58 @@ failed — four tests errored. Fixed with `server_default="0"`. **`created_at`
 has the same latent shape**: it is NOT NULL with a Python-side default, so
 raw-SQL inserts into `picks` must supply it explicitly.
 
+## The scheduler now survives a reboot — 2026-09-19
+
+Registered Windows task **`sports_picks scheduler`**, running
+`scripts\start_scheduler.ps1` **at logon** as `mwill` (Interactive, Limited).
+
+| setting | value | why |
+|---|---|---|
+| `ExecutionTimeLimit` | `PT0S` | unlimited. The default is 3 days, which would kill a long-lived scheduler mid-week |
+| `MultipleInstances` | `IgnoreNew` | the task cannot run twice |
+| trigger delay | `PT1M` | let the network settle before the first ESPN/Odds call |
+| restart | 3 attempts, 5 min apart | |
+
+**Why logon and not startup.** The pipeline reads the shared secrets file
+under `~\.secrets` and runs from a per-user venv. An at-startup task runs as
+SYSTEM, with no user profile; running at startup *as* the user would require
+storing the account password. Logon needs no credentials and gives the
+process exactly the environment it has when started by hand.
+
+**The trade-off, stated rather than buried:** if the machine reboots and
+nobody logs in, the scheduler does not start. A reboot at 03:00 with a 09:00
+login misses that day's 08:00 `morning_scout` — `scout_retry_9` and
+`scout_retry_10` exist for roughly this case. Switching to SYSTEM-at-startup
+is a one-line change in `register_scheduler_task.ps1`, but the secrets path
+must be re-verified under that account first.
+
+### Verified, not assumed
+
+Task Scheduler reporting "Ready" is not a running pipeline. The scheduler was
+killed and the task fired the way logon would: `LastTaskResult 0`, the
+process came up, 4 jobs registered, 0 errors. Firing the task a second time
+returned the **same PIDs** — `start_scheduler.ps1` checks for a running
+`backend.pipeline.scheduler` first, because Task Scheduler's `IgnoreNew`
+stops the *task* running twice but not a task-started scheduler colliding
+with a hand-started one. Two instances would share `sports_picks.db` and run
+every cron job twice.
+
+### Logs
+
+`scheduler.log` is wired to **stderr**, because `logging.basicConfig` writes
+there — the first version put every INFO line in `scheduler.err.log` and left
+`scheduler.log` at 0 bytes. `scheduler.out.log` catches stray stdout and is
+normally empty. Both rotate to `.prev` on start, so a restart no longer
+destroys the log covering whatever went wrong. Both are gitignored.
+
+### Hazard: `restart.bat` would kill this
+
+`restart.bat` runs `taskkill /F /IM python.exe`, which kills **every** Python
+process on the machine — the scheduler, and every MCP server. It, and
+`start-server*.bat`, still point at the OneDrive path that has been dead
+since July 2026, and at system Python 3.14 rather than the venv. They are
+unusable as they stand and actively dangerous if run.
+
 ## Where things stand
 
 `master` is at `cc9eee2` and **pushed**. Test baseline: **646 passing backend,
