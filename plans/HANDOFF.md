@@ -3,79 +3,104 @@
 Everything below is recoverable from `git log` and `plans/`; nothing important
 lives only in a chat transcript.
 
-## Production was prepared on 2026-09-18
+## Production is prepared, collected and graded — 2026-09-18
 
-The five-step runbook has been **run against `sports_picks.db`**, each step
-dry-run first and verified against what it produced on a copy.
-
-Backup, taken after a `wal_checkpoint(TRUNCATE)` so the `.db` file is complete:
-**`sports_picks.backup-20260918-222023.db`** — `integrity_check: ok`, 708
-picks, 1664 games, 2116 elo_history. It is the only rollback.
+The runbook has been **run against `sports_picks.db`**, each step dry-run first
+and checked against what it produced on a copy. Backup, taken after a
+`wal_checkpoint(TRUNCATE)` so the `.db` file is complete:
+**`sports_picks.backup-20260918-222023.db`** (`integrity_check: ok`, 708 picks,
+1664 games). A second, pre-collection backup:
+`sports_picks.backup-20260918-223905.db`. They are the only rollback.
 
 | | before | after |
 |---|---|---|
-| games | 1664 | **1670** |
-| — final | 1058 | **1320** |
+| games | 1664 | **1713** |
+| — final | 1058 | **1363** |
 | — past, not final | 570 | **314** |
-| games with `espn_id` | 0 | **1328** |
+| games with `espn_id` | 0 | **1371** |
 | duplicate `espn_id` | 0 | **0** |
 | picks / max id | 708 / 708 | **708 / 708** |
-| — props with prop fields | 0 | **82** |
-| **`pick_results`** | **0** | **95** |
-| elo_history | 2116 | 2640 |
-| team_stats game_ids | 1058 | 1326 |
-| `player_stats` `game_log` | 0 | **0** |
+| **`pick_results`** | **0** | **173** |
+| — props graded | 0 | **75 of 82** |
+| **`player_stats` `game_log`** | **0** | **26,843** |
+| — players with ≥3 logs | 0 | **571** |
+| elo_history | 2116 | 2726 |
 
-`integrity_check: ok`. **95 picks graded — the first `pick_results` rows this
-project has ever had**: moneyline 18W/17L, over_under 14W/22L, spread 14W/10L
-(46W/49L, 48.4%).
+`integrity_check: ok`. Graded: moneyline 18W/18L, over_under 15W/22L,
+spread 14W/11L, **prop 48W/27L**. 535 picks remain ungraded — mostly on the
+314 games still not final (ncaab and mma/boxing).
 
-### Two things the run turned up
+### The first prop calibration from production
 
-**1. The catch-up inserts games, and for ncaab that means duplicates.**
-`fetch_and_store_games` upserts, so ESPN events we did not have became new
-rows: 19 of them (nba 6, ncaab 10, mlb 3), all `final`, all with scores and
-ids, no duplicate `espn_id`. For nba and mlb that is a clean gain.
+```
+  tier   settled   wins  losses   win%     units     roi  reliable
+  5         36     27       9    75.0%    +8.62  +0.239    NO
+  4         16      8       8    50.0%    -3.66  -0.229    NO
+  3         10      7       3    70.0%    +0.42  +0.042    NO
+  2         10      5       5    50.0%    -2.19  -0.219    NO
+  1          3      1       2    33.3%    -1.07  -0.358    NO
 
-**For ncaab it is not.** ESPN returns `M-OH`, `SMU`, `PV`; our ncaab rows hold
-display names like `"Pennsylvania Quakers"`. So the old rows could not match
-and new ones were created *alongside* them — on 2026-03-18 (2 new / 2 stuck)
-and 2026-03-22 (8 new / 12 stuck), very likely the same games under two
-naming schemes. `espn_id` cannot detect these: the old rows have NULL ids and
-different `team_id`s.
+  5-star vs 4-star: 75.0% vs 50.0% -- higher by 25.0 points.
+  tier 5: n=36 across 2 games -> effective 19.5 (ICC 0.05), 10.1 (ICC 0.15)
+```
 
-**429 of the 708 picks are on ncaab**, so this matters. It needs the
-team-identity fix (open item 8) before ncaab can be trusted; nba and mlb are
-unaffected.
+Reproduce with:
 
-**2. `backfill_elo_history` had to be replayed twice, for the reason already
-in this file.** It skips games that already have rows, so after the catch-up
-finalized 219 more nba games the original 1014 rows were stale — computed
-without those games interleaved. Deleting all nba `elo_history` and replaying
-moved **26 more ratings, median 16.64, p90 57.34, max 80.47 points**, on top of
-the 957 corrected earlier. nba now has exactly 2 rows per final game and none
-with more.
+```
+.venv/Scripts/python.exe -m backend.analysis.prop_calibration --db <abs win path> --sport nba
+```
 
-**Any "skip if already done" guard needs an answer to "what if what is already
-done is wrong?"** That is the third time this cost a step today.
+**These are identical to the figures the copy produced, which is the good
+news** — the production pipeline reproduced it exactly. **It is also the
+warning**: the sample is still the same **2 games**. Every tier is flagged
+unreliable, and tier 5's effective n is 19.5 against a `min_bin` of 30.
 
-### What is still not done
+**How badly the headline moves on partial data:** a run taken when only one of
+the two games had been graded reported tier 5 at **61.5%**. The same props, the
+same model, a 13-point swing from which game happened to be graded. Quote the
+effective n, never the raw win rate.
 
-- **Box scores.** `player_stats` `game_log` is still **0 rows**, so no prop is
-  gradeable and 012's Task 4 still cannot measure. 613 picks remain ungraded
-  (82 props plus picks on the 314 games still not final).
-- **Do open item 7 before that collection run** — `espn_box_score` still
-  searches the scoreboard on three dates per game, and rows now carry
-  `espn_id`. It turns ~4000 requests into ~1014.
-- **The scheduler is still not running.** Starting it is now safe for nba/mlb:
-  `espn_id` is populated, twins are merged and dates are Eastern. ncaab will
-  keep creating duplicates until open item 8 is fixed.
+**`digest.enabled` stays `false`.** What changed is that this measurement is
+now possible and repeatable in production — not that the model is good.
+
+### Two collector bugs found by doing this for real
+
+1. **Box scores were skipped per DATE, not per game.** The resumability check
+   filtered on `(sport, game_date)`, so on any date with more than one game
+   only the first was ever collected: **176 of 1248 final games, 3826 rows
+   where the true figure is 26,843**. It surfaced because a game's props could
+   not be graded when another game shared its date. `PlayerStat` has no
+   `game_id`, so the check now also filters on the game's own `team_id`s.
+   Fixed in `cc9eee2`. **The plan 010 test meant to guard resumability used one
+   game per date, so the distinction was invisible to it.**
+2. **The catch-up asked only about the stored date.** Game 1603 holds 48 props
+   and stayed non-final because it sits on 2026-05-25, the UTC date of an 8pm
+   ET tip, while ESPN files event `401873200` under 05-24. Now searches ±1 day,
+   the same window `backfill_espn_ids` already used. Fixed in `703e6ff`.
+   **That fix only works because plan 014 populated `espn_id` first** — without
+   an id the fallback still matches on the wrong date and inserts a twin. The
+   test encodes that dependency rather than hiding it.
+
+Both are the session's recurring shape: **a guard that was right about the case
+it imagined and blind to the one that mattered.**
+
+### Still open after all this
+
+- **7 props ungraded** — players ESPN's box score does not list. DNPs produce
+  no row by design (absent is not zero), so this is correct behaviour.
+- **314 past games still not final**, almost all ncaab (59) plus mma/boxing,
+  which are out of scope for the ESPN scoreboard path.
+- **ncaab duplicates.** The catch-up inserted rows for ESPN events whose
+  abbreviations do not match our display-name team rows, so ~10 real games now
+  exist twice. **429 of 708 picks are on ncaab.** Needs the team-identity fix
+  before ncaab can be trusted; nba and mlb are unaffected.
+- **More games.** Everything above rests on two nights of props. The scheduler
+  is still not running; starting it is now safe for nba/mlb.
 
 ## Where things stand
 
-`master` is at `e90049a` and **pushed** — local, `origin/master` and the last
-CI run agree. Test baseline: **642 passing backend, 0 failed**, identical on
-Python **3.12 and 3.14**; frontend eslint 0/0, `tsc` clean, vitest 15/15.
+`master` is at `cc9eee2` and **pushed**. Test baseline: **646 passing backend,
+0 failed**, identical on Python **3.12 and 3.14**; frontend eslint 0/0, `tsc` clean, vitest 15/15.
 Started this session at 545.
 
 **CI is live** (`.github/workflows/ci.yml`), ~50s for all three jobs. Local:
@@ -132,6 +157,9 @@ next day. Same session.
 | `033d712` | **012 T2** — recent form bounded to before the game |
 | `6c8c62e` | **012 T3** — one edge formula, on one scale |
 | `e90049a` | **WebSocket transport installed** — `/ws` can finally upgrade |
+| `a7112d7` | Box scores fetched by stored `espn_id` instead of searching |
+| `703e6ff` | Catch-up asks about the day's neighbours too |
+| `cc9eee2` | **Box scores skipped per game, not per date** — 176 of 1248 collected before this |
 
 **Plans 001-011 and 014 are complete. 013 is done bar the production
 catch-up. 012's Tasks 1-3 are done and Task 4 is blocked on data.**

@@ -434,7 +434,26 @@ def test_a_prop_with_enough_history_is_analysed_on_the_distribution():
 
 ### Task 4: Re-measure, and say plainly that the old baseline is void
 
-> **BLOCKED on data, not code — 2026-09-17.** Tasks 1-3 are done
+> **DONE 2026-09-18.** Box scores collected in production (26,843 `game_log`
+> rows, 571 players with >=3 logs), 75 of 82 props graded, and the report run:
+>
+> ```
+>   tier   settled   wins  losses   win%     units     roi  reliable
+>   5         36     27       9    75.0%    +8.62  +0.239    NO
+>   4         16      8       8    50.0%    -3.66  -0.229    NO
+>   3         10      7       3    70.0%    +0.42  +0.042    NO
+>   2         10      5       5    50.0%    -2.19  -0.219    NO
+>   1          3      1       2    33.3%    -1.07  -0.358    NO
+> ```
+>
+> Identical to the copy's figures, which is the good news. **The sample is
+> still 2 games**: tier 5's effective n is 19.5 against a `min_bin` of 30, and
+> every tier is flagged unreliable. A run taken when only one game had been
+> graded reported tier 5 at **61.5%** — a 13-point swing on the same props.
+> **Quote the effective n, never the raw win rate.** Full detail in
+> `plans/HANDOFF.md`.
+>
+> Historical note — the blocked state this replaced: Tasks 1-3 are done
 > (`adb66d8`, `033d712`, `6c8c62e`). This task cannot produce a measurement
 > yet:
 >
