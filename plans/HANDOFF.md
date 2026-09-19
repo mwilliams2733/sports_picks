@@ -471,6 +471,62 @@ fix is testable offline: assert the fitted home baseline for ncaab lands near
 **Do not re-tune `min_edge` first.** The edge estimate is inverted above 10%;
 raising the threshold selects harder for the defect.
 
+## First scheduled run reviewed — 2026-09-19 08:00 ET
+
+`morning_scout` fired on time and the scheduler is healthy. The structural
+work all succeeded; the two things that produce *value* both failed.
+
+```
+  Stored 71 ncaaf games for 2026-09-19        <- ESPN fine
+  Refreshed 1136 team_stat values             <- fine
+  Scheduled ncaaf window: 11 games, run 09:30 <- fired, completed
+  Prop pipeline: games 86, stats_fetched 0, props_analyzed 0, picks 0
+  Window complete. Credits today: 0, month: 0/20000
+```
+
+| | today |
+|---|---|
+| games stored | **86** |
+| odds rows | **0** |
+| picks created | **0** |
+| newest pick in the database | still 2026-05-24 |
+
+### P0 — the Odds API key is the one that was rotated out
+
+Every Odds API call returns **401 INVALID_KEY**, so no odds were stored and
+therefore no picks could be generated. It is not a subscription or sport
+problem:
+
+| key | `/v4/sports` |
+|---|---|
+| repo `.env` → `ODDS_API_KEY` (file dated 20 Mar 2026) | **401 INVALID_KEY** |
+| `~\.secrets\shared.env` → `TheODDSAPI` | **200**, 8736 credits left, ncaaf/nfl/mlb all offered |
+
+Nothing bridges the two. `backend/config.py:14` reads only
+`os.environ.get("ODDS_API_KEY")`, and `load_dotenv()` at `config.py:7` reads
+only `./.env` — which still holds the pre-rotation key. The rotated key has
+been sitting in the shared secrets file under a different name the whole time.
+
+`.env` is gitignored and was never committed, so the stale key did not leak.
+
+**This is the single thing standing between the pipeline and producing
+picks**, and it matters today: ncaaf is in season (71 games on 2026-09-19),
+nfl and mlb are live, and nba does not start until 22 Oct.
+
+### P1 — `EspnStatsSource._find_team_id` does not exist
+
+`espn_stats_source.py:52` calls `self._find_team_id(sport, team_abbr)` from
+`fetch_season_averages`, and the method is defined nowhere on the class.
+**284 warnings in one run** — one per team — and the prop pipeline reported
+`stats_fetched: 0`. This was already open item 9; it is now confirmed firing
+in production on every scheduled run.
+
+### Not a problem
+
+- The 4 ncaaf 401s are the same key fault, not a separate issue.
+- `Credits today: 0` is consistent: every call 401'd, so nothing was billed.
+- The scheduler itself, the logon task and the log rotation all behaved.
+
 ## Where things stand
 
 `master` is at `cc9eee2` and **pushed**. Test baseline: **646 passing backend,
