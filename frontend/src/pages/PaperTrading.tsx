@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, getErrorMessage } from '../api/client';
 import { useLeaderboard } from '../hooks/useLeaderboard';
+import { usePaperTradingData, useUserDetail } from '../hooks/usePaperTrading';
 import { useUserStore } from '../stores/userStore';
 import { useFeedStore } from '../stores/feedStore';
-import type { PaperPickData, GameOddsData, UserStats, PropData, UserProfile } from '../types';
+import type { PropData, UserProfile } from '../types';
 import { useToast } from '../hooks/useToast';
 
 export default function PaperTrading() {
@@ -12,14 +13,15 @@ export default function PaperTrading() {
   const { data: users = [], isLoading: usersLoading } = useLeaderboard();
   const { selectedUser, setSelectedUser } = useUserStore();
   const { events: wsEvents } = useFeedStore();
-  const [userPicks, setUserPicks] = useState<PaperPickData[]>([]);
-  const [userStats, setUserStats] = useState<UserStats | null>(null);
-  const [games, setGames] = useState<GameOddsData[]>([]);
+  const { games: gamesQuery, props: propsQuery, feed: feedQuery } = usePaperTradingData();
+  const { picks: userPicksQuery, stats: userStatsQuery } = useUserDetail(selectedUser?.id);
+  const games = gamesQuery.data ?? [];
+  const props = propsQuery.data ?? [];
+  const initialFeedEvents = feedQuery.data ?? [];
+  const userPicks = userPicksQuery.data ?? [];
+  const userStats = userStatsQuery.data ?? null;
   const [newName, setNewName] = useState('');
   const { toast } = useToast();
-
-  // Activity feed state (initial load from API + real-time from WS)
-  const [initialFeedEvents, setInitialFeedEvents] = useState<{ message: string; timestamp: string }[]>([]);
 
   // Place pick form state
   const [selectedGame, setSelectedGame] = useState<number | ''>('');
@@ -35,56 +37,13 @@ export default function PaperTrading() {
   const [, setParlayResult] = useState<{ combined_odds: number; potential_payout: number; result: string | null; payout: number | null } | null>(null);
 
   // Prop-specific state
-  const [props, setProps] = useState<PropData[]>([]);
   const [selectedPropId, setSelectedPropId] = useState<number | ''>('');
   const [propSearch, setPropSearch] = useState('');
 
-  const loadGames = async () => {
-    const g = await api.games.today();
-    setGames(g);
-  };
-
-  const loadProps = async () => {
-    try {
-      const p = await api.props.today();
-      setProps(p);
-    } catch {
-      // Props may not be available
-    }
-  };
-
-  const loadFeed = async () => {
-    try {
-      const feedData = await api.users.feed(20);
-      setInitialFeedEvents(
-        feedData.map((e) => ({
-          message: e.payload?.message || `${e.event_type}`,
-          timestamp: e.created_at,
-        }))
-      );
-    } catch {
-      // Feed may not be available
-    }
-  };
-
-  // This is hand-rolled server-state fetching (setState after an async API
-  // call) on the app's most complex page — the one page that doesn't use
-  // React Query. The correct fix is migrating these to useQuery and
-  // replacing manual refetches with invalidateQueries, which means rewriting
-  // the parlay builder and prop search; that's a separate, larger refactor
-  // (see plans/009-frontend-eslint-errors.md). Suppressed here rather than
-  // done as a side effect of a lint sweep.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { loadGames(); loadProps(); loadFeed(); }, []);
-
-  const selectUser = async (user: UserProfile) => {
+  // Selecting a user is now only that. Their picks and stats are queries
+  // keyed on the id, so they load, cache and refresh themselves.
+  const selectUser = (user: UserProfile) => {
     setSelectedUser(user);
-    const [picks, stats] = await Promise.all([
-      api.users.picks(user.id),
-      api.users.stats(user.id),
-    ]);
-    setUserPicks(picks);
-    setUserStats(stats);
   };
 
   const handleCreateUser = async () => {
@@ -122,7 +81,6 @@ export default function PaperTrading() {
           : `Pick placed! Balance: $${result.new_balance.toLocaleString()}`;
         toast(msg, result.result === 'loss' ? 'error' : 'success');
         queryClient.invalidateQueries({ queryKey: ['users'] });
-        selectUser(selectedUser);
         setSelectedPropId('');
         setPropSearch('');
       } catch (e) {
@@ -144,7 +102,6 @@ export default function PaperTrading() {
           : `Pick placed! Balance: $${result.new_balance.toLocaleString()}`;
         toast(msg, result.result === 'loss' ? 'error' : 'success');
         queryClient.invalidateQueries({ queryKey: ['users'] });
-        selectUser(selectedUser);
         setPickValue('');
       } catch (e) {
         toast(getErrorMessage(e), 'error');
@@ -213,7 +170,6 @@ export default function PaperTrading() {
         : `${parlayLegs.length}-leg parlay placed! Potential: $${res.potential_payout.toLocaleString()}`;
       toast(msg, res.result === 'loss' ? 'error' : 'success');
       queryClient.invalidateQueries({ queryKey: ['users'] });
-      selectUser(selectedUser);
       setParlayLegs([]);
     } catch (e) {
       toast(getErrorMessage(e), 'error');
