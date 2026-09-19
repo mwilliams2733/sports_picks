@@ -1440,3 +1440,41 @@ attempts.
 - Three dead model features (`offensive_rating`, `defensive_rating`, `pace`)
   still need possession counts no collector supplies.
 - November: re-measure the neutral slot's 0.693 and ncaab's hosted baseline.
+
+## fetch_odds_now: the perishable half of a window — 2026-09-19 evening
+
+`_run_window` does two jobs back to back that share nothing but a sport.
+Storing odds takes ~10 seconds and is **perishable** — prices move. Collecting
+player stats takes 25+ minutes and thousands of ESPN requests and is not
+time-sensitive at all. Because they are welded together and due windows run
+serially, an mlb odds fetch sat behind five ncaaf stats collections.
+
+`backend/scripts/fetch_odds_now.py` runs only the perishable half. It
+delegates to the same `fetch_and_store_odds` / `generate_and_store_picks` /
+pitcher remap that `_run_window` calls, so the two cannot drift. Props are
+opt-in via `--props`.
+
+    python -m backend.scripts.fetch_odds_now --db <abs path> --sport mlb
+
+Measured against production: **19.7 seconds**, 126 game picks, 19 credits.
+
+### Two things it surfaced
+
+**Only 5 of 15 mlb games matched an odds event.** 49 rows across 5 games and
+11 books landed for today; the other 138 of the 187 stored belong to later
+dates. It is *not* a started-game filter — 1815 (HOU/ATL) and 1816 (STL/WSH)
+had not started and got nothing, while 1812–1814 had started and did:
+
+| matched | not matched |
+|---|---|
+| CIN/CHC, PIT/KC, TEX/TOR, COL/SEA, LAD/SF | HOU/ATL, STL/WSH, ARI/NYY, SD/MIA, LAA/MIN, and 5 more |
+
+That pattern looks like the odds-to-fixture matcher failing on a subset, the
+same class of problem as the ncaaf name mismatches, but it has **not** been
+diagnosed. Instrument `fetch_and_store_odds` before concluding anything —
+no "Cannot identify mlb ..." warning was logged, which is itself a clue.
+
+**`fetch_pitcher_scores_for_date` returned nothing.** All 12 mlb games logged
+`no score for game N (key=..., available=[])`, so every MLB pick today is
+priced on a neutral starter. The guard worked — picks were still generated —
+but the pitcher signal is absent, not merely degraded.
