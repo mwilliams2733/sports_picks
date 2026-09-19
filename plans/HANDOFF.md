@@ -3,58 +3,73 @@
 Everything below is recoverable from `git log` and `plans/`; nothing important
 lives only in a chat transcript.
 
-## READ THIS BEFORE STARTING THE PIPELINE
+## Production was prepared on 2026-09-18
 
-Plans 013 and 014 changed how games are identified and dated. **The code is
-correct and production has not been prepared for it.** If the pipeline ingests
-before the preparation below, every evening game already stored under its UTC
-date will fail to match and **a twin row will be inserted** — the exact problem
-014 fixed.
+The five-step runbook has been **run against `sports_picks.db`**, each step
+dry-run first and verified against what it produced on a copy.
 
-Production right now:
+Backup, taken after a `wal_checkpoint(TRUNCATE)` so the `.db` file is complete:
+**`sports_picks.backup-20260918-222023.db`** — `integrity_check: ok`, 708
+picks, 1664 games, 2116 elo_history. It is the only rollback.
 
-| | |
-|---|---|
-| `games.espn_id` column | **absent** until migrations run; then all NULL |
-| twin pairs merged | **no** (13 pairs, done on a copy only) |
-| past games still non-final | **570** (nba 239, mma 126, boxing 110, ncaab 81, mlb 14) |
-| `pick_results` | **0 rows** — nothing has ever been graded |
-| `player_stats` `stat_type='game_log'` | **0 rows** |
-| props with `prop_player` / `prop_market` | **0 of 82** (NULL) |
-| picks / max id | 708 / 708 |
+| | before | after |
+|---|---|---|
+| games | 1664 | **1670** |
+| — final | 1058 | **1320** |
+| — past, not final | 570 | **314** |
+| games with `espn_id` | 0 | **1328** |
+| duplicate `espn_id` | 0 | **0** |
+| picks / max id | 708 / 708 | **708 / 708** |
+| — props with prop fields | 0 | **82** |
+| **`pick_results`** | **0** | **95** |
+| elo_history | 2116 | 2640 |
+| team_stats game_ids | 1058 | 1326 |
+| `player_stats` `game_log` | 0 | **0** |
 
-The scheduler is **not running**, so nothing is ingesting today and nothing is
-at risk. Launching plain uvicorn is safe (it only runs additive migrations).
+`integrity_check: ok`. **95 picks graded — the first `pick_results` rows this
+project has ever had**: moneyline 18W/17L, over_under 14W/22L, spread 14W/10L
+(46W/49L, 48.4%).
 
-**Order to prepare production, all against a verified backup:**
+### Two things the run turned up
 
-```bash
-cp sports_picks.db "sports_picks.backup-$(date +%Y%m%d-%H%M%S).db"
-# verify: pragma integrity_check, and picks count == 708
-```
+**1. The catch-up inserts games, and for ncaab that means duplicates.**
+`fetch_and_store_games` upserts, so ESPN events we did not have became new
+rows: 19 of them (nba 6, ncaab 10, mlb 3), all `final`, all with scores and
+ids, no duplicate `espn_id`. For nba and mlb that is a clean gain.
 
-1. `python -m backend.scripts.backfill_espn_ids --db <abs win path> --dry-run`
-   then for real. Matched **1320 of 1392** in-scope rows on a copy (95%);
-   ncaab's residual is the display-name problem in "Out of scope".
-2. `python -m backend.scripts.merge_duplicate_games --db <abs win path>`
-   — 13 pairs on a copy, 0 refused, picks untouched.
-3. Delete and replay the Elo, because step 2 alone does **not** undo the
-   double-count (`backfill_elo_history` skips games that already have rows):
-   ```sql
-   DELETE FROM elo_history WHERE game_id IN
-       (SELECT id FROM games WHERE sport = 'nba');
-   ```
-   then `python -m backend.scripts.backfill_team_stats --db <abs win path>`.
-4. `python -m backend.scripts.catch_up_finals --db <abs win path>` — finalized
-   **250 of 334** in-scope games on a copy (nba 218/239, ncaab 21/81,
-   mlb 11/14), 0 rows canceled. The residual is 6 genuinely `postponed`, 60
-   ncaab with display names in `abbreviation`, and the rest.
-5. `python -m backend.scripts.backfill_prop_fields --db <abs win path>` —
-   82 of 82 resolved on a copy.
-6. Only then start the scheduler. It will collect box scores and grade.
+**For ncaab it is not.** ESPN returns `M-OH`, `SMU`, `PV`; our ncaab rows hold
+display names like `"Pennsylvania Quakers"`. So the old rows could not match
+and new ones were created *alongside* them — on 2026-03-18 (2 new / 2 stuck)
+and 2026-03-22 (8 new / 12 stuck), very likely the same games under two
+naming schemes. `espn_id` cannot detect these: the old rows have NULL ids and
+different `team_id`s.
 
-**Everything in steps 1-5 was run and verified against copies. Production has
-had none of it.**
+**429 of the 708 picks are on ncaab**, so this matters. It needs the
+team-identity fix (open item 8) before ncaab can be trusted; nba and mlb are
+unaffected.
+
+**2. `backfill_elo_history` had to be replayed twice, for the reason already
+in this file.** It skips games that already have rows, so after the catch-up
+finalized 219 more nba games the original 1014 rows were stale — computed
+without those games interleaved. Deleting all nba `elo_history` and replaying
+moved **26 more ratings, median 16.64, p90 57.34, max 80.47 points**, on top of
+the 957 corrected earlier. nba now has exactly 2 rows per final game and none
+with more.
+
+**Any "skip if already done" guard needs an answer to "what if what is already
+done is wrong?"** That is the third time this cost a step today.
+
+### What is still not done
+
+- **Box scores.** `player_stats` `game_log` is still **0 rows**, so no prop is
+  gradeable and 012's Task 4 still cannot measure. 613 picks remain ungraded
+  (82 props plus picks on the 314 games still not final).
+- **Do open item 7 before that collection run** — `espn_box_score` still
+  searches the scoreboard on three dates per game, and rows now carry
+  `espn_id`. It turns ~4000 requests into ~1014.
+- **The scheduler is still not running.** Starting it is now safe for nba/mlb:
+  `espn_id` is populated, twins are merged and dates are Eastern. ncaab will
+  keep creating duplicates until open item 8 is fixed.
 
 ## Where things stand
 
