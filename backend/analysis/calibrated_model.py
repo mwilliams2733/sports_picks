@@ -17,6 +17,43 @@ logger = logging.getLogger(__name__)
 
 MIN_TRAINING_GAMES = 30
 
+#: Fixed sport ordering for the one-hot slots. Deliberately a constant and
+#: not derived from the training data: a vocabulary built from whatever
+#: sports happen to be present would reassign column meanings between runs,
+#: so a model fitted one night would be read wrong the next.
+#:
+#: A sport absent from this tuple sets no slot and falls back to the shared
+#: intercept -- the old behaviour, which is a safe degradation.
+SPORT_VOCAB: tuple[str, ...] = (
+    "boxing", "mlb", "mma", "nba", "ncaab", "ncaaf", "nfl",
+)
+
+
+def build_feature_row(
+    elo_diff: float,
+    point_diff: float,
+    net_rating_diff: float,
+    rest_days_diff: float,
+    pace_diff: float,
+    sport: str,
+) -> list[float]:
+    """The feature vector for CalibratedModel, for training AND prediction.
+
+    Five legacy difference features, then one one-hot slot per sport.
+
+    The sport slots exist because home advantage has no other representation
+    in this model: there is no home feature, so it is carried entirely by the
+    intercept. One intercept across a pool that is 91% nba scored ncaab -- a
+    0.708 home-win sport -- as though it were 0.561.
+
+    Both call sites route through here. They previously duplicated the
+    five-element list, which is how the two could have drifted.
+    """
+    row = [elo_diff, point_diff, net_rating_diff, rest_days_diff, pace_diff]
+    row.extend(1.0 if sport == s else 0.0 for s in SPORT_VOCAB)
+    return row
+
+
 # Canonical feature order — FEATURE_ORDER is the single source of truth.
 # extract_features() must return a dict with exactly these keys.
 FEATURE_ORDER = [
@@ -187,8 +224,10 @@ class CalibratedModel:
             away_pace = _stat_value(away_stats, "pace") or 100.0
             pace_diff = home_pace - away_pace
 
-            # Legacy 5-feature format for logistic regression
-            features = [elo_diff, point_diff, net_rating_diff, rest_days_diff, pace_diff]
+            features = build_feature_row(
+                elo_diff, point_diff, net_rating_diff, rest_days_diff,
+                pace_diff, game.sport,
+            )
             label = 1 if game.home_score > game.away_score else 0
 
             X.append(features)
@@ -217,15 +256,14 @@ class CalibratedModel:
             return _fallback_probability(game)
 
         feature_dict = extract_features(game)
-        # CalibratedModel trains on legacy 5-feature format
-        legacy_features = [
+        feature_arr = np.array([build_feature_row(
             feature_dict["elo_diff"],
             feature_dict["point_diff"],
             feature_dict["net_rating_diff"],
-            feature_dict["home_rest_days"] - feature_dict["away_rest_days"],  # rest_days_diff
+            feature_dict["home_rest_days"] - feature_dict["away_rest_days"],
             feature_dict["pace_diff"],
-        ]
-        feature_arr = np.array([legacy_features], dtype=np.float64)
+            game.sport,
+        )], dtype=np.float64)
         proba = self.model.predict_proba(feature_arr)
         # predict_proba returns [[P(class0), P(class1)]]
         # class 1 = home win
