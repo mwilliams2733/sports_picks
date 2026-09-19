@@ -221,8 +221,18 @@ def test_unknown_label_is_unresolved_not_guessed():
 
 
 def test_st_is_not_expanded_inside_a_word():
-    # 'Stonehill' must not become 'Stateonehill'.
-    assert canonical_abbr("ncaab", "Stonehill Skyhawks") == "STO"
+    """Guard the rule directly, via _normalise -- NOT via canonical_abbr.
+
+    'Stonehill Skyhawks' is an exact ESPN display name, so resolution stops
+    at the first tier and never reaches the St rule. A version of this test
+    written as `canonical_abbr(...) == "STO"` passes even with the word
+    boundaries deleted from the regex. Verified during execution.
+    """
+    from backend.team_identity import _normalise
+
+    assert _normalise("Stonehill Skyhawks") == "Stonehill Skyhawks"
+    assert _normalise("St. John's Red Storm") == "St. John's Red Storm"
+    assert _normalise("Michigan St Spartans") == "Michigan State Spartans"
 
 
 def test_sports_without_a_table_resolve_nothing():
@@ -345,19 +355,27 @@ def canonical_abbr(sport: str, label: str) -> str | None:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_team_identity.py -v`
-Expected: PASS, 9 tests.
+Expected: PASS, 12 tests.
 
 If `test_st_is_not_expanded_inside_a_word` fails, the `\b` anchors are wrong —
 fix the regex, not the test.
 
 - [ ] **Step 6: Prove the tests bite (mutation)**
 
-Temporarily change `_ST` to `re.compile(r"St")` (drop the word boundaries) and
-re-run. Expected: `test_st_is_not_expanded_inside_a_word` FAILS. Restore it.
+Three mutations, each restored afterwards. All three were run during
+execution and all three fail the expected test:
 
-Then temporarily reorder `resolution_of` to try the alias tier before the exact
-tier and re-run. Expected: still green — which tells you the ordering is not
-yet guarded. Add:
+1. `_ST = re.compile("St")` (drop the word boundaries) →
+   `test_st_is_not_expanded_inside_a_word` FAILS.
+   **This only works because that test calls `_normalise` directly.** The
+   tiered design means an exact-matching label never reaches the St rule, so
+   any end-to-end test of it is vacuous.
+2. Delete the `normalised` tier from `resolution_of` →
+   `test_state_is_spelled_out_before_matching` FAILS.
+3. Reorder the tiers so alias is tried before exact →
+   `test_exact_match_wins_over_a_looser_tier` FAILS.
+
+The ordering guard is this test:
 
 ```python
 def test_exact_match_wins_over_a_looser_tier():
@@ -372,8 +390,6 @@ def test_exact_match_wins_over_a_looser_tier():
     finally:
         ti._ALIASES["ncaab"].pop("Duke Blue Devils")
 ```
-
-Re-run the reorder mutation and confirm this new test FAILS. Restore.
 
 - [ ] **Step 7: Commit**
 
