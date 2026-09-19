@@ -303,3 +303,107 @@ def test_constant_feature_caveat_is_printed_next_to_the_brier_score(db_session):
     assert "pace" in out
     # It must sit with the Brier score, not be buried at the top.
     assert out.index("Brier score") < out.index("CAVEAT")
+
+
+# --------------------------------------------------------------------------
+# The fitted home baseline, against the sport's real home rate.
+#
+# CalibratedModel carries home advantage entirely in its intercept, so a
+# baseline that has drifted away from the sport's actual rate is invisible in
+# the Brier score but decides every moneyline edge. It belongs next to the
+# other caveats.
+# --------------------------------------------------------------------------
+
+
+def _seed_sport(session, sport, n, home_rate, team_base, gid_base):
+    """n games of one sport whose home side wins home_rate of them.
+
+    Home wins are spread with a modulus rather than front-loaded, so the
+    rate holds in both the fit and the evaluation window instead of putting
+    every home win on one side of the split.
+    """
+    session.add_all([
+        Team(id=team_base + i, name=f"{sport}{i}", abbreviation=f"{sport}{i}",
+             sport=sport)
+        for i in range(4)
+    ])
+    session.flush()
+    session.add_all([EloRating(team_id=team_base + i, sport=sport,
+                               rating=1500.0 + 20 * i) for i in range(4)])
+    threshold = round(home_rate * 10)
+    for k in range(n):
+        gid = gid_base + k
+        home_won = (k % 10) < threshold
+        session.add(Game(
+            id=gid, sport=sport, season="2025-26",
+            date=date(2026, 1, 1) + timedelta(days=k),
+            home_team_id=team_base + (k % 4),
+            away_team_id=team_base + ((k + 1) % 4),
+            home_score=110 if home_won else 100,
+            away_score=100 if home_won else 110,
+            status="final",
+        ))
+        session.add(Odds(game_id=gid, bookmaker="book",
+                         moneyline_home=-150, moneyline_away=130))
+    session.commit()
+
+
+def _two_sport_db(db_session):
+    """nba at a 0.4 home rate, ncaab at 0.9 -- deliberately far apart.
+
+    The pooled rate lands near 0.5, so a report that mistakenly uses the
+    whole fit set cannot accidentally agree with either sport's own rate.
+    """
+    Base.metadata.create_all(db_session.get_bind())
+    _seed_sport(db_session, "nba", 100, 0.4, team_base=100, gid_base=1000)
+    _seed_sport(db_session, "ncaab", 60, 0.9, team_base=200, gid_base=2000)
+    return db_session
+
+
+def test_the_report_carries_the_fitted_home_baseline(db_session):
+    r = evaluate(_two_sport_db(db_session), "ncaab")
+    assert r.fitted_home_baseline is not None
+    assert 0.0 < r.fitted_home_baseline < 1.0
+
+
+def test_the_actual_home_rate_is_this_sports_games_not_the_whole_pool(db_session):
+    """The comparison is only meaningful sport against sport.
+
+    ``fit_games`` holds every sport's games -- that is deliberately what the
+    model saw. But comparing a sport-specific baseline against an all-sport
+    home rate would put the pooled number back on the other side of the
+    comparison, which is the exact confusion this line exists to expose.
+    """
+    session = _two_sport_db(db_session)
+    ncaab = evaluate(session, "ncaab")
+    nba = evaluate(session, "nba")
+
+    assert ncaab.actual_home_rate > 0.8, (
+        f"{ncaab.actual_home_rate}: looks pooled, not ncaab's own 0.9"
+    )
+    assert nba.actual_home_rate < 0.5, (
+        f"{nba.actual_home_rate}: looks pooled, not nba's own 0.4"
+    )
+
+
+def test_the_baseline_is_printed_against_the_actual_rate(db_session):
+    text = format_report(evaluate(_two_sport_db(db_session), "ncaab"))
+    assert "Fitted home baseline" in text
+    assert "Actual home win rate" in text
+    assert "gap" in text
+
+
+def test_a_sport_outside_the_vocabulary_is_warned_about(db_session):
+    """Such a sport sets no one-hot slot, so its baseline cannot move."""
+    Base.metadata.create_all(db_session.get_bind())
+    _seed_sport(db_session, "nba", 100, 0.4, team_base=100, gid_base=1000)
+    _seed_sport(db_session, "hurling", 60, 0.9, team_base=200, gid_base=2000)
+
+    text = format_report(evaluate(db_session, "hurling"))
+    assert "SPORT_VOCAB" in text
+
+
+def test_a_sport_inside_the_vocabulary_is_not_warned_about(db_session):
+    """The guard must discriminate, not print unconditionally."""
+    text = format_report(evaluate(_two_sport_db(db_session), "ncaab"))
+    assert "SPORT_VOCAB" not in text

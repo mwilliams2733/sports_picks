@@ -58,8 +58,13 @@ from datetime import date
 from sqlalchemy import and_, event
 from sqlalchemy.orm import Session, with_loader_criteria
 
-from backend.analysis.calibrated_model import MIN_TRAINING_GAMES, CalibratedModel
+from backend.analysis.calibrated_model import (
+    MIN_TRAINING_GAMES,
+    SPORT_VOCAB,
+    CalibratedModel,
+)
 from backend.analysis.variants.ensemble import EnsembleStrategy
+from backend.data_types import GameData, TeamStats
 from backend.models import Game
 
 # The live ensemble configuration, so the measured probabilities are the ones
@@ -201,6 +206,20 @@ class Report:
     n_teams: int
     bins: list[Bin]
     brier: float | None
+    #: P(home win) the fitted model gives when every difference feature is
+    #: zero -- i.e. the baseline it has learned for this sport. Compared
+    #: against ``actual_home_rate``, this is what exposes a pooled intercept
+    #: being applied to a sport it does not fit. The Brier score will not:
+    #: a baseline off by ten points still scores well if the ranking holds.
+    fitted_home_baseline: float | None = None
+    #: The home win rate of THIS SPORT'S games in the fit window. Not the
+    #: whole fit set, which spans every sport -- comparing a sport-specific
+    #: baseline against a pooled rate would re-create the confusion this
+    #: pair of numbers exists to expose.
+    actual_home_rate: float | None = None
+    #: How many games ``actual_home_rate`` rests on. Printed because a rate
+    #: without its denominator invites confidence the sample cannot support.
+    n_fit_sport: int = 0
     fit_game_ids: frozenset[int] = field(default_factory=frozenset)
     eval_game_ids: frozenset[int] = field(default_factory=frozenset)
 
@@ -330,6 +349,30 @@ def evaluate(
     pairs = binary_pairs(rows)
     teams = {g.home_team_id for g in eval_games} | {g.away_team_id for g in eval_games}
 
+    # Probe the fitted model with every difference feature at zero, so the
+    # only thing left speaking is the sport encoding and the intercept.
+    # Built from the games already loaded -- a second query would describe a
+    # different population than the rate it is printed beside.
+    sport_fit = [g for g in fit_games if g.sport == sport]
+    fitted_home_baseline = None
+    actual_home_rate = None
+    if model.trained:
+        flat = TeamStats(
+            point_diff=0.0, home_record=(0, 0), away_record=(0, 0),
+            last_n_record=(0, 0), offensive_rating=100.0,
+            defensive_rating=100.0, pace=100.0, strength_of_schedule=0.0,
+            elo_rating=1500.0, rest_days=1,
+        )
+        probe = GameData(
+            game_id=0, sport=sport, date=split_date,
+            home_team_id=0, away_team_id=0,
+            home_stats=flat, away_stats=flat, odds=[],
+        )
+        fitted_home_baseline = model.predict_home_win_prob(probe)
+    if sport_fit:
+        home_wins = sum(1 for g in sport_fit if g.home_score > g.away_score)
+        actual_home_rate = home_wins / len(sport_fit)
+
     return Report(
         sport=sport,
         split_date=split_date,
@@ -347,6 +390,9 @@ def evaluate(
         n_teams=len(teams),
         bins=reliability_bins(pairs, n_bins=n_bins, min_bin=min_bin) if pairs else [],
         brier=brier_score(pairs) if pairs else None,
+        fitted_home_baseline=fitted_home_baseline,
+        actual_home_rate=actual_home_rate,
+        n_fit_sport=len(sport_fit),
         fit_game_ids=frozenset(g.id for g in fit_games),
         eval_game_ids=frozenset(g.id for g in eval_games),
     )
@@ -445,6 +491,36 @@ def format_report(report: Report) -> str:
     lines.append(
         f"  Brier score       : {r.brier:.4f}  (lower is better; 0.25 = always 0.5)"
     )
+    if r.fitted_home_baseline is not None:
+        lines.append("")
+        lines.append(
+            f"  Fitted home baseline : {r.fitted_home_baseline:.4f}"
+        )
+        if r.actual_home_rate is not None:
+            lines.append(
+                f"  Actual home win rate : {r.actual_home_rate:.4f}  "
+                f"(gap {r.fitted_home_baseline - r.actual_home_rate:+.4f})"
+            )
+            lines.append(
+                f"  ...over the {r.n_fit_sport} {r.sport} games in the fit window."
+            )
+        if r.sport not in SPORT_VOCAB:
+            lines.append(
+                f"  WARNING: {r.sport!r} is absent from SPORT_VOCAB, so it sets"
+            )
+            lines.append(
+                "  no one-hot slot and its baseline cannot differ from any other"
+            )
+            lines.append(
+                "  absent sport's. Note this is NOT the pooled rate: the"
+            )
+            lines.append(
+                "  intercept no longer equals it once the present sports carry"
+            )
+            lines.append(
+                "  their own slots."
+            )
+
     lines.append("")
     lines.append("  CAVEAT: three of the model's features carry no signal.")
     lines.append("  offensive_rating, defensive_rating and pace need possession")

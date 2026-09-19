@@ -1240,3 +1240,74 @@ To grade in production, in order (subset — see above):
 generated during a digest preview and deleted afterwards, with a
 blast-radius check confirming no `pick_results` referenced them. All analysis
 work ran against copies.
+
+## Plan 016 landed: a home baseline per sport — 2026-09-19
+
+`CalibratedModel` fitted one logistic regression over every sport with no
+home feature, so home advantage lived entirely in a single intercept fitted
+on a pool that is 88% nba. A one-hot sport encoding now carries it. Both
+`train_from_db` and `predict_home_win_prob` build their row through
+`build_feature_row`, so the two cannot drift.
+
+### Fitted baseline against the real rate (1418 final games)
+
+| sport | n | actual | before | after |
+|---|---|---|---|---|
+| nba | 1248 | 0.554 | 0.559 | 0.562 |
+| mlb | 93 | 0.505 | 0.559 | 0.511 |
+| ncaab | 72 | 0.708 | 0.559 | 0.702 |
+| ncaaf | 4 | 0.750 | 0.559 | 0.689 |
+| nfl | 1 | 1.000 | 0.559 | 0.706 |
+
+"Before" is the pooled rate, which every sport received. ncaaf (n=4) and nfl
+(n=1) are correctly shrunk hard toward the pool by L2 — that is the sample
+being thin, not a defect.
+
+### Brier, out-of-sample
+
+| | before | after | effective n |
+|---|---|---|---|
+| ncaab | 0.2116 | 0.2021 | ~36 (ICC 0.01–0.05) |
+| nba | 0.1768 | 0.1768 | 171–303 |
+
+**nba did not regress**, identical to four decimals. nba is the majority of
+the training pool, so a gain for ncaab bought at nba's expense would have
+been a bad trade; there is no trade.
+
+### Read ncaab's 0.708 with care — it is not home advantage
+
+Every ncaab final game in the database falls between **2026-03-14 and
+2026-03-22**: 8 distinct dates, with n=6 on Mar 17–18, n=39 on Mar 19–20 and
+n=18 on Mar 21–22. That is the First Four, Round 1 and Round 2 — **neutral
+sites**, where "home team" is a bracket seed designation and not a host.
+
+So the 0.708 is higher seeds beating lower seeds, with actual home advantage
+near zero by construction. Split temporally it is 0.571 before 2026-03-20 and
+0.838 after — the bracket tightening, not a sport constant. The new report
+line shows the fit-window figure, 0.5714 over 35 games.
+
+Consequences:
+
+- The mechanism fix stands on its own. One intercept for seven sports is
+  wrong regardless, and mlb — genuine regular-season games — moved from the
+  pooled 0.559 to 0.511 against its actual 0.505.
+- **When ncaab regular-season games arrive in November a ~0.70 baseline will
+  be too high** (real ncaab home advantage runs nearer 0.60–0.65), and these
+  72 tournament games will be a large share of the ncaab pool during exactly
+  the early weeks when picks start flowing. Worth a neutral-site flag on
+  `games`, or excluding tournament dates from training. The table has no such
+  column today.
+- The ncaab underconfidence signature survives the fix: observed still
+  exceeds predicted in every populated bin. The report fits on the pre-split
+  window where the rate is 0.571 and is then scored against 0.838, so it
+  cannot learn what it is being marked on.
+
+### This changes future pick generation only
+
+The 348 graded ncaab picks and their −73.33 units are unaffected, and
+re-measuring ROI will not show an improvement until new picks are generated
+and settled. Do not look for one before then.
+
+`min_edge` stays where it is until that happens. The edge estimate was
+inverted above ~10%, so tuning the threshold against inverted edges optimises
+the wrong thing.
