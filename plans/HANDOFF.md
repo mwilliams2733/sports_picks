@@ -358,13 +358,25 @@ there — the first version put every INFO line in `scheduler.err.log` and left
 normally empty. Both rotate to `.prev` on start, so a restart no longer
 destroys the log covering whatever went wrong. Both are gitignored.
 
-### Hazard: `restart.bat` would kill this
+### The legacy .bat/.vbs launchers are gone
 
-`restart.bat` runs `taskkill /F /IM python.exe`, which kills **every** Python
-process on the machine — the scheduler, and every MCP server. It, and
-`start-server*.bat`, still point at the OneDrive path that has been dead
-since July 2026, and at system Python 3.14 rather than the venv. They are
-unusable as they stand and actively dangerous if run.
+`restart.bat`, `start-server.bat`, `start-server-loop.bat`,
+`start-tunnel.bat`, `start-tunnel-loop.bat`, `start-server-hidden.vbs`
+and `start-tunnel-hidden.vbs` were deleted on 2026-09-19. All seven are
+in git history if one is ever wanted back.
+
+Five pointed at the OneDrive path dead since July 2026, and the server
+launchers used system Python 3.14 rather than the venv. `restart.bat`
+also ran `taskkill /F /IM python.exe`, which kills **every** Python
+process on the machine -- the scheduler and every MCP server. The two
+tunnel scripts did still work (`cloudflared.exe` is present) but only
+served a server started by the broken loop script.
+
+Launching is now `scripts\start_scheduler.ps1` for the pipeline, and
+`Dockerfile` / `deploy/sports-picks-web.service` / `start.sh` for the web
+app -- all three confirmed present before anything was removed. The
+docstring at `backend/api/main.py:138` listed two of the deleted files as
+live launch sites and has been corrected.
 
 ## Where things stand
 
@@ -390,9 +402,8 @@ Started this session at 545.
 `/games/today`, `/picks/today` and `/users/feed` all return 200. Empty arrays
 are correct — there are no games dated today.
 
-**Do not use `start-server.bat`**: it `cd`s to
-`C:\Users\mwill\OneDrive\...`, the path that died in July 2026. **And be
-careful with `start.sh`**: it also launches `python -m backend.pipeline.scheduler`,
+(`start-server.bat` carried a warning here about its dead OneDrive
+path; it was deleted on 2026-09-19.) **Be careful with `start.sh`**: it also launches `python -m backend.pipeline.scheduler`,
 which ingests — see the deploy-order warning below. The scheduler is off by
 default (`ENABLE_SCHEDULER` unset), so plain uvicorn is safe.
 
