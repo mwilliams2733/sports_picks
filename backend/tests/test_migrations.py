@@ -9,9 +9,17 @@ now derive their migration set from the same function.
 """
 import inspect
 
+import pytest
 from sqlalchemy import inspect as sa_inspect
 
-from backend.database import get_engine, run_migrations
+from backend.database import (
+    ALLOW_DESTRUCTIVE_ENV,
+    DESTRUCTIVE_MIGRATIONS,
+    MIGRATIONS,
+    DestructiveMigrationRefused,
+    get_engine,
+    run_migrations,
+)
 from backend.models import Base
 
 
@@ -145,3 +153,87 @@ def test_run_migrations_adds_espn_id_to_a_legacy_games_table():
     run_migrations(engine)
 
     assert "espn_id" in _columns(engine, "games")
+
+
+# ---------------------------------------------------------------------------
+# The one destructive migration
+# ---------------------------------------------------------------------------
+
+LEGACY_API_USAGE = (
+    "CREATE TABLE api_usage ("
+    " id INTEGER PRIMARY KEY, source VARCHAR NOT NULL,"
+    " credits_used INTEGER NOT NULL)"
+)
+
+
+def _legacy_api_usage_db():
+    engine = get_engine(":memory:")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(LEGACY_API_USAGE)
+        conn.exec_driver_sql(
+            "INSERT INTO api_usage (id, source, credits_used) VALUES (1, 'odds', 7)")
+    return engine
+
+
+def test_a_legacy_api_usage_table_is_not_dropped_without_an_opt_in():
+    """The sharpest object in the repo. Refusing to start beats losing rows."""
+    engine = _legacy_api_usage_db()
+
+    with pytest.raises(DestructiveMigrationRefused) as exc:
+        run_migrations(engine)
+
+    assert ALLOW_DESTRUCTIVE_ENV in str(exc.value)
+    with engine.begin() as conn:
+        assert conn.exec_driver_sql("SELECT COUNT(*) FROM api_usage").scalar() == 1
+        assert _columns(engine, "api_usage") == {"id", "source", "credits_used"}
+
+
+def test_the_opt_in_lets_the_drop_through():
+    engine = _legacy_api_usage_db()
+
+    run_migrations(engine, allow_destructive=True)
+
+    # Dropped, then recreated from the model by create_all.
+    assert "endpoint" in _columns(engine, "api_usage")
+    with engine.begin() as conn:
+        assert conn.exec_driver_sql("SELECT COUNT(*) FROM api_usage").scalar() == 0
+
+
+def test_the_environment_variable_is_the_same_opt_in(monkeypatch):
+    engine = _legacy_api_usage_db()
+    monkeypatch.setenv(ALLOW_DESTRUCTIVE_ENV, "1")
+
+    run_migrations(engine)
+
+    assert "endpoint" in _columns(engine, "api_usage")
+
+
+def test_a_current_api_usage_table_is_untouched_and_needs_no_opt_in():
+    """The normal path: every database that has run this migration once.
+
+    If this ever raised, the guard would have turned a no-op into an outage
+    on every process start.
+    """
+    engine = get_engine(":memory:")
+    Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        # created_at is NOT NULL with a Python-side default only, so a raw
+        # INSERT has to supply it -- the same latent shape the handoff flags
+        # for picks.created_at.
+        conn.exec_driver_sql(
+            "INSERT INTO api_usage (id, endpoint, sport, credits_used, created_at)"
+            " VALUES (1, 'events', 'nba', 3, '2026-09-19 00:00:00')")
+
+    run_migrations(engine)
+
+    with engine.begin() as conn:
+        assert conn.exec_driver_sql("SELECT COUNT(*) FROM api_usage").scalar() == 1
+
+
+def test_every_destructive_migration_is_listed_and_accepts_the_flag():
+    """A new destructive migration left off the list would run unguarded."""
+    assert DESTRUCTIVE_MIGRATIONS <= set(MIGRATIONS)
+    for migration in DESTRUCTIVE_MIGRATIONS:
+        params = inspect.signature(migration).parameters
+        assert "allow_destructive" in params, migration.__name__
+        assert params["allow_destructive"].default is False, migration.__name__

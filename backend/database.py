@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -25,15 +27,52 @@ def get_session(engine) -> Session:
     return Session(engine)
 
 
-def migrate_api_usage(engine):
-    """Drop old ApiUsage table if it has the legacy schema (source column)."""
+#: Set to "1" to let a destructive migration actually run.
+ALLOW_DESTRUCTIVE_ENV = "SPORTS_PICKS_ALLOW_DESTRUCTIVE_MIGRATIONS"
+
+
+class DestructiveMigrationRefused(RuntimeError):
+    """A migration that destroys data was reached without an explicit opt-in."""
+
+
+def migrate_api_usage(engine, *, allow_destructive: bool = False):
+    """Drop a legacy ApiUsage table (``source`` column, no ``endpoint``).
+
+    The only migration in this module that destroys data, and the reason
+    plan 011 mattered: ``run_migrations`` is called on every process start,
+    and importing ``backend.api.main`` used to call it against the real
+    ``sports_picks.db`` as a side effect -- so ``pytest`` in the repo root
+    could drop a production table without anything being run on purpose.
+
+    011 closed that particular door. This closes the shape of it: reaching
+    the DROP now requires saying so, via ``allow_destructive=True`` or
+    ``SPORTS_PICKS_ALLOW_DESTRUCTIVE_MIGRATIONS=1``. Without one, a database
+    that would be modified stops the process instead, with its rows intact.
+
+    Refusing to start is the point. The alternative on a legacy schema is a
+    dropped table, and a process that will not boot is recoverable in a way
+    that deleted rows are not. Nothing changes for a current schema, which
+    is every database that has run this migration once: the check below sees
+    ``endpoint`` and returns without touching anything.
+    """
     from sqlalchemy import inspect as sa_inspect, text
     inspector = sa_inspect(engine)
-    if "api_usage" in inspector.get_table_names():
-        columns = [c["name"] for c in inspector.get_columns("api_usage")]
-        if "source" in columns and "endpoint" not in columns:
-            with engine.begin() as conn:
-                conn.execute(text("DROP TABLE api_usage"))
+    if "api_usage" not in inspector.get_table_names():
+        return
+    columns = [c["name"] for c in inspector.get_columns("api_usage")]
+    if not ("source" in columns and "endpoint" not in columns):
+        return
+
+    if not allow_destructive:
+        raise DestructiveMigrationRefused(
+            "api_usage has the legacy schema, and migrating it means DROPping "
+            "the table and losing every row in it. Back the database up, then "
+            f"re-run with {ALLOW_DESTRUCTIVE_ENV}=1 (or call run_migrations("
+            "allow_destructive=True)) to proceed."
+        )
+
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE api_usage"))
 
 
 def migrate_game_start_time(engine):
@@ -211,15 +250,32 @@ MIGRATIONS = (
     migrate_pick_odds_reconstructed,
 )
 
+#: Migrations that can destroy data. run_migrations passes each of these an
+#: explicit allow_destructive; a migration listed here must accept it. Keep
+#: this in step with any new migration that drops or rewrites rows.
+DESTRUCTIVE_MIGRATIONS = frozenset({migrate_api_usage})
 
-def run_migrations(engine) -> None:
+
+def run_migrations(engine, *, allow_destructive: bool | None = None) -> None:
     """Apply every schema migration, then create any still-missing tables.
 
     Idempotent: each migration checks for its own column/table first, and
     `create_all` only creates what does not exist. Safe to call on every
     process start.
+
+    Every migration here is additive except the ones in
+    :data:`DESTRUCTIVE_MIGRATIONS`, which are handed ``allow_destructive``
+    and refuse unless it is true. It defaults to the
+    ``SPORTS_PICKS_ALLOW_DESTRUCTIVE_MIGRATIONS`` environment variable, so
+    the default for every launch site -- app, scheduler, scripts, pytest --
+    is that nothing destroys anything.
     """
     from backend.models import Base
+    if allow_destructive is None:
+        allow_destructive = os.environ.get(ALLOW_DESTRUCTIVE_ENV, "") == "1"
     for migration in MIGRATIONS:
-        migration(engine)
+        if migration in DESTRUCTIVE_MIGRATIONS:
+            migration(engine, allow_destructive=allow_destructive)
+        else:
+            migration(engine)
     Base.metadata.create_all(engine)
