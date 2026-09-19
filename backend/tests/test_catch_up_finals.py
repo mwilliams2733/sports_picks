@@ -65,20 +65,27 @@ def _seeded_db(tmp_path):
     return str(db)
 
 
-def _status(db_path, game_id):
+def _status(db_path, game_id, attr="status"):
     session = get_session(get_engine(db_path))
     try:
-        return session.query(Game).filter(Game.id == game_id).one().status
+        return getattr(session.query(Game).filter(Game.id == game_id).one(), attr)
     finally:
         session.close()
 
 
 def _stub_espn(httpx_mock):
-    """ESPN lists only game 1 for the stuck date."""
+    """ESPN lists only game 1 for the stuck date.
+
+    The neighbouring days are stubbed empty because the catch-up asks about
+    them too: a row stored under the UTC date of an evening game sits a day
+    after the date ESPN files it under.
+    """
     httpx_mock.add_response(
         url=f"{NBA_SB}?dates=20260501",
         json={"events": [_event("CLE", "NY", "STATUS_FINAL", 110, 105,
                                 when=STUCK_DAY)]})
+    for stamp in ("20260430", "20260502"):
+        httpx_mock.add_response(url=f"{NBA_SB}?dates={stamp}", json={"events": []})
 
 
 def test_only_dates_with_a_stuck_past_game_are_requested(tmp_path):
@@ -98,7 +105,7 @@ def test_a_matched_game_is_finalized(tmp_path, httpx_mock):
     summary = run(db, today=TODAY)
 
     assert _status(db, 1) == "final"
-    assert summary["requests"] == 1
+    assert summary["requests"] == 3   # the day plus its two neighbours
     # Counts cover PAST non-final games only, so the future game (id 4) is
     # correctly excluded: ids 1 and 2 before, id 2 alone after.
     assert summary["stuck_before"]["nba"] == 2
@@ -148,3 +155,38 @@ def test_run_refuses_a_db_path_that_does_not_exist(tmp_path):
     zero-game catch-up against it."""
     with pytest.raises(FileNotFoundError):
         run(str(tmp_path / "nope.db"))
+
+
+def test_a_row_stored_under_the_wrong_date_convention_is_still_finalized(
+        tmp_path, httpx_mock):
+    """The UTC/ET residual, hit for real on production.
+
+    Row 1603 sat on 2026-05-25 (the UTC date of an 8pm ET game) while ESPN
+    files event 401873200 under 2026-05-24. Requesting only the stored date
+    never returns the event, so 48 props could not be graded. The search must
+    cover the day's neighbours, exactly as backfill_espn_ids does.
+    """
+    db = _seeded_db(tmp_path)
+    # The row carries ESPN's id, as plan 014's backfill gives it. That is what
+    # lets the neighbouring day's response find THIS row and correct its date
+    # -- without an id the fallback still matches on the wrong date and would
+    # insert a twin instead. Production's row 1603 has espn_id 401873200.
+    session = get_session(get_engine(db))
+    session.query(Game).filter(Game.id == 1).one().espn_id = "1"
+    session.commit()
+    session.close()
+
+    # ESPN lists the game on the day BEFORE our stored date.
+    httpx_mock.add_response(
+        url=f"{NBA_SB}?dates=20260430",
+        json={"events": [_event("CLE", "NY", "STATUS_FINAL", 110, 105,
+                                when=datetime.date(2026, 4, 30))]})
+    httpx_mock.add_response(url=f"{NBA_SB}?dates=20260501", json={"events": []})
+    httpx_mock.add_response(url=f"{NBA_SB}?dates=20260502", json={"events": []})
+
+    run(db, today=TODAY)
+
+    assert _status(db, 1) == "final", (
+        "a row stored under the other date convention was not finalized")
+    assert _status(db, 1, "date") == datetime.date(2026, 4, 30), (
+        "the stored date should have been corrected to ESPN's")

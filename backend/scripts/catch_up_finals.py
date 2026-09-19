@@ -50,7 +50,7 @@ import asyncio
 import os
 import sys
 from collections import Counter
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import func
 
@@ -111,9 +111,18 @@ def run(db_path: str, *, dry_run: bool = False, sports=ESPN_TEAM_SPORTS,
         requested = 0
         if not dry_run:
             for sport, day in pairs:
-                asyncio.run(fetch_and_store_games(
-                    session, [sport], day, reconcile=False))
-                requested += 1
+                # Ask about the day and its neighbours. A row stored under the
+                # UTC date of an evening game (plan 014) sits a day after the
+                # date ESPN files the event under, so requesting only the
+                # stored date never returns it -- that is how game 1603 stayed
+                # non-final with 48 props attached. _store_games matches on
+                # espn_id, so the neighbouring day's response still finds the
+                # right row and corrects its date.
+                for delta in (0, -1, 1):
+                    asyncio.run(fetch_and_store_games(
+                        session, [sport], day + timedelta(days=delta),
+                        reconcile=False))
+                    requested += 1
 
         after = before if dry_run else _counts_by_sport(session, today, sports)
         canceled = dict(Counter(
