@@ -132,10 +132,12 @@ _app: FastAPI | None = None
 def __getattr__(name: str):
     """Construct the ASGI app only when something actually asks for it.
 
-    ``uvicorn backend.api.main:app`` resolves the attribute, so all five
-    launch sites keep working unchanged (``Dockerfile:44``,
-    ``deploy/sports-picks-web.service:11``, ``start.sh:14``,
-    ``start-server.bat:3``, ``start-server-loop.bat:4``).
+    ``uvicorn backend.api.main:app`` resolves the attribute, so every launch
+    site keeps working unchanged (``Dockerfile:44``,
+    ``deploy/sports-picks-web.service:11``, ``start.sh:14``). The two
+    ``start-server*.bat`` launchers that used to be listed here were deleted
+    on 2026-09-19: they pointed at a OneDrive path dead since July 2026 and
+    at system Python rather than the venv.
 
     Importing any *other* name no longer touches the disk. It used to:
     ``create_app`` runs ``run_migrations``, Python executes a module body on
