@@ -177,6 +177,72 @@ sample is far smaller than 348. Quote effective n, as
 `backend/analysis/prop_calibration.py` already does. `digest.enabled` stays
 `false`.
 
+## First ncaab calibration, and the Clippers row — 2026-09-19
+
+The nba display-name row (team 205 `'Los Angeles Clippers'` vs team 15 `LAC`)
+was repaired with the same general tool, not a one-off script. It also
+surfaced a defect class the ncaab run did not: **date-offset twins**.
+
+`resolve_duplicate_games` groups by exact date, so it merged the team row but
+left both duplicate *games* behind — they sit one day apart, the plan-014
+UTC-vs-ET shape. `resolve_offset_twins` handles them, with a deliberately
+narrow signature: same teams exactly one day apart, exactly one row final
+**and** carrying an `espn_id`, the other with no score, no `espn_id`, not
+final. Production holds **47** same-team pairs a day apart; only **2** match.
+The other 45 are genuine back-to-backs and mma cards. A looser rule deletes
+real games.
+
+Like same-date duplicates, offset twins are invisible before the merge: the
+survey found **0** against production and **2** against the merged copy.
+Backup before this step: `sports_picks.backup-20260919-004133.db`.
+
+Final: 708 picks / **519** graded, 1675 games, `integrity_check: ok`,
+no picks lost. `STARS`/`WORLD`/`STRIPES`/`TBD` are All-Star rosters and a
+placeholder; they stay unresolved and untouched, with a test.
+
+### ncaab results — read the breakdown, not the total
+
+```
+  type           n     W     L    win%     units      roi
+  over_under   120    61    59   50.8%     -3.55   -0.030
+  spread       116    51    65   44.0%    -18.64   -0.161
+  moneyline    112    29    83   25.9%    -61.62   -0.550
+  TOTAL        348   141   207   40.5%    -83.80   -0.241
+```
+
+**Moneyline is where the money goes**: 26% win rate and -0.55 ROI, carrying
+**74% of all losses**. Over/under is close to break-even. Any triage starts
+here, and it is a far more specific finding than the -83.8 total.
+
+By confidence tier the signal does point the right way:
+
+```
+  tier 5  n=120  W=61  50.8%  units  -3.55
+  tier 1  n=228  W=80  35.1%  units -80.26
+```
+
+**Caveats, all of which matter more than the numbers:**
+
+- **Effective n is near 37, not 348.** The 348 picks sit across 37 games,
+  9.4 per game, and picks within a game share teams, pace and outcome. A
+  15-point tier gap across ~37 clusters is directional, not established.
+- **Units are understated.** 16 wins carry invalid `odds_at_pick` (-99..-61)
+  and book 0.0. Priced at -110 the total would be about **-69**, but the true
+  prices are unknown — that is the defect, not a correction.
+- **`calibration_report --sport ncaab` gives Brier 0.2116 on 37 games**, with
+  observed rates *above* predicted in every populated bin. So the win model
+  looks underconfident while the picks lose. Those are different objects: a
+  reasonable win probability can still produce losing bets if the edge or
+  line comparison is wrong. **That gap is the thing to investigate next.**
+- The three dead features (`offensive_rating`, `defensive_rating`, `pace`)
+  still carry no signal; the Brier above was produced without them.
+
+**Prop calibration is unchanged** — still the same 2 nba games, every tier
+under `min_bin=30`, tier 5 effective n 19.5 (ICC 0.05) / 10.1 (ICC 0.15).
+The repair added ncaab game-level picks, not nba props.
+
+**`digest.enabled` stays `false`.**
+
 ## Where things stand
 
 `master` is at `cc9eee2` and **pushed**. Test baseline: **646 passing backend,
