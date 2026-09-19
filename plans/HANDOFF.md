@@ -243,6 +243,77 @@ The repair added ncaab game-level picks, not nba props.
 
 **`digest.enabled` stays `false`.**
 
+## Invalid odds_at_pick traced and reconstructed — 2026-09-19
+
+34 ensemble moneyline picks (2026-03-15..21) stored a price inside the
+invalid American-odds band (-87..-61). Root cause, reproduced on all 34:
+
+```
+stored == sum(moneyline prices) / count(ALL odds rows for the game)
+                                  ^^^ not count(rows carrying a price)
+```
+
+Books posting only a spread and total were counted in the divisor, pulling
+the mean toward zero. Game 1401: 8 rows, 4 with a moneyline summing to -574;
+correct consensus -143, dividing by 8 gives -71. A second, independent defect
+is present too — pick 522 had 7 prices of 7 rows (no dilution) and still
+stored -76 against a correct -105, from averaging in price space rather than
+probability space.
+
+**Not established:** every committed `ensemble.py` back to 2026-03-13 uses
+`len(ml_home)`, the correct divisor. Either deployed code differed from what
+is committed, or those now-NULL columns held `0` at the time. The effect is
+identical either way and the current code is correct on both counts.
+
+### The repair
+
+`backend/scripts/repair_invalid_odds.py`, dry-run by default. It calls the
+same `consensus_moneyline` the live strategies use — extracted from
+`Strategy._average_odds`, which now delegates to it — so a reconstructed
+price cannot drift from one recorded today.
+
+| | |
+|---|---|
+| repaired | 34 |
+| payouts changed | 16 (exactly the zeroed wins) |
+| unrecoverable | 0 |
+| picks left in the invalid band | 0 |
+| wins still booked at 0.0 | 0 |
+
+Backup: `sports_picks.backup-20260919-010520.db`.
+
+**These are reconstructions, not recordings.** The prices come from the book
+rows that survive today; their timestamps are at or before each pick, but
+they are not provably the snapshot the pick was taken against. Every repaired
+row carries **`picks.odds_reconstructed = 1`** so the distinction lives in
+the data rather than in this file. `ncaab units -83.80 -> -73.33`.
+
+### ncaab after the repair
+
+```
+  type           n     W    win%     units      roi
+  over_under   120    61   50.8%     -3.55   -0.030
+  spread       116    51   44.0%    -18.64   -0.161
+  moneyline    112    29   25.9%    -51.14   -0.457
+  TOTAL        348   141   40.5%    -73.33   -0.211
+
+  excluding reconstructed rows:
+               316   125   39.6%    -67.80   -0.215
+```
+
+The two subsets agree closely (-0.211 vs -0.215), so the reconstruction is
+not carrying the conclusion. **Moneyline remains the problem**: 26% and
+-0.46 ROI, still ~70% of all losses. Effective n is near 37 games, not 348.
+
+### A schema-drift bug this surfaced
+
+`picks.odds_reconstructed` first went in with a Python-side default only,
+so `create_all()` (tests, fresh databases) produced NOT NULL **without** a
+DB default while the migration produced `DEFAULT 0`. Any raw INSERT then
+failed — four tests errored. Fixed with `server_default="0"`. **`created_at`
+has the same latent shape**: it is NOT NULL with a Python-side default, so
+raw-SQL inserts into `picks` must supply it explicitly.
+
 ## Where things stand
 
 `master` is at `cc9eee2` and **pushed**. Test baseline: **646 passing backend,

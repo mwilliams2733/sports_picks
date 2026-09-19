@@ -2,6 +2,39 @@ from abc import ABC, abstractmethod
 from backend.analysis.odds_utils import InvalidOddsError, american_to_implied_prob
 from backend.data_types import GameData, Pick, PickFactor
 
+def consensus_moneyline(prices) -> int | None:
+    """Average American moneyline prices into one consensus price.
+
+    The single definition of what a book-level moneyline consensus is. The
+    repair script for historical picks calls this too, so a reconstructed
+    price cannot drift from a live one.
+
+    Two things it gets right, both of which were wrong in production:
+
+    * **Probability space, not price space.** American odds are non-linear
+      around +/-100, so an arithmetic mean of prices is wrong and can land in
+      the invalid (-100, 100) band where no price exists. Books straddling
+      pick'em (-150 and +140) average arithmetically to -5.
+    * **The divisor is the number of PRICES.** ``None`` entries -- books that
+      post a spread and total but no moneyline -- are dropped, not counted.
+      Counting them pulled the mean toward zero and into the invalid band;
+      that is how 34 ensemble picks came to hold values like -71.
+
+    Returns None when no usable price is present.
+    """
+    usable = []
+    for price in prices:
+        if price is None:
+            continue
+        try:
+            usable.append(american_to_implied_prob(price))
+        except InvalidOddsError:
+            continue
+    if not usable:
+        return None
+    return Strategy._prob_to_american(sum(usable) / len(usable))
+
+
 class Strategy(ABC):
     #: The factor codes this strategy is allowed to emit — i.e. the signals it
     #: genuinely consumes when computing a probability. `_build_factors` can
@@ -43,24 +76,14 @@ class Strategy(ABC):
         if not ml_home_prices or not ml_away_prices:
             return None
 
-        home_probs = []
-        for price in ml_home_prices:
-            try:
-                home_probs.append(american_to_implied_prob(price))
-            except InvalidOddsError:
-                continue
-        away_probs = []
-        for price in ml_away_prices:
-            try:
-                away_probs.append(american_to_implied_prob(price))
-            except InvalidOddsError:
-                continue
-        if not home_probs or not away_probs:
+        home_price = consensus_moneyline(ml_home_prices)
+        away_price = consensus_moneyline(ml_away_prices)
+        if home_price is None or away_price is None:
             return None
 
         result = {
-            "moneyline_home": self._prob_to_american(sum(home_probs) / len(home_probs)),
-            "moneyline_away": self._prob_to_american(sum(away_probs) / len(away_probs)),
+            "moneyline_home": home_price,
+            "moneyline_away": away_price,
         }
 
         sp_home = [o.spread_home for o in game.odds if o.spread_home is not None]

@@ -121,6 +121,16 @@ class PickModel(Base):
     # is keyed by the former, and _market_label is not one-to-one.
     prop_player = Column(String, nullable=True)
     prop_market = Column(String, nullable=True)
+    #: True when odds_at_pick was RECONSTRUCTED from surviving book rows
+    #: rather than recorded when the pick was made. See
+    #: backend/scripts/repair_invalid_odds.py. Treat these rows as an
+    #: approximation in any ROI or CLV figure.
+    #: server_default matters: the migration adds this column with
+    #: DEFAULT 0, and without it here create_all() would build a
+    #: different schema -- NOT NULL with only a Python-side default,
+    #: which any raw INSERT (tests, scripts) then violates.
+    odds_reconstructed = Column(Boolean, nullable=False, default=False,
+                                server_default="0")
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
     game = relationship("Game")
 

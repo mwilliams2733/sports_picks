@@ -171,6 +171,32 @@ def migrate_game_espn_id(engine):
 # itself, so a new migration cannot land in one entry point and be forgotten
 # in the other. (It was: the scheduler ran only two of eight, so a
 # pre-existing DB had no picks.rationale_json and every pick insert failed.)
+def migrate_pick_odds_reconstructed(engine):
+    """Add picks.odds_reconstructed if missing.
+
+    Marks a pick whose `odds_at_pick` was recomputed after the fact rather
+    than recorded at pick time. 34 ensemble moneyline picks from March 2026
+    stored a value inside the invalid (-100, 100) band, because the consensus
+    divided by every odds row rather than by the rows carrying a price. Those
+    prices cannot be graded, so a win booked 0.0 payout and ROI was biased
+    downward.
+
+    The repair recomputes them from the surviving book rows, which is a
+    reconstruction and not the price the pick was actually taken at. This
+    column exists so that distinction survives in the data instead of living
+    in a commit message.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "picks" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("picks")]
+        if "odds_reconstructed" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE picks ADD COLUMN odds_reconstructed "
+                    "BOOLEAN NOT NULL DEFAULT 0"))
+
+
 MIGRATIONS = (
     migrate_api_usage,
     migrate_game_start_time,
@@ -182,6 +208,7 @@ MIGRATIONS = (
     migrate_pick_rationale,
     migrate_pick_prop_fields,
     migrate_game_espn_id,
+    migrate_pick_odds_reconstructed,
 )
 
 
