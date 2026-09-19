@@ -315,7 +315,8 @@ def test_constant_feature_caveat_is_printed_next_to_the_brier_score(db_session):
 # --------------------------------------------------------------------------
 
 
-def _seed_sport(session, sport, n, home_rate, team_base, gid_base):
+def _seed_sport(session, sport, n, home_rate, team_base, gid_base,
+                neutral=False):
     """n games of one sport whose home side wins home_rate of them.
 
     Home wins are spread with a modulus rather than front-loaded, so the
@@ -342,6 +343,7 @@ def _seed_sport(session, sport, n, home_rate, team_base, gid_base):
             home_score=110 if home_won else 100,
             away_score=100 if home_won else 110,
             status="final",
+            neutral_site=neutral,
         ))
         session.add(Odds(game_id=gid, bookmaker="book",
                          moneyline_home=-150, moneyline_away=130))
@@ -407,3 +409,26 @@ def test_a_sport_inside_the_vocabulary_is_not_warned_about(db_session):
     """The guard must discriminate, not print unconditionally."""
     text = format_report(evaluate(_two_sport_db(db_session), "ncaab"))
     assert "SPORT_VOCAB" not in text
+
+
+def test_neutral_games_in_the_fit_window_are_reported(db_session):
+    """A baseline fitted mostly on neutral games is not a home advantage.
+
+    ncaab's whole production training set is NCAA tournament games at neutral
+    venues. Without this count the reader has no way to know the number they
+    are looking at rests on games with no host.
+    """
+    Base.metadata.create_all(db_session.get_bind())
+    _seed_sport(db_session, "nba", 100, 0.4, team_base=100, gid_base=1000)
+    _seed_sport(db_session, "ncaab", 60, 0.9, team_base=200, gid_base=2000,
+                neutral=True)
+
+    r = evaluate(db_session, "ncaab")
+    assert r.n_fit_neutral == r.n_fit_sport, "all seeded ncaab games are neutral"
+    assert "neutral" in format_report(r).lower()
+
+
+def test_a_fully_hosted_sport_is_not_labelled_neutral(db_session):
+    """The line must discriminate, not print unconditionally."""
+    r = evaluate(_two_sport_db(db_session), "nba")
+    assert r.n_fit_neutral == 0

@@ -46,6 +46,9 @@ class ESPNCollector:
                 "away_team_name": away["team"]["displayName"],
                 "home_score": int(home.get("score", 0)) if home.get("score") else None,
                 "away_score": int(away.get("score", 0)) if away.get("score") else None,
+                # ESPN marks tournament and showcase games here. Absent on
+                # some feeds, so default to hosted rather than guessing.
+                "neutral_site": bool(competition.get("neutralSite", False)),
             })
         return games
 

@@ -177,7 +177,8 @@ def _build_game_data(session: Session, game,
 
     return GameData(game_id=game.id, sport=game.sport, date=game.date,
         home_team_id=game.home_team_id, away_team_id=game.away_team_id,
-        home_stats=home_stats, away_stats=away_stats, odds=odds, week=game.week)
+        home_stats=home_stats, away_stats=away_stats, odds=odds, week=game.week,
+        neutral_site=bool(game.neutral_site))
 
 def _build_fighter_stats(session: Session, fighter_id: int, sport: str, before_date) -> FighterStats:
     """Build FighterStats from EloRating + last-5-fights history before `before_date`."""

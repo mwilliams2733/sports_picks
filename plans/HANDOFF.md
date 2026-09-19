@@ -1311,3 +1311,61 @@ and settled. Do not look for one before then.
 `min_edge` stays where it is until that happens. The edge estimate was
 inverted above ~10%, so tuning the threshold against inverted edges optimises
 the wrong thing.
+
+## Neutral-site flag added and backfilled — 2026-09-19
+
+`games.neutral_site`, populated from ESPN's `competitions[0].neutralSite`.
+Verified against the live API before building anything: ncaab 2026-03-19
+returned 16/16 True, a regular-season ncaab date returned False, and an nba
+regular-season date returned 8 False / 1 True — so it discriminates, and it
+is not a college-only concern.
+
+Backfill result against production (backed up first, `integrity_check: ok`,
+1823 games / 708 picks unchanged):
+
+| sport | changed | ->neutral | correct | no_match |
+|---|---|---|---|---|
+| nba | 6 | 6 | 1246 | 0 |
+| ncaab | 73 | 73 | 1 | 0 |
+| ncaaf | 2 | 2 | 73 | 0 |
+| mlb | 0 | 0 | 112 | 0 |
+
+**71 of 72 ncaab final games are neutral-site.** Exactly one hosted ncaab
+game exists in the entire database.
+
+The first pass left 772 nba rows unmatched — the UTC/Eastern date convention
+again, the same problem `backfill_espn_ids` carries neighbour-date logic for.
+Added the same: neighbours are consulted only for rows the exact date missed,
+so the common case stays at one request per date. `no_match` went to 0.
+
+### How the flag reaches the model
+
+A sport's one-hot slot means "home advantage for this sport is in effect", so
+it does not fire at a neutral venue. Gating alone proved insufficient: with
+the slots gated, a neutral game and a sport absent from `SPORT_VOCAB` both
+encode as all-zeros, so neutral outcomes fitted the bare intercept and every
+slot-less sport inherited them. On a fixture with hosted nba at 0.55 and
+all-neutral ncaab at 0.75, a *hosted* ncaab game came back 0.740 — the seed
+effect was not removed, only promoted. `build_feature_row` therefore also
+appends an explicit neutral slot; the same fixture then gives 0.655.
+
+### Residual, worth knowing before November
+
+Production now predicts **0.693 for a neutral game of any sport** with flat
+features. That is the neutral slot having absorbed the ncaab bracket effect:
+the designated home side is the higher seed and wins ~71%. It should have
+been carried by `elo_diff`, but ncaab Elo is nearly uniform — the sport has
+only 8 days of games, so ratings have barely moved.
+
+So the seed effect is not gone; it is confined. It no longer touches ncaab's
+home-court baseline (what November needs), nor nba's or mlb's. But it does
+mean neutral-site predictions carry a ~+0.19 bump that is really seed
+strength, which is wrong for the 6 neutral nba games where no seeding exists.
+Expect it to shrink on its own once ncaab Elo becomes informative and
+`elo_diff` can explain the seeding. Worth re-measuring then rather than
+tuning now.
+
+`ncaab` hosted now reads 0.716 off a single hosted game plus the shared
+intercept. The number barely moved from the old 0.702, but its provenance
+changed completely: it is now "almost no information" rather than "71 neutral
+games said 0.71". There is no data to move it toward until November.

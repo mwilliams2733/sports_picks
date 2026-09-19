@@ -220,6 +220,12 @@ class Report:
     #: How many games ``actual_home_rate`` rests on. Printed because a rate
     #: without its denominator invites confidence the sample cannot support.
     n_fit_sport: int = 0
+    #: How many of those had no host. A "home win rate" measured on neutral
+    #: games is not home advantage -- in a tournament bracket the home side
+    #: is the higher seed, so the rate is seed strength wearing the same
+    #: name. The model gates its per-sport slot on this, and the reader needs
+    #: to know how much of the number below it applies to.
+    n_fit_neutral: int = 0
     fit_game_ids: frozenset[int] = field(default_factory=frozenset)
     eval_game_ids: frozenset[int] = field(default_factory=frozenset)
 
@@ -372,6 +378,7 @@ def evaluate(
     if sport_fit:
         home_wins = sum(1 for g in sport_fit if g.home_score > g.away_score)
         actual_home_rate = home_wins / len(sport_fit)
+    n_fit_neutral = sum(1 for g in sport_fit if g.neutral_site)
 
     return Report(
         sport=sport,
@@ -393,6 +400,7 @@ def evaluate(
         fitted_home_baseline=fitted_home_baseline,
         actual_home_rate=actual_home_rate,
         n_fit_sport=len(sport_fit),
+        n_fit_neutral=n_fit_neutral,
         fit_game_ids=frozenset(g.id for g in fit_games),
         eval_game_ids=frozenset(g.id for g in eval_games),
     )
@@ -504,6 +512,21 @@ def format_report(report: Report) -> str:
             lines.append(
                 f"  ...over the {r.n_fit_sport} {r.sport} games in the fit window."
             )
+            if r.n_fit_neutral:
+                share = r.n_fit_neutral / r.n_fit_sport
+                lines.append(
+                    f"  NOTE: {r.n_fit_neutral} of those ({share:.0%}) were at "
+                    "NEUTRAL sites, where the"
+                )
+                lines.append(
+                    "  home side is a bracket seed and not a host. That share of"
+                )
+                lines.append(
+                    "  the rate above is seed strength, not home advantage, and"
+                )
+                lines.append(
+                    "  the model's per-sport slot does not fire for those games."
+                )
         if r.sport not in SPORT_VOCAB:
             lines.append(
                 f"  WARNING: {r.sport!r} is absent from SPORT_VOCAB, so it sets"

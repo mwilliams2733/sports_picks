@@ -36,6 +36,7 @@ def build_feature_row(
     rest_days_diff: float,
     pace_diff: float,
     sport: str,
+    neutral_site: bool = False,
 ) -> list[float]:
     """The feature vector for CalibratedModel, for training AND prediction.
 
@@ -48,9 +49,32 @@ def build_feature_row(
 
     Both call sites route through here. They previously duplicated the
     five-element list, which is how the two could have drifted.
+
+    A slot means "home advantage for this sport is in effect", so a neutral
+    venue fires none of them: there is no host to hold an advantage, and the
+    bare intercept then carries what a no-host game looks like. This matters
+    concretely -- every ncaab game in the database is an NCAA tournament game
+    at a neutral site, where "home team" is a bracket seed designation. Left
+    ungated the model reads their 0.708 home rate as home-court advantage
+    when it is seed strength, and would carry that into November when real
+    home-court games arrive.
+
+    Gating alone is not sufficient, and the trailing slot is why. With the
+    slots gated, a neutral game encodes as all-zeros -- and so does a sport
+    absent from the vocabulary. The model cannot tell "no host" from "sport I
+    have never seen", so neutral outcomes end up fitting the bare intercept
+    and every slot-less sport inherits them. Measured on a fixture with
+    hosted nba at 0.55 and all-neutral ncaab at 0.75, a *hosted* ncaab game
+    came back 0.740: the seed effect was not removed, it was promoted from
+    ncaab's slot into the global intercept.
+
+    The explicit neutral slot gives those rows somewhere of their own to go,
+    leaving the intercept to mean "hosted game, sport unknown".
     """
     row = [elo_diff, point_diff, net_rating_diff, rest_days_diff, pace_diff]
-    row.extend(1.0 if sport == s else 0.0 for s in SPORT_VOCAB)
+    home = 0.0 if neutral_site else 1.0
+    row.extend(home if sport == s else 0.0 for s in SPORT_VOCAB)
+    row.append(1.0 - home)
     return row
 
 
@@ -226,7 +250,7 @@ class CalibratedModel:
 
             features = build_feature_row(
                 elo_diff, point_diff, net_rating_diff, rest_days_diff,
-                pace_diff, game.sport,
+                pace_diff, game.sport, bool(game.neutral_site),
             )
             label = 1 if game.home_score > game.away_score else 0
 
@@ -263,6 +287,7 @@ class CalibratedModel:
             feature_dict["home_rest_days"] - feature_dict["away_rest_days"],
             feature_dict["pace_diff"],
             game.sport,
+            bool(game.neutral_site),
         )], dtype=np.float64)
         proba = self.model.predict_proba(feature_arr)
         # predict_proba returns [[P(class0), P(class1)]]

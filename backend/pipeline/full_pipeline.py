@@ -214,6 +214,13 @@ def _store_games(session: Session, sport: str, target_date: date,
                 # Rows predating the column acquire it as they are seen, so
                 # the backfill script is a catch-up rather than the only path.
                 existing.espn_id = espn_id
+            if "neutral_site" in g:
+                # ESPN is authoritative here and the Odds API carries no
+                # venue, so a row created from odds starts hosted and is
+                # corrected the first time ESPN sees it. Overwritten rather
+                # than filled-if-null: False is a real value, not a gap, so
+                # there is no way to tell "not known yet" from "hosted".
+                existing.neutral_site = bool(g["neutral_site"])
             touched.append(existing)
             continue
 
@@ -223,6 +230,7 @@ def _store_games(session: Session, sport: str, target_date: date,
             home_team_id=home_id, away_team_id=away_id,
             home_score=g["home_score"], away_score=g["away_score"],
             status=g["status"],
+            neutral_site=g.get("neutral_site", False),
         )
         session.add(game)
         touched.append(game)

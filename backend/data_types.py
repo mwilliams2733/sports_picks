@@ -83,6 +83,10 @@ class GameData:
     away_stats: TeamStats
     odds: list[OddsSnapshot] = field(default_factory=list)
     week: int | None = None
+    #: True when neither side is hosting (tournament bracket, neutral
+    #: showcase). Home advantage does not apply, so the model's per-sport
+    #: home slot must not fire. Mirrors `Game.neutral_site`.
+    neutral_site: bool = False
     home_fighter: "FighterStats | None" = None
     away_fighter: "FighterStats | None" = None
 

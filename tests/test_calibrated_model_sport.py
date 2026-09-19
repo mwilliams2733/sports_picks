@@ -19,19 +19,29 @@ def _row(sport):
     return build_feature_row(1.0, 2.0, 3.0, 4.0, 5.0, sport)
 
 
+def _sport_slots(row):
+    """The one-hot sport slots only, excluding the trailing neutral slot."""
+    return row[5:5 + len(SPORT_VOCAB)]
+
+
+def _neutral_slot(row):
+    return row[-1]
+
+
 def test_legacy_features_come_first_and_unchanged():
     row = _row("nba")
     assert row[:5] == [1.0, 2.0, 3.0, 4.0, 5.0]
 
 
-def test_row_length_is_five_plus_the_vocabulary():
-    assert len(_row("nba")) == 5 + len(SPORT_VOCAB)
+def test_row_length_is_five_plus_the_vocabulary_plus_the_neutral_slot():
+    assert len(_row("nba")) == 5 + len(SPORT_VOCAB) + 1
 
 
 def test_exactly_one_sport_slot_is_set():
     row = _row("ncaab")
-    assert sum(row[5:]) == 1.0
+    assert sum(_sport_slots(row)) == 1.0
     assert row[5 + SPORT_VOCAB.index("ncaab")] == 1.0
+    assert _neutral_slot(row) == 0.0
 
 
 def test_an_unknown_sport_sets_no_slot_rather_than_raising():
@@ -42,8 +52,11 @@ def test_an_unknown_sport_sets_no_slot_rather_than_raising():
     middle of pick generation.
     """
     row = _row("curling")
-    assert sum(row[5:]) == 0.0
-    assert len(row) == 5 + len(SPORT_VOCAB)
+    assert sum(_sport_slots(row)) == 0.0
+    assert len(row) == 5 + len(SPORT_VOCAB) + 1
+    # Distinguishable from a neutral game, which is the whole reason the
+    # neutral slot is explicit rather than implied by all-zero sport slots.
+    assert _neutral_slot(row) == 0.0
 
 
 def test_vocabulary_is_fixed_not_derived_from_data():
@@ -68,7 +81,8 @@ def test_two_sports_produce_different_rows():
 # --------------------------------------------------------------------------
 
 
-def _seed(session, sport, n_games, home_win_rate, start_team_id):
+def _seed(session, sport, n_games, home_win_rate, start_team_id,
+          neutral_site=False):
     """n_games of one sport where the home side wins home_win_rate of them.
 
     No TeamStat rows are written, so every difference feature falls through
@@ -92,6 +106,7 @@ def _seed(session, sport, n_games, home_win_rate, start_team_id):
             home_score=101 if home_won else 99,
             away_score=99 if home_won else 101,
             status="final",
+            neutral_site=neutral_site,
         ))
 
 
@@ -157,3 +172,108 @@ def test_an_unseen_sport_still_predicts(trained_model):
     """mlb is in the vocabulary but absent from this training set."""
     p = trained_model.predict_home_win_prob(_flat_game("mlb"))
     assert 0.0 < p < 1.0
+
+
+# --------------------------------------------------------------------------
+# Neutral sites. A sport's one-hot slot means "home advantage for this sport
+# is in effect", so at a neutral venue it must not fire: there is no host to
+# have an advantage. ncaab's entire training set is NCAA tournament games at
+# neutral venues, where "home team" is a bracket seed designation, so without
+# this gate the model learns a 0.70 home baseline that is really seed
+# strength.
+# --------------------------------------------------------------------------
+
+
+def test_a_neutral_game_sets_no_sport_slot():
+    row = build_feature_row(1.0, 2.0, 3.0, 4.0, 5.0, "ncaab", neutral_site=True)
+    assert sum(_sport_slots(row)) == 0.0
+    assert _neutral_slot(row) == 1.0
+
+
+def test_a_hosted_game_still_sets_its_slot():
+    row = build_feature_row(1.0, 2.0, 3.0, 4.0, 5.0, "ncaab", neutral_site=False)
+    assert row[5 + SPORT_VOCAB.index("ncaab")] == 1.0
+
+
+def test_neutral_defaults_to_false():
+    """Callers that predate the flag must keep their old behaviour."""
+    assert build_feature_row(1.0, 2.0, 3.0, 4.0, 5.0, "nba") == \
+        build_feature_row(1.0, 2.0, 3.0, 4.0, 5.0, "nba", neutral_site=False)
+
+
+def test_the_legacy_features_are_untouched_by_neutrality():
+    """Only the home-advantage slots are gated, not the difference features."""
+    hosted = build_feature_row(1.0, 2.0, 3.0, 4.0, 5.0, "nba", neutral_site=False)
+    neutral = build_feature_row(1.0, 2.0, 3.0, 4.0, 5.0, "nba", neutral_site=True)
+    assert hosted[:5] == neutral[:5] == [1.0, 2.0, 3.0, 4.0, 5.0]
+
+
+def test_the_row_width_does_not_change():
+    """Gating must not widen the vector -- a stored model would misread it."""
+    assert len(build_feature_row(0, 0, 0, 0, 0, "nba", neutral_site=True)) == \
+        len(build_feature_row(0, 0, 0, 0, 0, "nba", neutral_site=False))
+
+
+def test_neutral_games_of_different_sports_are_indistinguishable():
+    """Deliberate: with no host, sport identity carries no home advantage.
+
+    Anything that still separates them (pace, scoring level) belongs in the
+    difference features, not in an intercept.
+    """
+    a = build_feature_row(1.0, 2.0, 3.0, 4.0, 5.0, "nba", neutral_site=True)
+    b = build_feature_row(1.0, 2.0, 3.0, 4.0, 5.0, "ncaab", neutral_site=True)
+    assert a == b
+
+
+def _flat_neutral_game(sport):
+    g = _flat_game(sport)
+    g.neutral_site = True
+    return g
+
+
+@pytest.fixture()
+def model_with_neutral_ncaab():
+    """Production's actual shape: hosted nba, and ncaab that is ALL neutral.
+
+    ncaab's 0.75 here is bracket seeding, not home advantage -- exactly what
+    the 72 NCAA tournament games in the real database encode.
+    """
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as s:
+        _seed(s, "nba", 400, 0.55, 100)
+        _seed(s, "ncaab", 80, 0.75, 200, neutral_site=True)
+        s.commit()
+        m = CalibratedModel()
+        m.train_from_db(s)
+        assert m.trained
+        yield m
+
+
+def test_neutral_games_do_not_teach_a_home_advantage(model_with_neutral_ncaab):
+    """The point of the flag.
+
+    ncaab's training games are all neutral, so its slot never fires and it
+    learns no home baseline. Asked about a HOSTED ncaab game it must not
+    return the 0.75 that was really seed strength.
+    """
+    hosted = model_with_neutral_ncaab.predict_home_win_prob(_flat_game("ncaab"))
+    assert hosted < 0.70, (
+        f"ncaab hosted baseline {hosted:.3f}: the neutral games still taught "
+        "a home advantage"
+    )
+
+
+def test_a_hosted_sport_is_unaffected_by_another_sports_neutrality(
+    model_with_neutral_ncaab
+):
+    """nba is hosted throughout and must keep its own baseline."""
+    nba = model_with_neutral_ncaab.predict_home_win_prob(_flat_game("nba"))
+    assert 0.48 < nba < 0.64, f"nba baseline {nba:.3f} not near its 0.55"
+
+
+def test_a_neutral_prediction_does_not_depend_on_sport(model_with_neutral_ncaab):
+    """With no host, no sport slot fires, so the rows are identical."""
+    a = model_with_neutral_ncaab.predict_home_win_prob(_flat_neutral_game("nba"))
+    b = model_with_neutral_ncaab.predict_home_win_prob(_flat_neutral_game("ncaab"))
+    assert a == b

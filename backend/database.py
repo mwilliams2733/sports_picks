@@ -197,6 +197,31 @@ def migrate_pick_odds_reconstructed(engine):
                     "BOOLEAN NOT NULL DEFAULT 0"))
 
 
+def migrate_game_neutral_site(engine):
+    """Add games.neutral_site if missing.
+
+    A game at a neutral venue has no host, so `home_team_id` is a bracket or
+    seed designation rather than a team playing at home. Without this column
+    every such game teaches the model a home advantage that does not exist:
+    all 72 ncaab final games in production are NCAA tournament games at
+    neutral sites, and their 0.708 "home win rate" is higher seeds beating
+    lower seeds.
+
+    Existing rows default to 0. That is wrong for those 72 games until
+    `backfill_neutral_site` runs, and deliberately so -- a migration that
+    guessed would be indistinguishable from one that measured.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "games" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("games")]
+        if "neutral_site" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE games ADD COLUMN neutral_site "
+                    "BOOLEAN NOT NULL DEFAULT 0"))
+
+
 MIGRATIONS = (
     migrate_api_usage,
     migrate_game_start_time,
@@ -209,6 +234,7 @@ MIGRATIONS = (
     migrate_pick_prop_fields,
     migrate_game_espn_id,
     migrate_pick_odds_reconstructed,
+    migrate_game_neutral_site,
 )
 
 

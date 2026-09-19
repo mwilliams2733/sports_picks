@@ -34,6 +34,15 @@ class Game(Base):
     home_score = Column(Integer, nullable=True)
     away_score = Column(Integer, nullable=True)
     status = Column(String, nullable=False, default="scheduled")
+    #: True when neither side is hosting -- a tournament bracket, a neutral
+    #: showcase. `home_team_id` is then a seed or bracket designation, not a
+    #: host, so home advantage does not apply and the model must not learn
+    #: one from it. ESPN supplies this as `competitions[0].neutralSite`.
+    #: server_default matters: raw sqlite3 INSERTs bypass the Python-side
+    #: `default=`, and create_all would otherwise build a NOT NULL column
+    #: with no database default, drifting from what the migration writes.
+    neutral_site = Column(Boolean, nullable=False, default=False,
+                          server_default="0")
     home_team = relationship("Team", foreign_keys=[home_team_id])
     away_team = relationship("Team", foreign_keys=[away_team_id])
 
