@@ -68,15 +68,33 @@ Resolving all 78 against ESPN's `displayName`:
 | exact `displayName` match | 64 |
 | after `\bSt\b` → `State` | 8 |
 | hand-written alias | 5 |
-| **unresolved** | **1** (`'Queens University Royals'`, 1 game) |
+| **unresolved** | **2** — both Queens University (see below) |
 
 | action | rows | game refs |
 |---|---|---|
 | **rename** (target abbreviation free) | 17 | 19 |
 | **merge** (an existing row owns it) | 60 | 89 |
-| leave alone (unresolved) | 1 | 1 |
+| leave alone (unresolved) | 2 | 2 |
 
 No two bad rows resolve to the same target, so there are no merge-of-merges.
+
+**Corrected during execution.** The survey behind the first two tables
+identified bad rows as `length(abbreviation) > 5`, which assumes a short
+abbreviation is a valid one. It is not: team 327 holds `'QUC'`, three
+characters and absent from ESPN's table. Both unresolved rows are the same
+school — team 257 `'Queens University Royals'` and team 327 `'QUC'` — and
+ESPN's 362-team list contains no Queens University at all, so neither can be
+resolved. `classify()` uses `resolution_of` rather than a length heuristic and
+finds both.
+
+**The merge reveals duplicate fixtures a dry run cannot see.** Rehearsing
+`--apply` on a copy of production reported **34 fixtures held by more than one
+game row**. They were invisible beforehand because the two rows carried
+different team ids, so a same-teams/same-date scan reads them as different
+fixtures. This also corrects the claim earlier in this plan that there are "0
+twin pairs": that scan matched on team id, and these duplicates sit across
+*different* team rows. There are both 59 stranded originals **and** 34
+duplicates; the duplicates only become visible once the team rows collapse.
 
 ## Root cause
 
@@ -985,8 +1003,9 @@ games/picks counts match the live file. It is the only rollback.
 .venv/Scripts/python.exe -m backend.scripts.fix_team_identity --db "<abs db path>"
 ```
 
-Expected, from the 2026-09-18 survey: `rename 17 rows / 19 game references`,
-`merge 60 rows / 89 game references`, `unresolved 1 rows / 1 game references`.
+Expected, from the 2026-09-19 rehearsal: `rename 17 rows / 19 game
+references`, `merge 60 rows / 89 game references`, `unresolved 2 rows / 2 game
+references`.
 
 **If the numbers differ, stop and re-survey.** They are a fingerprint of the
 database this plan was written against.
@@ -998,10 +1017,14 @@ cp sports_picks.db /tmp/trial.db   # or the session scratchpad
 .venv/Scripts/python.exe -m backend.scripts.fix_team_identity --db "<abs trial path>" --apply
 ```
 
-Expected: the assertions pass, and the duplicate-fixture report prints whatever
+Expected: the assertions pass, and the duplicate-fixture report prints the
 collisions the merge revealed. A dry run cannot surface those, because they
 only exist once team ids have been merged — this step is the only place they
-appear before production. Record the count.
+appear before production.
+
+**The rehearsal on 2026-09-19 reported 34.** Post-state on the copy: 87 ncaab
+team rows (from 147), abbreviations unique, `integrity_check: ok`, 120 ncaab
+games unchanged. If the count differs materially, stop and re-survey.
 
 - [ ] **Step 5: Apply**
 
@@ -1083,10 +1106,12 @@ git commit -m "docs: record ncaab team identity repair and its calibration effec
 
 ## Notes for whoever executes this
 
-- **The one unresolved row is fine.** `'Queens University Royals'` (1 game)
-  stays as it is. Guessing an alias for a single game is how a wrong merge
-  gets in. If you do resolve it, confirm the school by eye against ESPN's
-  table first and add it to `_ALIASES` with a test.
+- **The two unresolved rows are fine.** Both are Queens University (team 257
+  `'Queens University Royals'`, team 327 `'QUC'`, one game each), and ESPN's
+  table has no Queens University to map them to. They stay as they are, and
+  they stay duplicated. Guessing an alias for two games is how a wrong merge
+  gets in. If ESPN later lists the school, add it to `_ALIASES` with a test
+  and the two rows will merge on the next run.
 - **The alias table is the dangerous part of this plan.** Every entry asserts
   two strings name the same school. A wrong entry does not crash — it merges
   two programmes' games and Elo history, and looks plausible afterwards. Five
