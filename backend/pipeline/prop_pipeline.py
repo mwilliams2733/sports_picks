@@ -228,7 +228,7 @@ def _build_prop_pick(analysis, strategy_id: int) -> PickModel:
 
     ``prop_player`` and ``prop_market`` are written here, at generation time,
     because they cannot be recovered reliably afterwards: ``pick_value`` embeds
-    a *display label* and :func:`_market_label` covers only 7 of the 16 keys in
+    a *display label* and :func:`_market_label` covers only 7 of the 21 keys in
     ``MARKET_STAT_MAP``, so the reverse mapping is not one-to-one. Grading
     reads the market key, never the label.
     """

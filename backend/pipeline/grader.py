@@ -1,6 +1,7 @@
 import logging
 import re
 from backend.analysis.odds_utils import calculate_payout, InvalidOddsError
+from backend.analysis.prop_markets import MARKET_STAT_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -9,26 +10,6 @@ logger = logging.getLogger(__name__)
 # exact push, so pushes are detected within this tolerance rather than `==`.
 _PUSH_EPSILON = 0.001
 
-# Map prop market keys to PlayerStat field names
-MARKET_STAT_MAP = {
-    "player_points": ["points"],
-    "player_rebounds": ["rebounds"],
-    "player_assists": ["assists"],
-    "player_threes": ["threes"],
-    "player_blocks": ["blocks"],
-    "player_steals": ["steals"],
-    "player_turnovers": ["turnovers"],
-    "player_points_rebounds_assists": ["points", "rebounds", "assists"],
-    "player_points_rebounds": ["points", "rebounds"],
-    "player_points_assists": ["points", "assists"],
-    "player_rebounds_assists": ["rebounds", "assists"],
-    "player_pass_yds": ["pass_yards"],
-    "player_rush_yds": ["rush_yards"],
-    "player_reception_yds": ["rec_yards"],
-    "player_pass_tds": ["touchdowns"],
-    "player_receptions": ["receptions"],
-    "player_anytime_td": ["touchdowns"],
-}
 
 
 def payout_for(result: str, odds_at_pick: int) -> float:

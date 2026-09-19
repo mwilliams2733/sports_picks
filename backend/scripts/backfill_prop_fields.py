@@ -13,7 +13,7 @@ What it writes
 What it deliberately refuses to write
 -------------------------------------
 A market it cannot resolve exactly. ``prop_pipeline._market_label`` maps 7 of
-the 16 keys in ``MARKET_STAT_MAP`` to a display label; the other 9 fall through
+the 21 keys in ``MARKET_STAT_MAP`` to a display label; the other 14 fall through
 as themselves. So the reverse mapping is only defined for labels the forward
 map actually produces, and a guess would silently grade a prop against the
 wrong stat -- a confident wrong result, which is worse than an ungraded pick.
@@ -48,7 +48,7 @@ from collections import Counter
 
 from backend.database import get_engine, get_session, run_migrations
 from backend.models import PickModel
-from backend.pipeline.grader import MARKET_STAT_MAP
+from backend.analysis.prop_markets import MARKET_STAT_MAP
 from backend.pipeline.prop_pipeline import _market_label
 
 #: "<player> Over|Under <line> <label>"
