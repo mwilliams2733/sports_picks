@@ -192,6 +192,12 @@ def morning_scout(config, engine, scheduler, is_retry=False):
                 pass
 
         existing_jobs = {j.id for j in scheduler.get_jobs()}
+        # Windows already due are collected here and run after every sport has
+        # been scheduled, not inline. Running one inline blocks the loop for as
+        # long as that pipeline takes -- on 2026-09-19 a ncaaf window held it
+        # for over 25 minutes fetching player stats, so mlb, later in the list,
+        # never had a window created at all and went the day without odds.
+        due_now: list[tuple[str, dict, str]] = []
         for sport in scheduled_sports:
             games = session.query(Game).filter(
                 Game.sport == sport, Game.date == today,
@@ -225,8 +231,9 @@ def morning_scout(config, engine, scheduler, is_retry=False):
                 run_at = window["run_at"]
                 now_utc = datetime.now(tz=timezone.utc)
                 if run_at <= now_utc:
-                    logger.info(f"Window {job_id} run_at is past, running now")
-                    _run_window(config, engine, sport, window)
+                    logger.info(f"Window {job_id} run_at is past, queued to run "
+                                "after scheduling completes")
+                    due_now.append((sport, window, job_id))
                 else:
                     run_at_et = run_at.astimezone(ET)
                     scheduler.add_job(
@@ -240,6 +247,18 @@ def morning_scout(config, engine, scheduler, is_retry=False):
                         f"~{earliest_et.strftime('%I:%M %p')} ET, pipeline run at "
                         f"{run_at_et.strftime('%I:%M %p')} ET"
                     )
+
+        # Still serialised, deliberately: these share a database and hit the
+        # same ESPN endpoints, so running them concurrently would trade one
+        # problem for another. The point is only that scheduling no longer
+        # waits on them.
+        for sport, window, job_id in due_now:
+            logger.info(f"Running overdue window {job_id}")
+            try:
+                _run_window(config, engine, sport, window)
+            except Exception:
+                logger.exception(
+                    "Overdue window %s failed; continuing with the rest", job_id)
     except Exception as e:
         logger.error(f"Morning scout error: {e}", exc_info=True)
     finally:

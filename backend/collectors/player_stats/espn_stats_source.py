@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 
 from backend.collectors.player_stats.base import PlayerStatsSource
+from backend.collectors.espn_http import get_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ class EspnStatsSource(PlayerStatsSource):
         base = urls["base"]
         roster_url = f"{base}/teams/{team_id}/roster"
         try:
-            resp = await self._client.get(roster_url)
+            resp = await get_with_retry(self._client, roster_url)
             resp.raise_for_status()
             roster_data = resp.json()
         except Exception as e:
@@ -172,7 +173,7 @@ class EspnStatsSource(PlayerStatsSource):
                 continue
             stats_url = f"{stats_base}/athletes/{athlete_id}/stats"
             try:
-                resp = await self._client.get(stats_url)
+                resp = await get_with_retry(self._client, stats_url)
                 resp.raise_for_status()
                 stats_data = resp.json()
             except Exception as e:
@@ -200,7 +201,7 @@ class EspnStatsSource(PlayerStatsSource):
         # Search athlete by name
         search_url = f"{base}/athletes"
         try:
-            resp = await self._client.get(search_url, params={"limit": 50, "search": player_name})
+            resp = await get_with_retry(self._client, search_url, params={"limit": 50, "search": player_name})
             resp.raise_for_status()
             search_data = resp.json()
         except Exception as e:
@@ -218,7 +219,7 @@ class EspnStatsSource(PlayerStatsSource):
 
         gamelog_url = f"{base}/athletes/{athlete_id}/gamelog"
         try:
-            resp = await self._client.get(gamelog_url)
+            resp = await get_with_retry(self._client, gamelog_url)
             resp.raise_for_status()
             gamelog_data = resp.json()
         except Exception as e:
@@ -276,7 +277,7 @@ class EspnStatsSource(PlayerStatsSource):
     async def is_available(self) -> bool:
         try:
             url = ESPN_SPORT_URLS["nba"]["scoreboard"]
-            resp = await self._client.get(url, timeout=5.0)
+            resp = await get_with_retry(self._client, url, timeout=5.0)
             return resp.status_code == 200
         except Exception:
             return False

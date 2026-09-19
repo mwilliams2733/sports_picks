@@ -1,5 +1,7 @@
 import httpx
 
+from backend.collectors.espn_http import get_with_retry
+
 SPORT_URLS = {
     "nba": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
     "nfl": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
@@ -26,7 +28,7 @@ class ESPNCollector:
         url = SPORT_URLS.get(sport)
         if not url:
             return []
-        response = await self.client.get(url, params={"dates": date_str})
+        response = await get_with_retry(self.client, url, params={"dates": date_str})
         response.raise_for_status()
         data = response.json()
         games = []
