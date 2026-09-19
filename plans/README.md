@@ -35,9 +35,18 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 013 | Nobody asks ESPN about yesterday, so games never finalize | **P0** | M | — | **Tasks 1-2 DONE 2026-09-17** as `5603514` (3-day finalize-only lookback; ESPN_TEAM_SPORTS widened from nba/nfl). Task 3's catch-up script shipped as `1c75c11` and ran against a **copy only**: 250 of 334 finalized (nba 218/239, ncaab 21/81, mlb 11/14), 0 rows canceled. Production not yet caught up. |
 | 014 | ESPN dates are UTC, so every evening game is stored a day late | P1 | M | 013 — done | **DONE 2026-09-17** (`eddf502`, `a5f9201`, `e04fa24`, `822f5ef`): `Game.espn_id` + identity matching; 13 twin pairs merged; dates now Eastern via one shared `time_utils.et_date`. Found **9 games double-counted in the Elo replay** — replay moved 957 of 2098 ratings, max 20.64 pts. Task 4 obsolete (0 same-id duplicates remain). **Production untouched: apply backfill + merge BEFORE this code ingests there.** |
 
-Current `master`: **549 backend tests passing**, 0 failed (360 at the start of
+Current `master`: **674 backend tests passing**, 0 failed (360 at the start of
 the audit), verified by CI on Python **3.12 and 3.14**. Frontend: eslint 0/0,
-tsc clean, vitest 15/15.
+tsc clean, **vitest 20/20**.
+
+> **2026-09-19.** Four items came off the handoff's "Still open" list:
+> `EspnStatsSource._find_team_id` defined, the duplicated prop-market map
+> merged, `migrate_api_usage`'s `DROP TABLE` made opt-in, and
+> `PaperTrading.tsx` migrated to React Query (which clears the suppression
+> 009 left behind). Two new findings came out of that work: the test suite
+> had been making live HTTP calls, now blocked; and **mlb props are fetched
+> but can be neither analysed nor graded**. `plans/HANDOFF.md` has the
+> detail and the evidence for the two open judgment calls.
 
 Plans 001-011 and 014 are complete. **013 is done bar the production
 catch-up.** **Open: 012 (P1).**
