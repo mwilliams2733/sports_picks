@@ -308,3 +308,106 @@ def test_repair_resolves_duplicates_it_creates(con):
     # game 10's derived rows followed it onto the survivor.
     assert con.execute(
         "SELECT team_id FROM team_stats WHERE game_id=12").fetchone()[0] == 1
+
+
+# --- date-offset twins (the UTC-vs-ET shape from plan 014) --------------
+
+
+@pytest.fixture()
+def con_offset(con):
+    """A plan-014 twin: same teams, one day later, empty, no espn_id.
+
+    ESPN files an evening tip under the UTC date, so the same fixture can
+    exist twice a day apart. Only visible once the team rows merge.
+    """
+    con.execute("INSERT INTO games (id, sport, season, date, espn_id, "
+                "home_team_id, away_team_id, home_score, away_score, status) "
+                "VALUES (20, 'ncaab', '2026', '2026-01-04', '40199', "
+                "2, 4, 115, 119, 'final')")
+    # game 10 (2026-01-05, scheduled, no score, no espn_id) is its twin.
+    con.commit()
+    return con
+
+
+def test_offset_twin_is_merged_into_the_final_row(con_offset):
+    from backend.scripts.fix_team_identity import resolve_offset_twins
+
+    result = resolve_offset_twins(con_offset, "ncaab", apply=True)
+    cur = con_offset.cursor()
+    assert result["resolved"] == 1
+    assert cur.execute("SELECT COUNT(*) FROM games WHERE id=10").fetchone()[0] == 0
+    assert cur.execute(
+        "SELECT team_id FROM team_stats WHERE game_id=20").fetchone()[0] == 2
+
+
+def test_two_final_rows_a_day_apart_are_left_alone(con):
+    """A real back-to-back. Production has 47 pairs like this."""
+    from backend.scripts.fix_team_identity import resolve_offset_twins
+
+    con.execute("UPDATE games SET status='final', home_score=1, away_score=2, "
+                "espn_id='A' WHERE id=10")
+    con.execute("INSERT INTO games (id, sport, season, date, espn_id, "
+                "home_team_id, away_team_id, home_score, away_score, status) "
+                "VALUES (21, 'ncaab', '2026', '2026-01-04', 'B', "
+                "2, 4, 3, 4, 'final')")
+    con.commit()
+
+    result = resolve_offset_twins(con, "ncaab", apply=True)
+    assert result["resolved"] == 0
+    assert con.execute(
+        "SELECT COUNT(*) FROM games WHERE id IN (10,21)").fetchone()[0] == 2
+
+
+def test_a_twin_carrying_an_espn_id_is_left_alone(con):
+    """If the second row has its own espn_id it is its own fixture."""
+    from backend.scripts.fix_team_identity import resolve_offset_twins
+
+    con.execute("UPDATE games SET espn_id='OWN' WHERE id=10")
+    con.execute("INSERT INTO games (id, sport, season, date, espn_id, "
+                "home_team_id, away_team_id, home_score, away_score, status) "
+                "VALUES (22, 'ncaab', '2026', '2026-01-04', 'X', "
+                "2, 4, 115, 119, 'final')")
+    con.commit()
+
+    assert resolve_offset_twins(con, "ncaab", apply=True)["resolved"] == 0
+
+
+def test_two_days_apart_is_not_a_twin(con):
+    from backend.scripts.fix_team_identity import resolve_offset_twins
+
+    con.execute("INSERT INTO games (id, sport, season, date, espn_id, "
+                "home_team_id, away_team_id, home_score, away_score, status) "
+                "VALUES (23, 'ncaab', '2026', '2026-01-03', 'Y', "
+                "2, 4, 115, 119, 'final')")
+    con.commit()
+    assert resolve_offset_twins(con, "ncaab", apply=True)["resolved"] == 0
+
+
+def test_offset_twin_dry_run_writes_nothing(con_offset):
+    from backend.scripts.fix_team_identity import resolve_offset_twins
+
+    resolve_offset_twins(con_offset, "ncaab", apply=False)
+    assert con_offset.execute(
+        "SELECT COUNT(*) FROM games WHERE id=10").fetchone()[0] == 1
+
+
+def test_a_final_row_without_an_espn_id_is_not_trusted_as_survivor(con):
+    """The espn_id is the evidence that the final row is ESPN's fixture.
+
+    Without it we have a final row and an empty next-day row and no proof
+    they are the same game, so the pair is left alone. Production has no
+    case like this; the guard is deliberate conservatism, and without this
+    test it was unenforced.
+    """
+    from backend.scripts.fix_team_identity import resolve_offset_twins
+
+    # game 10 is 2026-01-05 scheduled/empty; add a final twin the day before
+    # that carries NO espn_id.
+    con.execute("INSERT INTO games (id, sport, season, date, "
+                "home_team_id, away_team_id, home_score, away_score, status) "
+                "VALUES (24, 'ncaab', '2026', '2026-01-04', 2, 4, 9, 8, 'final')")
+    con.commit()
+
+    assert resolve_offset_twins(con, "ncaab", apply=True)["resolved"] == 0
+    assert con.execute(
+        "SELECT COUNT(*) FROM games WHERE id IN (10,24)").fetchone()[0] == 2

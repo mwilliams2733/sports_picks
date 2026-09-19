@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+from datetime import date, timedelta
 from typing import NamedTuple
 
 from backend.team_identity import ABBREVIATION_SPORTS, resolution_of
@@ -212,6 +213,76 @@ def resolve_duplicate_games(con: sqlite3.Connection, sport: str, *,
     return {"resolved": resolved, "skipped": skipped}
 
 
+def _repoint_and_delete(cur, allowed, children, survivor: int, loser: int) -> None:
+    """Move every child row from ``loser`` onto ``survivor``, then drop it."""
+    for table, column in children:
+        # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query
+        # Identifiers only, each checked against the schema allowlist;
+        # both values are bound.
+        sql = ("UPDATE " + ident(table, allowed) + " SET "
+               + ident(column, allowed) + "=? WHERE "
+               + ident(column, allowed) + "=?")
+        cur.execute(sql, (survivor, loser))
+    cur.execute("DELETE FROM games WHERE id=?", (loser,))
+
+
+def resolve_offset_twins(con: sqlite3.Connection, sport: str, *,
+                         apply: bool) -> dict:
+    """Merge fixtures that exist twice a day apart (the plan-014 shape).
+
+    ESPN timestamps are UTC, so an evening tip is filed under the next day.
+    Before ``espn_id`` existed, rows were identified by (date, teams), and the
+    same fixture could be inserted twice: the real one, and an empty twin
+    dated a day later.
+
+    The signature is deliberately narrow, because teams really do play each
+    other on consecutive days. All of these must hold:
+
+      * same sport and same two teams, exactly one day apart;
+      * exactly one row is final AND carries an espn_id;
+      * the other has no score, no espn_id and is not final.
+
+    Production holds 47 same-team pairs a day apart; only 2 match this
+    signature. The other 45 are genuine back-to-backs and mma cards, and are
+    left alone. A looser rule would silently delete real games.
+    """
+    cur = con.cursor()
+    allowed = schema_names(cur)
+    children = fk_children(cur, "games")
+
+    by_match: dict[tuple, list] = {}
+    for row in cur.execute(
+        "SELECT id, date, home_team_id, away_team_id, status, home_score, "
+        "espn_id FROM games WHERE sport=? ORDER BY date", (sport,)
+    ).fetchall():
+        by_match.setdefault((row[2], row[3]), []).append(row)
+
+    pairs = []
+    for games in by_match.values():
+        games.sort(key=lambda r: r[1])
+        for a, b in zip(games, games[1:]):
+            da = date.fromisoformat(str(a[1])[:10])
+            db_ = date.fromisoformat(str(b[1])[:10])
+            if (db_ - da) != timedelta(days=1):
+                continue
+            finals = [g for g in (a, b) if g[4] == "final" and g[6] is not None]
+            empties = [g for g in (a, b)
+                       if g[4] != "final" and g[5] is None and g[6] is None]
+            if len(finals) == 1 and len(empties) == 1:
+                pairs.append((finals[0], empties[0]))
+
+    for survivor, twin in pairs:
+        print(f"  twin {twin[0]} ({twin[1]}) -> {survivor[0]} "
+              f"({survivor[1]}, espn={survivor[6]})")
+        if apply:
+            _repoint_and_delete(cur, allowed, children, survivor[0], twin[0])
+
+    if apply and pairs:
+        con.commit()
+
+    return {"resolved": len(pairs)}
+
+
 def repair(con: sqlite3.Connection, sport: str, *, apply: bool) -> dict:
     if sport not in ABBREVIATION_SPORTS:
         raise ValueError(f"{sport} identifies teams by name, not abbreviation")
@@ -268,8 +339,15 @@ def repair(con: sqlite3.Connection, sport: str, *, apply: bool) -> dict:
         dup_result = resolve_duplicate_games(con, sport, apply=True)
         if dup_result["resolved"]:
             print(f"  resolved {dup_result['resolved']}, keeping the final row.")
+        # Same-DATE duplicates are not the only kind the merge reveals: an
+        # evening tip filed under ESPN's UTC date produces a twin one day
+        # later. Both only become visible once the team ids collapse.
+        twin_result = resolve_offset_twins(con, sport, apply=True)
+        if twin_result["resolved"]:
+            print(f"  resolved {twin_result['resolved']} date-offset twins.")
     else:
         dup_result = {"resolved": 0, "skipped": []}
+        twin_result = {"resolved": 0}
         print()
         print("  Duplicate fixtures cannot be counted until the merge has run;")
         print("  --apply will report and resolve them.")
@@ -279,6 +357,7 @@ def repair(con: sqlite3.Connection, sport: str, *, apply: bool) -> dict:
         "duplicate_games": dupes,
         "duplicates_resolved": dup_result["resolved"],
         "duplicates_skipped": dup_result["skipped"],
+        "offset_twins_resolved": twin_result["resolved"],
     }
 
 

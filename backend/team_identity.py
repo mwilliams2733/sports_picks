@@ -35,6 +35,12 @@ _ALIASES: dict[str, dict[str, str]] = {
         "Seattle Redhawks": "Seattle U Redhawks",
         "GW Revolutionaries": "George Washington Revolutionaries",
     },
+    "nba": {
+        # The Odds API spells the city out; ESPN does not. Same franchise --
+        # note ESPN keeps "Los Angeles Lakers" in full, so this is a genuine
+        # one-off rather than a rule about LA teams.
+        "Los Angeles Clippers": "LA Clippers",
+    },
 }
 
 _ST = re.compile(r"\bSt\b(?!\.)")

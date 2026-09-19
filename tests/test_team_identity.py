@@ -82,3 +82,25 @@ def test_exact_match_wins_over_a_looser_tier():
 
 def test_empty_label_is_unresolved():
     assert canonical_abbr("ncaab", "") is None
+
+
+def test_nba_clippers_alias_resolves():
+    """ESPN says 'LA Clippers'; the Odds API says 'Los Angeles Clippers'."""
+    assert canonical_abbr("nba", "Los Angeles Clippers") == "LAC"
+    assert resolution_of("nba", "Los Angeles Clippers")[1] == "alias"
+
+
+def test_nba_lakers_are_not_abbreviated_by_the_same_rule():
+    # ESPN keeps the Lakers' city in full -- the Clippers entry is a one-off,
+    # not a rule about LA teams.
+    assert canonical_abbr("nba", "Los Angeles Lakers") == "LAL"
+    assert resolution_of("nba", "Los Angeles Lakers")[1] == "exact"
+
+
+def test_an_all_star_team_stays_unresolved():
+    """'Team Stripes' is a real All-Star roster, not a defect.
+
+    It must land in the unresolved bucket so the repair leaves it alone.
+    """
+    assert canonical_abbr("nba", "Team Stripes") is None
+    assert canonical_abbr("nba", "STRIPES") is None
