@@ -162,6 +162,7 @@ from backend.team_identity import canonical_abbr, resolution_of
     "UMass Minutemen",                  # ESPN: Massachusetts Minutemen
     "Southeastern Louisiana Lions",     # ESPN: SE Louisiana Lions
     "Appalachian State Mountaineers",   # ESPN: App State Mountaineers
+    "Nicholls State Colonels",          # ESPN: Nicholls Colonels
 ])
 def test_an_ncaaf_school_the_odds_api_names_differently_resolves(odds_name):
     abbr, how = resolution_of("ncaaf", odds_name)

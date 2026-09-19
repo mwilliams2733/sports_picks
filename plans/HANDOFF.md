@@ -1527,3 +1527,55 @@ A further test pins the opposite direction — if the request ever hydrates
 - Team identity is checked *before* the two pitcher stat requests. It used to
   fetch both pitchers' season logs and then discard the game — 30 wasted
   calls a day while the abbreviations were all `None`.
+
+## Odds were being attached to the wrong game — 2026-09-19
+
+`_find_game_by_teams` ordered candidates `by date desc` and took the first,
+ignoring the event's `commence_time` entirely — a field the collector has
+always returned and `_store_odds` never passed. In a series (the same two
+teams on consecutive days, routine in baseball) **tonight's prices were
+written onto tomorrow's fixture**.
+
+Two harms, not one: tonight's game cannot be priced, and tomorrow's game
+carries a price that is not its own. Unmatched events were skipped with a
+bare `continue`, so none of it logged.
+
+### Measured
+
+| | before | after |
+|---|---|---|
+| mlb 09-19 | 5 / 15 | **12 / 15** |
+| mlb 09-20 | 9 / 9 (wrong prices) | 9 / 9 (its own) |
+| ncaaf 09-19 | 64 / 73 | **70 / 73** |
+
+The 3 remaining mlb games are not in the API's event list at all — already
+underway. The 3 ncaaf are the same.
+
+### Three separate defects, found in sequence
+
+1. **commence_time ignored.** Fixed by matching the nearest candidate within
+   a window: 12h when the game has a `start_time`, 1 day when only its date
+   is known. Outside the window nothing matches — no price beats another
+   fixture's price.
+
+2. **My first fix had a tie bug.** Games created from the Odds API have no
+   `start_time`; those from ESPN do. A late game's UTC timestamp falls on the
+   *next* calendar day, so a date-only candidate dated that day scored a
+   perfect zero and tied the game actually starting at that instant — and
+   `date desc` handed the tie to the guess. Three mlb events still matched
+   the wrong fixture. The rank is now `(has_start_time, distance)`, so a
+   precise match outranks a guess rather than tying it.
+
+3. **The lookup used raw equality while game creation used `team_identity`.**
+   The two could disagree about the same label: creation resolves "Sam
+   Houston State Bearkats" through an alias, raw equality against ESPN's
+   "Sam Houston Bearkats" does not. `_lookup_team` now falls back to the
+   resolver, which recovered 5 ncaaf games immediately.
+
+With the new warning in place the last ncaaf failure named itself —
+`'Nicholls State Colonels'` — and is now an alias. ESPN separately lists
+"Nichols Bison" (one L, a different school), so this could not be a fuzzy
+rule: the two resolve to NICH and NICC respectively.
+
+`_store_odds`'s return value counts bookmaker rows, not events. The log line
+calling them "events" has always been wrong; the docstring now says so.

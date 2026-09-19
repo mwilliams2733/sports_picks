@@ -1,6 +1,6 @@
 """Full pipeline: fetch games, odds, props from APIs → store in DB → generate picks."""
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from sqlalchemy.orm import Session
 from backend.collectors.espn import ESPNCollector
 from backend.time_utils import et_date
@@ -307,12 +307,38 @@ def _reconcile_against_espn(session: Session, sport: str, target_date: date,
                 db_game.status = "canceled"
 
 
+def _event_start(event: dict) -> datetime | None:
+    raw = event.get("commence_time")
+    if not raw:
+        return None
+    try:
+        return _parse_start_time(raw)
+    except (TypeError, ValueError):
+        logger.warning("Unparseable commence_time %r on odds event", raw)
+        return None
+
+
 def _store_odds(session: Session, sport: str, odds_data: list[dict]) -> int:
-    """Store odds linked to games by matching team names."""
+    """Store odds on the game each event was priced for.
+
+    The return value counts bookmaker rows written, not events -- the log
+    line calling it "events" has always been wrong.
+    """
     count = 0
     for event in odds_data:
-        game = _find_game_by_teams(session, sport, event["home_team"], event["away_team"])
+        game = _find_game_by_teams(
+            session, sport, event["home_team"], event["away_team"],
+            when=_event_start(event),
+        )
         if not game:
+            # A bare `continue` here is how a whole slate could lose its
+            # prices without anything noticing.
+            logger.warning(
+                "No %s game matches odds event %r vs %r at %s; its prices are "
+                "dropped rather than attached to another fixture",
+                sport, event.get("home_team"), event.get("away_team"),
+                event.get("commence_time"),
+            )
             continue
 
         for bk in event["bookmakers"]:
@@ -478,24 +504,99 @@ def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
     session.commit()
 
 
-def _find_game_by_teams(session: Session, sport: str, home_name: str, away_name: str) -> Game | None:
-    """Find a game by matching team names or abbreviations."""
-    home_team = session.query(Team).filter(
+#: How far a game may sit from an event's commence_time and still be the one
+#: that event prices. Books and ESPN disagree by minutes, so this cannot be
+#: exact; the next game of a series is ~24h away, so it must stay well under
+#: that or a series collapses back onto one fixture.
+_START_TIME_WINDOW = timedelta(hours=12)
+
+#: For a game with no start_time, date is the only signal. One day of slack
+#: absorbs the UTC/Eastern convention difference, which is the same problem
+#: backfill_espn_ids carries neighbour-date logic for.
+_DATE_WINDOW = timedelta(days=1)
+
+
+def _lookup_team(session: Session, sport: str, label: str) -> Team | None:
+    """The team a label names, by the same rules game creation uses.
+
+    Exact name/abbreviation first, then `team_identity`. Without the second
+    step this path and `_ensure_game_from_odds` disagree about the same
+    string: the creation path resolves "Sam Houston State Bearkats" through
+    an alias, while raw equality against ESPN's "Sam Houston Bearkats" fails.
+    """
+    team = session.query(Team).filter(
         Team.sport == sport,
-        (Team.name == home_name) | (Team.abbreviation == home_name)
+        (Team.name == label) | (Team.abbreviation == label)
     ).first()
-    away_team = session.query(Team).filter(
-        Team.sport == sport,
-        (Team.name == away_name) | (Team.abbreviation == away_name)
+    if team is not None:
+        return team
+    abbr = canonical_abbr(sport, label)
+    if abbr is None:
+        return None
+    return session.query(Team).filter(
+        Team.sport == sport, Team.abbreviation == abbr
     ).first()
+
+
+def _match_distance(game: Game, when: datetime) -> tuple[int, timedelta, timedelta]:
+    """(precision, distance, allowed window) for a candidate game.
+
+    ``precision`` is 0 when the game has a real start_time and 1 when only
+    its date is known, and it sorts before the distance. That ordering is
+    load-bearing rather than cosmetic: a late game's UTC timestamp falls on
+    the next calendar day, so a date-only candidate dated that day scores a
+    perfect zero on the date comparison and ties the game that actually
+    starts at that instant. Ordering by date descending then handed the tie
+    to the guess -- three mlb events matched the wrong fixture that way.
+    """
+    if game.start_time is not None:
+        start = game.start_time
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        return 0, abs(start - when), _START_TIME_WINDOW
+    midnight = datetime.combine(game.date, time(0), tzinfo=timezone.utc)
+    return 1, abs(midnight - when.replace(hour=0, minute=0, second=0,
+                                          microsecond=0)), _DATE_WINDOW
+
+
+def _find_game_by_teams(session: Session, sport: str, home_name: str,
+                        away_name: str, when: datetime | None = None) -> Game | None:
+    """Find the game an odds event prices.
+
+    ``when`` is the event's commence_time. Without it this used to order by
+    date descending and take the first, which in a series -- the same two
+    teams on consecutive days, routine in baseball -- wrote tonight's prices
+    onto tomorrow's fixture. On 2026-09-19 that left 10 of 15 mlb games
+    unpriced while tomorrow's rows carried prices that were not theirs.
+
+    A candidate outside the window matches nothing. No price is better than
+    another fixture's price.
+    """
+    home_team = _lookup_team(session, sport, home_name)
+    away_team = _lookup_team(session, sport, away_name)
     if not home_team or not away_team:
         return None
-    return session.query(Game).filter(
+    candidates = session.query(Game).filter(
         Game.sport == sport,
         Game.home_team_id == home_team.id,
         Game.away_team_id == away_team.id,
         Game.status.in_(["scheduled", "in_progress"]),
-    ).order_by(Game.date.desc()).first()
+    ).order_by(Game.date.desc()).all()
+    if not candidates:
+        return None
+    if when is None:
+        # Callers with no commence_time keep the old behaviour.
+        return candidates[0]
+
+    best, best_rank = None, None
+    for game in candidates:
+        precision, distance, window = _match_distance(game, when)
+        if distance > window:
+            continue
+        rank = (precision, distance)
+        if best_rank is None or rank < best_rank:
+            best, best_rank = game, rank
+    return best
 
 
 def _find_game_for_event(session: Session, sport: str, event: dict) -> Game | None:

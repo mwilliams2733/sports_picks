@@ -48,6 +48,9 @@ _ALIASES: dict[str, dict[str, str]] = {
         "Appalachian State Mountaineers": "App State Mountaineers",
         "Sam Houston State Bearkats": "Sam Houston Bearkats",
         "Southern Mississippi Golden Eagles": "Southern Miss Golden Eagles",
+        # Note ESPN also lists a separate "Nichols Bison" (one L, a
+        # different school), so this cannot be a fuzzy rule.
+        "Nicholls State Colonels": "Nicholls Colonels",
     },
     "nba": {
         # The Odds API spells the city out; ESPN does not. Same franchise --
