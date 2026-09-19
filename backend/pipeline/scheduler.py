@@ -421,17 +421,23 @@ async def fetch_pitcher_scores_for_date(target_date) -> dict[tuple[str, str], di
     from backend.analysis.pitcher import pitcher_skill_score
     collector = MLBStatsCollector()
     out: dict[tuple[str, str], dict[str, float]] = {}
+    skipped = 0
     try:
         games = await collector.fetch_schedule(target_date)
         for g in games:
+            # Identity first: a game whose teams do not resolve is skipped,
+            # so fetching its two pitchers' season logs first spent two
+            # requests to throw the answer away. While the abbreviations were
+            # all None that was 30 wasted calls a day.
+            home_abbr = g.get("home_team")
+            away_abbr = g.get("away_team")
+            if home_abbr is None or away_abbr is None:
+                skipped += 1
+                continue
             home_id = g.get("home_probable_pitcher_id")
             away_id = g.get("away_probable_pitcher_id")
             home_stats = await collector.fetch_pitcher_recent(home_id, season=target_date.year) if home_id else None
             away_stats = await collector.fetch_pitcher_recent(away_id, season=target_date.year) if away_id else None
-            home_abbr = g.get("home_team")
-            away_abbr = g.get("away_team")
-            if home_abbr is None or away_abbr is None:
-                continue
             out[(home_abbr, away_abbr)] = {
                 "home": pitcher_skill_score(
                     era=home_stats["era_recent"] if home_stats else None,
@@ -444,6 +450,13 @@ async def fetch_pitcher_scores_for_date(target_date) -> dict[tuple[str, str], di
             }
     finally:
         await collector.close()
+    if skipped:
+        # Returning {} here used to be indistinguishable from "no MLB games
+        # today". It is not: every pick then prices a neutral starter, which
+        # is the dominant MLB feature quietly switched off.
+        logger.warning(
+            "MLB pitcher scores: %d of %d games had an unidentifiable team "
+            "and were skipped", skipped, len(games) if games else 0)
     return out
 
 

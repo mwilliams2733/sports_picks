@@ -1478,3 +1478,52 @@ no "Cannot identify mlb ..." warning was logged, which is itself a clue.
 `no score for game N (key=..., available=[])`, so every MLB pick today is
 priced on a neutral starter. The guard worked — picks were still generated —
 but the pitcher signal is absent, not merely degraded.
+
+## The MLB pitcher fetch was returning nothing — 2026-09-19
+
+`fetch_pitcher_scores_for_date` returned `{}` every day, so every MLB pick
+was priced on a neutral 0.5 starter — the dominant MLB feature, silently off.
+
+`MLBStatsCollector.fetch_schedule` read `team["abbreviation"]`. The MLB Stats
+API only sends that key when the request hydrates `team`; with
+`hydrate=probablePitcher` the object is `{id, link, name}`. So `.get()`
+returned `None` for all 15 games, the caller skipped each one for want of a
+key, and nothing logged anything.
+
+### The fix resolves the name instead, and does real work doing it
+
+`name` is already in the payload — no extra hydration needed. It goes through
+`team_identity.resolution_of("mlb", name)`, which also handles a second
+problem: **MLB's own abbreviations disagree with ESPN's**, and our `teams`
+table holds ESPN's. MLB says `AZ` and `CWS` where ESPN says `ARI` and `CHW`.
+All 30 MLB team names resolve `exact` against the snapshot, so there is no
+hand-kept mapping to rot and a rename is picked up by refreshing the snapshot.
+
+Verified against the live API:
+
+```
+pitcher scores returned: 15 games (was 0)
+games where BOTH pitchers are neutral 0.5: 0 of 15
+games mapped to a Game.id: 15 (was 0)
+```
+
+### The test was certifying the bug
+
+`test_run_mlb_window_fetches_pitcher_scores` built its payload as
+`{"team": {"id": 111, "abbreviation": "BOS"}}` — an `abbreviation` the
+endpoint never sends, and no `name`. It passed for months against code that
+read exactly that key. The fixture now carries `name` and no `abbreviation`,
+with a comment saying not to add it back. Same failure mode as the two legacy
+ESPN parser tests removed earlier: a hand-built fixture asserting the
+implementation's assumption rather than the API's reality.
+
+A further test pins the opposite direction — if the request ever hydrates
+`team`, MLB's `AZ` must still resolve to `ARI` rather than be trusted.
+
+### Two smaller things fixed alongside
+
+- An empty pitcher map now logs how many games were skipped and why. Before,
+  `{}` was indistinguishable from "no MLB games today".
+- Team identity is checked *before* the two pitcher stat requests. It used to
+  fetch both pitchers' season logs and then discard the game — 30 wasted
+  calls a day while the abbreviations were all `None`.

@@ -127,3 +127,31 @@ def test_no_api_key_means_no_odds_call(db, mod, monkeypatch):
 def test_it_refuses_a_db_path_that_does_not_exist(tmp_path, mod):
     with pytest.raises(FileNotFoundError):
         mod.run(str(tmp_path / "nope.db"))
+
+
+# --------------------------------------------------------------------------
+# An empty pitcher map used to be indistinguishable from "no MLB games".
+# --------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_skipped_games_are_counted_and_reported(monkeypatch, caplog):
+    """Returning {} silently is how this went unnoticed for months."""
+    import logging
+
+    import backend.pipeline.scheduler as sch
+
+    class _Collector:
+        async def fetch_schedule(self, target_date):
+            return [{"home_team": None, "away_team": None,
+                     "home_probable_pitcher_id": 1,
+                     "away_probable_pitcher_id": 2}]
+        async def close(self):
+            return None
+
+    monkeypatch.setattr("backend.collectors.mlb_stats.MLBStatsCollector",
+                        _Collector)
+    with caplog.at_level(logging.WARNING):
+        out = await sch.fetch_pitcher_scores_for_date(TODAY)
+
+    assert out == {}
+    assert "unidentifiable" in caplog.text

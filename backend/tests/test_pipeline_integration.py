@@ -89,7 +89,14 @@ def test_all_sports_includes_mlb():
 @pytest.mark.asyncio
 async def test_run_mlb_window_fetches_pitcher_scores(httpx_mock):
     """An MLB pipeline run should hit MLB Stats API once for schedule and once
-    per probable pitcher, then return scores keyed by (home_abbr, away_abbr)."""
+    per probable pitcher, then return scores keyed by (home_abbr, away_abbr).
+
+    The team objects below carry `name` and NOT `abbreviation`, which is what
+    `hydrate=probablePitcher` actually returns. This fixture used to be the
+    other way round -- an `abbreviation` the endpoint never sends -- so it
+    passed while production resolved every team to None and priced every MLB
+    pick on a neutral starter. Do not add `abbreviation` back here.
+    """
     from datetime import date as _date
     from backend.pipeline.scheduler import fetch_pitcher_scores_for_date
 
@@ -100,9 +107,11 @@ async def test_run_mlb_window_fetches_pitcher_scores(httpx_mock):
             "gamePk": 700001,
             "gameDate": "2026-04-29T23:05:00Z",
             "teams": {
-                "home": {"team": {"id": 111, "abbreviation": "BOS"},
+                "home": {"team": {"id": 111, "link": "/api/v1/teams/111",
+                                  "name": "Boston Red Sox"},
                          "probablePitcher": {"id": 5001, "fullName": "A. Pitcher"}},
-                "away": {"team": {"id": 147, "abbreviation": "NYY"},
+                "away": {"team": {"id": 147, "link": "/api/v1/teams/147",
+                                  "name": "New York Yankees"},
                          "probablePitcher": {"id": 5002, "fullName": "B. Pitcher"}},
             },
         }]}]},

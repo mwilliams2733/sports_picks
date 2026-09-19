@@ -135,3 +135,136 @@ async def test_fetch_pitcher_recent_handles_no_starts(httpx_mock):
     stats = await collector.fetch_pitcher_recent(pitcher_id=9999, season=2026)
     assert stats is None
     await collector.close()
+
+
+# --------------------------------------------------------------------------
+# The schedule endpoint does not return team abbreviations.
+#
+# fetch_schedule read `team["abbreviation"]`, which the MLB Stats API only
+# sends when the request hydrates `team`. With `hydrate=probablePitcher`
+# alone the team object is {id, link, name}, so `.get("abbreviation")`
+# returned None for every game, every day. The caller skipped each game for
+# want of a key and returned an empty map, so every MLB pick was priced on a
+# neutral starting pitcher -- the dominant MLB feature, silently absent.
+#
+# Found 2026-09-19: all 12 MLB games logged `available=[]`.
+# --------------------------------------------------------------------------
+
+import logging
+
+import pytest
+
+from backend.collectors.mlb_stats import MLBStatsCollector
+
+MLB_SCHEDULE = "https://statsapi.mlb.com/api/v1/schedule"
+
+
+def _schedule_payload(pairs):
+    """The real shape: team carries `name`, and NO `abbreviation`."""
+    return {"dates": [{"games": [
+        {
+            "gamePk": 1000 + i,
+            "gameDate": "2026-09-19T20:05:00Z",
+            "teams": {
+                "home": {"team": {"id": 1, "link": "/x", "name": home},
+                         "probablePitcher": {"id": 111}},
+                "away": {"team": {"id": 2, "link": "/y", "name": away},
+                         "probablePitcher": {"id": 222}},
+            },
+        }
+        for i, (home, away) in enumerate(pairs)
+    ]}]}
+
+
+@pytest.mark.asyncio
+async def test_teams_are_resolved_from_the_name_the_api_actually_sends(
+    httpx_mock
+):
+    httpx_mock.add_response(
+        url=f'{MLB_SCHEDULE}?sportId=1&date=2026-09-19&hydrate=probablePitcher',
+        json=_schedule_payload([("Cincinnati Reds", "Chicago Cubs")]))
+    c = MLBStatsCollector()
+    try:
+        games = await c.fetch_schedule(date(2026, 9, 19))
+    finally:
+        await c.close()
+    assert games[0]["home_team"] == "CIN"
+    assert games[0]["away_team"] == "CHC"
+
+
+@pytest.mark.asyncio
+async def test_mlbs_own_abbreviations_are_translated_to_espns(httpx_mock):
+    """MLB says AZ and CWS where ESPN -- and our teams table -- say ARI/CHW.
+
+    Resolving through team_identity rather than trusting the upstream
+    abbreviation is what makes this work without a hand-kept mapping.
+    """
+    httpx_mock.add_response(
+        url=f'{MLB_SCHEDULE}?sportId=1&date=2026-09-19&hydrate=probablePitcher',
+        json=_schedule_payload([("Arizona Diamondbacks", "Chicago White Sox")]))
+    c = MLBStatsCollector()
+    try:
+        games = await c.fetch_schedule(date(2026, 9, 19))
+    finally:
+        await c.close()
+    assert games[0]["home_team"] == "ARI"
+    assert games[0]["away_team"] == "CHW"
+
+
+@pytest.mark.asyncio
+async def test_an_unresolvable_team_is_reported_not_silently_dropped(
+    httpx_mock, caplog
+):
+    """The original bug was silent. It must not be able to be silent again."""
+    httpx_mock.add_response(
+        url=f'{MLB_SCHEDULE}?sportId=1&date=2026-09-19&hydrate=probablePitcher',
+        json=_schedule_payload([("Sioux Falls Canaries", "Chicago Cubs")]))
+    c = MLBStatsCollector()
+    try:
+        with caplog.at_level(logging.WARNING):
+            games = await c.fetch_schedule(date(2026, 9, 19))
+    finally:
+        await c.close()
+    assert games[0]["home_team"] is None
+    assert "Sioux Falls Canaries" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_probable_pitcher_ids_still_come_through(httpx_mock):
+    httpx_mock.add_response(
+        url=f'{MLB_SCHEDULE}?sportId=1&date=2026-09-19&hydrate=probablePitcher',
+        json=_schedule_payload([("Cincinnati Reds", "Chicago Cubs")]))
+    c = MLBStatsCollector()
+    try:
+        games = await c.fetch_schedule(date(2026, 9, 19))
+    finally:
+        await c.close()
+    assert games[0]["home_probable_pitcher_id"] == 111
+    assert games[0]["away_probable_pitcher_id"] == 222
+
+
+@pytest.mark.asyncio
+async def test_mlbs_abbreviation_is_ignored_even_when_it_is_present(httpx_mock):
+    """Guards against a future `hydrate=team` quietly undoing the fix.
+
+    If the request ever hydrates `team`, the payload gains an `abbreviation`
+    key -- and MLB's is the wrong one for us: AZ where our teams table says
+    ARI. Preferring it would reintroduce the mismatch while every test built
+    on the un-hydrated shape kept passing.
+    """
+    payload = _schedule_payload([("Arizona Diamondbacks", "Chicago White Sox")])
+    game = payload["dates"][0]["games"][0]
+    game["teams"]["home"]["team"]["abbreviation"] = "AZ"
+    game["teams"]["away"]["team"]["abbreviation"] = "CWS"
+
+    httpx_mock.add_response(
+        url=f'{MLB_SCHEDULE}?sportId=1&date=2026-09-19&hydrate=probablePitcher',
+        json=payload)
+    c = MLBStatsCollector()
+    try:
+        games = await c.fetch_schedule(date(2026, 9, 19))
+    finally:
+        await c.close()
+
+    assert games[0]["home_team"] == "ARI", "took MLB's abbreviation, not ESPN's"
+    assert games[0]["away_team"] == "CHW"

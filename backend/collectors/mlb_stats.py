@@ -5,8 +5,15 @@ The Odds API and ESPN do not reliably surface probable starting pitchers,
 which is the dominant feature for MLB game predictions.
 """
 from __future__ import annotations
+
+import logging
 from datetime import date
+
 import httpx
+
+from backend.team_identity import resolution_of
+
+logger = logging.getLogger(__name__)
 
 
 BASE_URL = "https://statsapi.mlb.com/api/v1"
@@ -39,12 +46,42 @@ class MLBStatsCollector:
                 out.append({
                     "mlb_game_pk": g["gamePk"],
                     "game_date_iso": g["gameDate"],
-                    "home_team": home["team"].get("abbreviation"),
-                    "away_team": away["team"].get("abbreviation"),
+                    "home_team": self._abbr(home["team"]),
+                    "away_team": self._abbr(away["team"]),
                     "home_probable_pitcher_id": (home.get("probablePitcher") or {}).get("id"),
                     "away_probable_pitcher_id": (away.get("probablePitcher") or {}).get("id"),
                 })
         return out
+
+    @staticmethod
+    def _abbr(team: dict) -> str | None:
+        """The ESPN abbreviation for an MLB Stats API team object.
+
+        Resolved from ``name``, not from ``abbreviation``. This endpoint only
+        sends ``abbreviation`` when the request hydrates ``team``; with
+        ``hydrate=probablePitcher`` the object is {id, link, name}, so reading
+        the key returned None for every game of every day and the caller
+        dropped them all. Every MLB pick was then priced on a neutral starter
+        -- the dominant MLB feature, silently absent.
+
+        Resolving the name also does real work rather than merely avoiding
+        the missing key: MLB's own abbreviations disagree with ESPN's, which
+        is what our teams table holds. MLB says AZ and CWS where ESPN says
+        ARI and CHW. Going through team_identity means no hand-kept mapping
+        to fall out of date, and a rename is picked up by refreshing the
+        snapshot.
+        """
+        name = team.get("name")
+        if not name:
+            logger.warning("MLB schedule: team object has no name: %r", team)
+            return None
+        abbr, how = resolution_of("mlb", name)
+        if abbr is None:
+            # Never silent again. The original failure logged nothing at all.
+            logger.warning(
+                "MLB schedule: cannot resolve team %r (%s); its pitcher will "
+                "not be matched to a game", name, how)
+        return abbr
 
     async def fetch_pitcher_recent(self, pitcher_id: int, season: int,
                                     last_n: int = 5) -> dict | None:
