@@ -1022,9 +1022,27 @@ collisions the merge revealed. A dry run cannot surface those, because they
 only exist once team ids have been merged — this step is the only place they
 appear before production.
 
-**The rehearsal on 2026-09-19 reported 34.** Post-state on the copy: 87 ncaab
-team rows (from 147), abbreviations unique, `integrity_check: ok`, 120 ncaab
-games unchanged. If the count differs materially, stop and re-survey.
+**The rehearsal on 2026-09-19 reported 34, and resolved all 34.** Measured
+against the live database:
+
+| | live | repaired |
+|---|---|---|
+| ncaab teams | 147 | **87** |
+| — display-name rows | 78 | **1** |
+| ncaab games | 120 | **86** |
+| — final | 61 | 61 |
+| — missing `espn_id` | 59 | **25** |
+| ncaab picks | 429 | 429 |
+| — **on a final game** | 16 | **270** |
+| total picks | 708 | 708 |
+| total games | 1713 | 1679 |
+
+`integrity_check: ok`, 0 duplicate fixtures remaining, abbreviations unique,
+0 orphaned picks. **No picks and no final games were lost** — only the 34
+empty twins. The 254 additional picks now sitting on final games are the
+point of the exercise: they are gradeable for the first time.
+
+If the counts differ materially, stop and re-survey.
 
 - [ ] **Step 5: Apply**
 
@@ -1032,12 +1050,20 @@ games unchanged. If the count differs materially, stop and re-survey.
 .venv/Scripts/python.exe -m backend.scripts.fix_team_identity --db "<abs db path>" --apply
 ```
 
-- [ ] **Step 6: Resolve any duplicate fixtures the merge revealed**
+- [ ] **Step 6: Confirm the duplicate fixtures were resolved**
 
-For each reported pair, the **final** row survives and the empty twin's
-children are repointed onto it — the same rule as the Clippers repair, and the
-opposite of `merge_duplicate_games.py`'s "row with picks wins", which would
-keep the empty row and discard real scores. If Step 4 reported none, skip.
+`--apply` now resolves them in the same run — `resolve_duplicate_games` keeps
+the **final** row and repoints the empty twin's children onto it. Confirm the
+run printed `resolved 34, keeping the final row.` and that no duplicate
+fixtures remain:
+
+```sql
+SELECT COUNT(*) FROM (SELECT 1 FROM games WHERE sport='ncaab'
+  GROUP BY sport, date, home_team_id, away_team_id HAVING COUNT(*) > 1);
+```
+
+Expected: `0`. Any group without exactly one final row is deliberately left
+alone and listed; the rehearsal had none.
 
 - [ ] **Step 7: Re-run the identification chain**
 

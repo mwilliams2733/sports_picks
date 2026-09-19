@@ -179,3 +179,132 @@ def test_schema_names_includes_tables_and_columns(con):
 
     names = schema_names(con.cursor())
     assert {"teams", "games", "abbreviation", "home_team_id"} <= names
+
+
+# --- resolving the duplicate fixtures a merge reveals -------------------
+
+
+@pytest.fixture()
+def con_dupes(con):
+    """After the merge, team 1 holds the same fixture twice.
+
+    Shaped like production: the FINAL row carries the score, espn_id and
+    derived stats; the SCHEDULED twin carries the picks and odds.
+    """
+    # Same teams and date as game 10, so this IS a duplicate fixture without
+    # needing the team merge to run first -- these tests exercise the survivor
+    # rule on its own. (Pointing it at team 1 instead would only become a
+    # duplicate after the merge, and the group would be empty here.)
+    con.execute("INSERT INTO games (id, sport, season, date, espn_id, "
+                "home_team_id, away_team_id, home_score, away_score, status) "
+                "VALUES (12, 'ncaab', '2026', '2026-01-05', '40185', "
+                "2, 4, 86, 83, 'final')")
+    con.execute("INSERT INTO team_stats (team_id, game_id, stat_type, value) "
+                "VALUES (2, 12, 'pts', 86.0)")
+    con.execute("INSERT INTO strategies (id, name, config_json, is_active, "
+                "strategy_type) VALUES (1, 's', '{}', 1, 'game')")
+    # created_at is NOT NULL with a *Python-side* SQLAlchemy default, which a
+    # raw sqlite3 INSERT does not apply -- supply it explicitly.
+    con.execute("INSERT INTO picks (game_id, strategy_id, pick_type, "
+                "pick_value, confidence, edge_pct, created_at) "
+                "VALUES (10, 1, 'spread', 'HOME', 3, 2.5, '2026-01-05 00:00:00')")
+    con.commit()
+    return con
+
+
+def test_game_children_discovers_player_props(con_dupes):
+    found = set(fk_children(con_dupes.cursor(), "games"))
+    # The table a hand-written list missed on the Clippers repair.
+    assert ("player_props", "game_id") in found
+    assert ("picks", "game_id") in found
+    assert ("odds", "game_id") in found
+
+
+def test_the_final_row_survives_not_the_row_with_picks(con_dupes):
+    """The survivor rule, and the one that matters.
+
+    merge_duplicate_games.py keeps "the row with picks". Measured against
+    production, that would choose the wrong row in 27 of 34 groups: the picks
+    sit on the empty scheduled twin while the scores sit on the final row.
+    """
+    from backend.scripts.fix_team_identity import resolve_duplicate_games
+
+    result = resolve_duplicate_games(con_dupes, "ncaab", apply=True)
+    cur = con_dupes.cursor()
+
+    assert cur.execute("SELECT COUNT(*) FROM games WHERE id=10").fetchone()[0] == 0
+    surv = cur.execute(
+        "SELECT status, home_score FROM games WHERE id=12").fetchone()
+    assert surv == ("final", 86)
+    # The pick moved onto the final row -- which is what makes it gradeable.
+    assert cur.execute(
+        "SELECT game_id FROM picks").fetchone()[0] == 12
+    assert result["resolved"] == 1
+
+
+def test_resolution_leaves_no_duplicate_fixtures(con_dupes):
+    from backend.scripts.fix_team_identity import (
+        _duplicate_games,
+        resolve_duplicate_games,
+    )
+
+    resolve_duplicate_games(con_dupes, "ncaab", apply=True)
+    assert _duplicate_games(con_dupes.cursor(), "ncaab") == []
+
+
+def test_a_group_with_no_final_row_is_refused_not_guessed(con):
+    from backend.scripts.fix_team_identity import resolve_duplicate_games
+
+    # Two scheduled rows for one fixture: nothing distinguishes them.
+    con.execute("INSERT INTO games (id, sport, season, date, home_team_id, "
+                "away_team_id, status) VALUES "
+                "(13, 'ncaab', '2026', '2026-01-05', 2, 4, 'scheduled')")
+    con.commit()
+    result = resolve_duplicate_games(con, "ncaab", apply=True)
+
+    assert result["resolved"] == 0
+    assert len(result["skipped"]) == 1
+    assert con.execute("SELECT COUNT(*) FROM games WHERE id IN (10,13)").fetchone()[0] == 2
+
+
+def test_a_group_with_two_final_rows_is_refused_not_guessed(con):
+    from backend.scripts.fix_team_identity import resolve_duplicate_games
+
+    con.execute("UPDATE games SET status='final', home_score=1, away_score=2 "
+                "WHERE id=10")
+    con.execute("INSERT INTO games (id, sport, season, date, home_team_id, "
+                "away_team_id, home_score, away_score, status) VALUES "
+                "(14, 'ncaab', '2026', '2026-01-05', 2, 4, 3, 4, 'final')")
+    con.commit()
+    result = resolve_duplicate_games(con, "ncaab", apply=True)
+
+    assert result["resolved"] == 0
+    assert len(result["skipped"]) == 1
+    assert con.execute("SELECT COUNT(*) FROM games WHERE id IN (10,14)").fetchone()[0] == 2
+
+
+def test_duplicate_resolution_dry_run_writes_nothing(con_dupes):
+    from backend.scripts.fix_team_identity import resolve_duplicate_games
+
+    resolve_duplicate_games(con_dupes, "ncaab", apply=False)
+    cur = con_dupes.cursor()
+    assert cur.execute("SELECT COUNT(*) FROM games WHERE id=10").fetchone()[0] == 1
+    assert cur.execute("SELECT game_id FROM picks").fetchone()[0] == 10
+
+
+def test_repair_resolves_duplicates_it_creates(con):
+    """End to end: the merge reveals a twin, and the same run cleans it up."""
+    # Team 1 (PENN) already holds the fixture that team 2's game 10 duplicates.
+    con.execute("INSERT INTO games (id, sport, season, date, home_team_id, "
+                "away_team_id, home_score, away_score, status) VALUES "
+                "(12, 'ncaab', '2026', '2026-01-05', 1, 4, 86, 83, 'final')")
+    con.commit()
+
+    result = repair(con, "ncaab", apply=True)
+
+    assert result["duplicates_resolved"] == 1
+    from backend.scripts.fix_team_identity import _duplicate_games
+    assert _duplicate_games(con.cursor(), "ncaab") == []
+    # game 10's derived rows followed it onto the survivor.
+    assert con.execute(
+        "SELECT team_id FROM team_stats WHERE game_id=12").fetchone()[0] == 1

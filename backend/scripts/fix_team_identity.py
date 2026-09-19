@@ -139,6 +139,79 @@ def _duplicate_games(cur, sport: str) -> list[tuple]:
     ).fetchall()
 
 
+def resolve_duplicate_games(con: sqlite3.Connection, sport: str, *,
+                            apply: bool) -> dict:
+    """Collapse fixtures held by more than one game row.
+
+    **The FINAL row survives.** It carries the scores, the espn_id and the
+    derived team_stats/elo_history; the twin is an empty ``scheduled`` row
+    that happens to hold the picks and odds, because those arrived from the
+    Odds API against the unmatchable team row.
+
+    This is deliberately the OPPOSITE of merge_duplicate_games.py's rule
+    ("the row with picks wins"). Measured against production after the team
+    merge, that rule would choose the wrong row in 27 of 34 groups --
+    discarding real scores and stranding the picks on a row that can never
+    finalise.
+
+    A group is resolved only when exactly one row is final. Zero finals (two
+    scheduled rows, nothing to choose between them) or several (two different
+    results claiming one fixture) are reported and left alone: guessing there
+    is how a real result gets deleted.
+    """
+    cur = con.cursor()
+    allowed = schema_names(cur)
+    children = fk_children(cur, "games")
+
+    resolved = 0
+    skipped: list[tuple] = []
+    for row in _duplicate_games(cur, sport):
+        ids = [int(i) for i in row[5].split(",")]
+        finals = [
+            g for g in ids
+            if cur.execute("SELECT status FROM games WHERE id=?", (g,)
+                           ).fetchone()[0] == "final"
+        ]
+        if len(finals) != 1:
+            skipped.append((row[1], ids, len(finals)))
+            continue
+        resolved += 1
+        if not apply:
+            continue
+        survivor = finals[0]
+        for loser in (g for g in ids if g != survivor):
+            for table, column in children:
+                # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query
+                # Identifiers only, each checked against the schema
+                # allowlist; both values are bound.
+                sql = ("UPDATE " + ident(table, allowed) + " SET "
+                       + ident(column, allowed) + "=? WHERE "
+                       + ident(column, allowed) + "=?")
+                cur.execute(sql, (survivor, loser))
+            cur.execute("DELETE FROM games WHERE id=?", (loser,))
+
+    if apply:
+        con.commit()
+        for table, column in children:
+            # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query
+            # Identifiers only, each checked against the schema allowlist.
+            sql = ("SELECT COUNT(*) FROM " + ident(table, allowed) + " x "
+                   "LEFT JOIN games g ON g.id = x." + ident(column, allowed)
+                   + " WHERE x." + ident(column, allowed)
+                   + " IS NOT NULL AND g.id IS NULL")
+            orphan = cur.execute(sql).fetchone()[0]
+            assert orphan == 0, f"{orphan} orphaned rows in {table}"
+
+    if skipped:
+        print()
+        print(f"  {len(skipped)} duplicate fixtures left alone "
+              f"(not exactly one final row):")
+        for gdate, ids, n in skipped[:10]:
+            print(f"     {gdate} ids={ids} final_rows={n}")
+
+    return {"resolved": resolved, "skipped": skipped}
+
+
 def repair(con: sqlite3.Connection, sport: str, *, apply: bool) -> dict:
     if sport not in ABBREVIATION_SPORTS:
         raise ValueError(f"{sport} identifies teams by name, not abbreviation")
@@ -182,15 +255,31 @@ def repair(con: sqlite3.Connection, sport: str, *, apply: bool) -> dict:
             orphan = cur.execute(sql).fetchone()[0]
             assert orphan == 0, f"{orphan} orphaned rows in {table}"
 
+    # Duplicate fixtures only become visible once the team rows collapse:
+    # while the two schools have separate ids the rows look like different
+    # fixtures, so a dry run genuinely cannot find them.
     dupes = _duplicate_games(cur, sport) if apply else []
     if dupes:
-        print(f"\n  !! {len(dupes)} fixtures are now held by more than one game row.")
-        print("     Merging teams revealed twins that the separate ids hid.")
-        for row in dupes[:10]:
-            print(f"     {row[1]} teams={row[2]}/{row[3]} game ids={row[5]}")
-        print("     Resolve these before finalising: the FINAL row survives.")
+        print()
+        print(f"  {len(dupes)} fixtures are now held by more than one game row.")
+        print("  Merging teams revealed twins that the separate ids hid.")
 
-    return {"buckets": buckets, "duplicate_games": dupes}
+    if apply:
+        dup_result = resolve_duplicate_games(con, sport, apply=True)
+        if dup_result["resolved"]:
+            print(f"  resolved {dup_result['resolved']}, keeping the final row.")
+    else:
+        dup_result = {"resolved": 0, "skipped": []}
+        print()
+        print("  Duplicate fixtures cannot be counted until the merge has run;")
+        print("  --apply will report and resolve them.")
+
+    return {
+        "buckets": buckets,
+        "duplicate_games": dupes,
+        "duplicates_resolved": dup_result["resolved"],
+        "duplicates_skipped": dup_result["skipped"],
+    }
 
 
 def main() -> int:
