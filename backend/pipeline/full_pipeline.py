@@ -8,6 +8,7 @@ from backend.collectors.odds_api import OddsAPICollector, redact_api_key
 from backend.collectors.budget import check_budget, record_api_call, BudgetStatus
 from backend.exceptions import BudgetExhaustedError
 from backend.models import Team, Game, Odds, PlayerProp
+from backend.team_identity import ABBREVIATION_SPORTS, canonical_abbr
 
 logger = logging.getLogger(__name__)
 
@@ -356,6 +357,33 @@ def _store_props(session: Session, game_id: int, props: list[dict]) -> int:
     return count
 
 
+def _resolve_team(session: Session, sport: str, label: str) -> Team | None:
+    """Find the team row an Odds API label refers to.
+
+    Matches on name first -- the historical behaviour -- then on the canonical
+    ESPN abbreviation, so "Pennsylvania Quakers" finds the row whose
+    abbreviation is "PENN". Without the second step the name-only lookup
+    misses, which both strands the game and skips the duplicate check below.
+    """
+    team = (
+        session.query(Team)
+        .filter(Team.sport == sport, Team.name == label)
+        .first()
+    )
+    if team is not None:
+        return team
+    if sport not in ABBREVIATION_SPORTS:
+        return None
+    abbr = canonical_abbr(sport, label)
+    if abbr is None:
+        return None
+    return (
+        session.query(Team)
+        .filter(Team.sport == sport, Team.abbreviation == abbr)
+        .first()
+    )
+
+
 def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
     """Create a game from Odds API event if it doesn't already exist in the DB.
 
@@ -373,9 +401,11 @@ def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
     # convention here would recreate the very split this fixes.
     game_date = et_date(commence)
 
-    # Try to find existing teams by name first
-    home_team = session.query(Team).filter(Team.sport == sport, Team.name == home_name).first()
-    away_team = session.query(Team).filter(Team.sport == sport, Team.name == away_name).first()
+    # Resolve BEFORE the duplicate check below: that check is gated on both
+    # sides resolving, so an unmatched label used to skip it and insert a twin
+    # on every odds tick.
+    home_team = _resolve_team(session, sport, home_name)
+    away_team = _resolve_team(session, sport, away_name)
 
     # If both teams already exist, check for an exact (sport, date, teams)
     # match BEFORE creating a duplicate — and don't filter by status here.
@@ -395,15 +425,41 @@ def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
         if existing:
             return
 
-    # Create teams only if they don't exist (primarily for boxing/MMA fighters)
-    if not home_team:
-        home_team = Team(name=home_name, abbreviation=home_name, sport=sport)
-        session.add(home_team)
+    # Create teams only if they don't exist.
+    #
+    # For combat sports the fighter's NAME is the identity, so a row keyed by
+    # the label is correct. For team sports the identity is an abbreviation: a
+    # row whose abbreviation is "Pennsylvania Quakers" can never match ESPN,
+    # never gets an espn_id and never finalises -- which is how 59 ncaab games
+    # and 413 picks ended up stranded. Resolve it, or refuse the whole game.
+    #
+    # Nothing is added until BOTH sides are settled, so an unidentifiable
+    # opponent cannot leave a half-created game behind.
+    pending: list[tuple[str, Team]] = []
+    for side, team, label in (
+        ("home", home_team, home_name), ("away", away_team, away_name),
+    ):
+        if team is not None:
+            continue
+        if sport not in ABBREVIATION_SPORTS:
+            pending.append((side, Team(name=label, abbreviation=label, sport=sport)))
+            continue
+        abbr = canonical_abbr(sport, label)
+        if abbr is None:
+            logger.warning(
+                "Cannot identify %s %s team %r; skipping game rather than "
+                "creating a row that can never match ESPN", sport, side, label,
+            )
+            return
+        pending.append((side, Team(name=label, abbreviation=abbr, sport=sport)))
+
+    for side, team in pending:
+        session.add(team)
         session.flush()
-    if not away_team:
-        away_team = Team(name=away_name, abbreviation=away_name, sport=sport)
-        session.add(away_team)
-        session.flush()
+        if side == "home":
+            home_team = team
+        else:
+            away_team = team
 
     season_label = f"{game_date.year}"
     session.add(Game(
