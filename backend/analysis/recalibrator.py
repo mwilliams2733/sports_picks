@@ -1,6 +1,6 @@
 """Confidence threshold recalibration based on actual pick performance."""
 import logging
-from datetime import date, timedelta
+from datetime import date
 
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,14 @@ from backend.models import CalibrationHistory, Game, PickModel, PickResult
 logger = logging.getLogger(__name__)
 
 MIN_PICKS_PER_TIER = 20
+#: How many graded picks a tier is judged on. A *count*, not a number of days.
+#: A calendar window is the wrong shape for a seasonal sport: basketball ends
+#: in June and restarts in October, so a 90-day lookback is empty on opening
+#: night and stays empty until twenty fresh picks have graded -- precisely when
+#: the thresholds deserve the least trust. Counting picks instead means the
+#: window spans whatever calendar time it needs to, and closes the offseason
+#: gap without a special case.
+MAX_PICKS_PER_TIER = 200
 ADJUSTMENT_STEP = 1.0  # percentage points per cycle
 EXPECTED_WIN_RATES = {5: 0.70, 4: 0.63, 3: 0.57, 2: 0.53, 1: 0.50}
 DEVIATION_THRESHOLD = 0.05  # 5 percentage points
@@ -20,12 +28,16 @@ class Recalibrator:
         self.session = session
         self.sport = sport
 
-    def run(self, days: int = 90) -> dict:
+    def run(self, max_picks: int = MAX_PICKS_PER_TIER) -> dict:
         """Analyze pick performance and adjust confidence thresholds.
+
+        Each tier is judged on its ``max_picks`` most recently made graded
+        picks, however long ago that reaches back. Bounding by count rather
+        than by date is what lets a sport carry its calibration across an
+        offseason; see ``MAX_PICKS_PER_TIER``.
 
         Returns dict of tier -> {actual_rate, expected_rate, direction, new_threshold, ...}.
         """
-        cutoff = date.today() - timedelta(days=days)
 
         # Get current thresholds: newest row per tier wins, defaults fill gaps
         thresholds = dict(DEFAULT_THRESHOLDS)
@@ -48,8 +60,12 @@ class Recalibrator:
                 .filter(
                     Game.sport == self.sport,
                     PickModel.confidence == tier,
-                    PickModel.created_at >= cutoff,
                 )
+                # Newest first, then capped: the cap has to keep the *recent*
+                # picks, or a tier with a long history would be judged forever
+                # on its oldest results.
+                .order_by(PickModel.created_at.desc())
+                .limit(max_picks)
                 .all()
             )
 

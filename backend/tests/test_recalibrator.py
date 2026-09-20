@@ -1,5 +1,5 @@
 """Tests for confidence recalibrator."""
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from backend.analysis.recalibrator import Recalibrator, MIN_PICKS_PER_TIER
 from backend.models import Base, PickModel, PickResult, Game, Team, StrategyModel, CalibrationHistory
 from backend.database import get_engine, get_session
@@ -19,7 +19,8 @@ def _setup_db():
     return session, t1, t2, strat
 
 
-def _add_picks(session, t1, t2, strat, confidence, wins, losses, sport="nba", pushes=0):
+def _add_picks(session, t1, t2, strat, confidence, wins, losses, sport="nba",
+               pushes=0, created_at=None):
     for i in range(wins + losses + pushes):
         game = Game(
             sport=sport, season="2025-26",
@@ -34,6 +35,8 @@ def _add_picks(session, t1, t2, strat, confidence, wins, losses, sport="nba", pu
             game_id=game.id, strategy_id=strat.id,
             pick_type="moneyline", pick_value="HOME ML",
             confidence=confidence, edge_pct=10.0, odds_at_pick=-150,
+            **({"created_at": created_at + timedelta(seconds=i)}
+               if created_at is not None else {}),
         )
         session.add(pick)
         session.commit()
@@ -60,7 +63,7 @@ def test_recalibrator_skips_small_samples():
     session, t1, t2, strat = _setup_db()
     _add_picks(session, t1, t2, strat, confidence=5, wins=8, losses=2)
     recal = Recalibrator(session, sport="nba")
-    adjustments = recal.run(days=90)
+    adjustments = recal.run()
     assert 5 not in adjustments
 
 
@@ -68,7 +71,7 @@ def test_recalibrator_tightens_when_underperforming():
     session, t1, t2, strat = _setup_db()
     _add_picks(session, t1, t2, strat, confidence=5, wins=11, losses=9)
     recal = Recalibrator(session, sport="nba")
-    adjustments = recal.run(days=90)
+    adjustments = recal.run()
     assert 5 in adjustments
     assert adjustments[5]["direction"] == "tighten"
     assert adjustments[5]["new_threshold"] > 12.0
@@ -78,7 +81,7 @@ def test_recalibrator_loosens_when_overperforming():
     session, t1, t2, strat = _setup_db()
     _add_picks(session, t1, t2, strat, confidence=3, wins=18, losses=6)
     recal = Recalibrator(session, sport="nba")
-    adjustments = recal.run(days=90)
+    adjustments = recal.run()
     assert 3 in adjustments
     assert adjustments[3]["direction"] == "loosen"
     assert adjustments[3]["new_threshold"] < 5.0
@@ -88,7 +91,7 @@ def test_recalibrator_saves_to_db():
     session, t1, t2, strat = _setup_db()
     _add_picks(session, t1, t2, strat, confidence=5, wins=11, losses=9)
     recal = Recalibrator(session, sport="nba")
-    recal.run(days=90)
+    recal.run()
     rows = session.query(CalibrationHistory).all()
     assert len(rows) >= 1
     assert rows[0].sport == "nba"
@@ -107,7 +110,7 @@ def test_recalibrator_only_counts_its_own_sport():
     _add_picks(session, t3, t4, strat, confidence=5, wins=0, losses=25, sport="nfl")
 
     recal = Recalibrator(session, sport="nba")
-    recal.run(days=90)
+    recal.run()
     rows = session.query(CalibrationHistory).filter(
         CalibrationHistory.sport == "nba", CalibrationHistory.confidence_tier == 5
     ).all()
@@ -119,7 +122,7 @@ def test_pushes_excluded_from_win_rate():
     session, t1, t2, strat = _setup_db()
     _add_picks(session, t1, t2, strat, confidence=5, wins=21, losses=0, pushes=9)
     recal = Recalibrator(session, sport="nba")
-    recal.run(days=90)
+    recal.run()
     rows = session.query(CalibrationHistory).filter(
         CalibrationHistory.sport == "nba", CalibrationHistory.confidence_tier == 5
     ).all()
@@ -144,6 +147,36 @@ def test_newest_threshold_wins():
     # 25 picks that deviate enough to trigger an adjustment and record old_threshold
     _add_picks(session, t1, t2, strat, confidence=5, wins=11, losses=14)
     recal = Recalibrator(session, sport="nba")
-    adjustments = recal.run(days=90)
+    adjustments = recal.run()
     assert 5 in adjustments
     assert adjustments[5]["old_threshold"] == 7.0
+
+
+def test_picks_from_a_previous_season_still_count():
+    """A sport's offseason must not empty its own calibration history.
+
+    The recalibrator used to filter `created_at >= today - 90 days`. nba and
+    ncaab finish in spring and restart in autumn, so on the first day of a new
+    season that window is empty and stays empty until twenty fresh picks have
+    graded -- exactly the stretch where the thresholds are least trustworthy.
+    On 2026-09-20 it hid 203 of the 328 graded picks in the database.
+    """
+    session, t1, t2, strat = _setup_db()
+    _add_picks(session, t1, t2, strat, confidence=5, wins=11, losses=14,
+               created_at=datetime(2026, 3, 1, 12, 0))
+    adjustments = Recalibrator(session, sport="nba").run()
+    assert 5 in adjustments
+    assert adjustments[5]["sample_size"] == 25
+
+
+def test_only_the_newest_picks_inside_the_cap_count():
+    """The window is a count, so it must be the *most recent* count."""
+    session, t1, t2, strat = _setup_db()
+    # Older: 30 losses. Newer: 25 wins. A cap of 25 must see only the wins.
+    _add_picks(session, t1, t2, strat, confidence=5, wins=0, losses=30,
+               created_at=datetime(2025, 11, 1, 12, 0))
+    _add_picks(session, t1, t2, strat, confidence=5, wins=25, losses=0,
+               created_at=datetime(2026, 3, 1, 12, 0))
+    adjustments = Recalibrator(session, sport="nba").run(max_picks=25)
+    assert adjustments[5]["sample_size"] == 25
+    assert adjustments[5]["actual_rate"] == 1.0

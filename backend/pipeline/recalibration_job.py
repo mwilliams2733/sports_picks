@@ -12,6 +12,12 @@ from backend.pipeline.scheduler import grade_pending_picks
 
 logger = logging.getLogger(__name__)
 
+#: Sports the nightly job recalibrates and retrains. One list, used by both
+#: loops below: when they were written out separately, mlb was added to the
+#: pipeline and to neither of them. Combat sports are deliberately absent --
+#: they have no team Elo and no LightGBM features, so neither step applies.
+RECALIBRATED_SPORTS = ("nba", "nfl", "ncaab", "ncaaf", "mlb")
+
 
 def run_recalibration(db_path: str = "sports_picks.db") -> dict:
     """Execute nightly recalibration pipeline.
@@ -27,7 +33,7 @@ def run_recalibration(db_path: str = "sports_picks.db") -> dict:
         grade_pending_picks(session)
 
         # Step 2: Recalibrate confidence thresholds per sport
-        for sport in ("nba", "nfl", "ncaab", "ncaaf"):
+        for sport in RECALIBRATED_SPORTS:
             game_count = (
                 session.query(Game)
                 .filter(Game.sport == sport, Game.status == "final")
@@ -37,12 +43,12 @@ def run_recalibration(db_path: str = "sports_picks.db") -> dict:
                 continue
 
             recal = Recalibrator(session, sport=sport)
-            adjustments = recal.run(days=90)
+            adjustments = recal.run()
             if adjustments:
                 summary["recalibrated"][sport] = adjustments
 
         # Step 3: Retrain LightGBM for sports with enough games
-        for sport in ("nba", "nfl", "ncaab", "ncaaf"):
+        for sport in RECALIBRATED_SPORTS:
             sport_count = (
                 session.query(Game)
                 .filter(Game.sport == sport, Game.status == "final")
