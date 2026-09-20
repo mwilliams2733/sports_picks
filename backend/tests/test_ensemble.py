@@ -4,9 +4,15 @@ from backend.backtesting.backtester import Backtester
 from backend.data_types import GameData, TeamStats, OddsSnapshot, Pick
 
 def _stats(**kw):
+    # ratings_measured=True because these fixtures supply real rating values.
+    # The flag exists to stop the totals model betting on its fallback
+    # constants in production, where no collector fills them in; it is not a
+    # statement about the strategy's logic, which is what these tests cover.
+    # Pass ratings_measured=False explicitly to exercise the guard.
     defaults = dict(point_diff=0.0, home_record=(0, 0), away_record=(0, 0),
         last_n_record=(0, 0), offensive_rating=100.0, defensive_rating=100.0,
-        pace=100.0, strength_of_schedule=0.5, elo_rating=1500.0, rest_days=2)
+        pace=100.0, strength_of_schedule=0.5, elo_rating=1500.0, rest_days=2,
+        ratings_measured=True)
     defaults.update(kw)
     return TeamStats(**defaults)
 

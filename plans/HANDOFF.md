@@ -1864,3 +1864,65 @@ model has no demonstrated skill either way on this sample.
 **Not investigated.** It is a separate defect from the home-advantage work
 and affects `over_under` across every sport — 361 picks in the table before
 deduplication, the largest single market.
+
+## The over_under "edge" was a constant, not a calculation — 2026-09-19
+
+The arithmetic was never wrong. `edge = (over_prob - 0.5) * 100` is internally
+consistent, and at −110 on both sides the vig-free fair probability really is
+0.5. The inputs were the problem.
+
+### `_predicted_total` returns 200.0 for every game in every sport
+
+```
+home_pts = pace * (own_off + opp_def) / 200
+```
+
+`offensive_rating`, `defensive_rating` and `pace` are the three dead features
+the calibration report has named on every run for months. `team_stats` holds
+only `rest_days`, `point_diff` and win/loss splits — none of the three is ever
+written — so all fall back to 100.0 and the total is `100 × 200/200 × 2 = 200`.
+
+Against real market lines that single constant decides the side:
+
+| sport | market totals | model | always picks |
+|---|---|---|---|
+| mlb | 6.5 – 20.5 | 200 | Over |
+| ncaaf | 36.5 – 76.5 | 200 | Over |
+| ncaab | 130 – 172.5 | 200 | Over |
+| nba | 208.5 – 255.5 | 200 | Under |
+
+The normal CDF then saturates, which is why `model_prob` is **exactly 1.0**
+on every row that has one and `edge_pct` **exactly 50.0** on 113 of 147.
+
+Graded, it came out at 52.0% over 50 picks at −110, ROI −0.007 — precisely
+what picking a side by constant and paying the vig produces.
+
+The eight rows with an edge above 100% are older still: all written
+2026-03-15..03-18, before the current formula, which caps at 50 by
+construction.
+
+### The fix: no signal, no bet
+
+`TeamStats.ratings_measured` records whether the three ratings came from real
+`TeamStat` rows or from their fallbacks. `_build_game_data` sets it, and the
+ensemble's totals branch is gated on both sides having it.
+
+Explicit rather than sniffing for 100.0: a genuine 100.0 and a missing value
+are different facts even when they are the same number.
+
+**This stops over_under picks entirely in production today**, because nothing
+supplies the ratings — verified against live upcoming games, all `False`.
+Moneyline and spread are untouched; spread uses the LightGBM margin path, not
+these features.
+
+Over_under was the largest market in the table (361 picks before dedup). It
+was also the one with no demonstrated skill, so the trade is giving up volume
+that was costing the vig.
+
+### To turn totals back on
+
+Supply the ratings, or replace `_predicted_total` with something built from
+data that exists. Scores are in `games.home_score`/`away_score`, so a
+points-for / points-against average per team is reachable; it needs new
+`TeamStat` rows from `_refresh_team_stats` and its own validation before
+anything should bet on it. Not attempted here.

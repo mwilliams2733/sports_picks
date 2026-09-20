@@ -109,8 +109,21 @@ class EnsembleStrategy(Strategy):
                     odds_at_pick=-110,
                     suggested_unit_size=fractional_kelly(away_cover_prob, -110, kelly_fraction)))
 
-        # Over/Under picks — distribution-based: P(over) via normal CDF
-        if avg_odds.get("over_under") is not None:
+        # Over/Under picks — distribution-based: P(over) via normal CDF.
+        #
+        # Gated on the ratings actually having been measured. _predicted_total
+        # is built from offensive_rating, defensive_rating and pace, none of
+        # which any collector in this repo supplies, so all three fall back to
+        # 100.0 and the prediction is exactly 200.0 for every game in every
+        # sport. Real market totals are 6.5-20.5 (mlb), 36.5-76.5 (ncaaf),
+        # 130-172.5 (ncaab) and 208.5-255.5 (nba), so that one constant
+        # decides the side by itself -- Over everywhere except nba, Under
+        # there -- and the CDF saturates, giving model_prob 1.0 and edge 50.0.
+        # Graded, it came out at 52.0% over 50 picks at -110: a coin flip
+        # paying the vig. No signal, no bet.
+        if (avg_odds.get("over_under") is not None
+                and game.home_stats.ratings_measured
+                and game.away_stats.ratings_measured):
             predicted_total = self._predicted_total(game)
             ou_line = avg_odds["over_under"]
             over_prob = self._over_probability(predicted_total, ou_line, std=get_total_points_std(game.sport))
