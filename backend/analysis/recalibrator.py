@@ -1,5 +1,6 @@
 """Confidence threshold recalibration based on actual pick performance."""
 import logging
+import math
 from datetime import date
 
 from sqlalchemy.orm import Session
@@ -9,7 +10,30 @@ from backend.models import CalibrationHistory, Game, PickModel, PickResult
 
 logger = logging.getLogger(__name__)
 
-MIN_PICKS_PER_TIER = 20
+#: One-sided 90% confidence. The recalibrator only ever moves a threshold in
+#: the direction the deviation points, so a one-sided test is the matching
+#: question: "is this tier really below expectation?", not "is it different?"
+_Z_ONE_SIDED_90 = 1.645
+
+#: Deviation from the expected win rate that triggers an adjustment.
+DEVIATION_THRESHOLD = 0.05  # 5 percentage points
+
+#: Smallest decided sample a tier may be judged on, derived from
+#: DEVIATION_THRESHOLD rather than chosen, so the two cannot drift.
+#:
+#: It was 20. At n=20 the standard error of a win rate near 0.5 is 11.2
+#: percentage points, so the 5-point deviation the recalibrator acts on is
+#: 0.45 SE -- comfortably inside noise. It was not measuring calibration, it
+#: was tightening thresholds on coin flips, one point per night, forever.
+#:
+#: n = (z * 0.5 / deviation)^2 puts the trigger at `z` standard errors. At
+#: 1.645 SE that is 271 decided picks.
+#:
+#: This is a floor on the RAW count, and raw picks are not independent: a
+#: slate's games share weather, injury news and line moves, so the effective
+#: sample is smaller still. Treat 271 as the minimum before a number is worth
+#: looking at, not as proof that it is.
+MIN_PICKS_PER_TIER = math.ceil((_Z_ONE_SIDED_90 * 0.5 / DEVIATION_THRESHOLD) ** 2)
 #: How many graded picks a tier is judged on. A *count*, not a number of days.
 #: A calendar window is the wrong shape for a seasonal sport: basketball ends
 #: in June and restarts in October, so a 90-day lookback is empty on opening
@@ -17,10 +41,15 @@ MIN_PICKS_PER_TIER = 20
 #: the thresholds deserve the least trust. Counting picks instead means the
 #: window spans whatever calendar time it needs to, and closes the offseason
 #: gap without a special case.
-MAX_PICKS_PER_TIER = 200
+#:
+#: Derived as a multiple of the minimum, never chosen independently: a cap
+#: below the floor makes the recalibrator silently inert -- every tier would
+#: fetch at most `MAX` picks and then be rejected for having fewer than
+#: `MIN`, with no log line saying why. Two minimum-samples of history keeps
+#: the estimate recent while always able to satisfy the floor.
+MAX_PICKS_PER_TIER = 2 * MIN_PICKS_PER_TIER
 ADJUSTMENT_STEP = 1.0  # percentage points per cycle
 EXPECTED_WIN_RATES = {5: 0.70, 4: 0.63, 3: 0.57, 2: 0.53, 1: 0.50}
-DEVIATION_THRESHOLD = 0.05  # 5 percentage points
 
 
 class Recalibrator:

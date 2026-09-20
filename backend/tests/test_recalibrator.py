@@ -30,7 +30,7 @@ def _add_picks(session, t1, t2, strat, confidence, wins, losses, sport="nba",
             status="final",
         )
         session.add(game)
-        session.commit()
+        session.flush()
         pick = PickModel(
             game_id=game.id, strategy_id=strat.id,
             pick_type="moneyline", pick_value="HOME ML",
@@ -39,7 +39,7 @@ def _add_picks(session, t1, t2, strat, confidence, wins, losses, sport="nba",
                if created_at is not None else {}),
         )
         session.add(pick)
-        session.commit()
+        session.flush()
         if i < wins:
             result_value, payout = "win", 100.0
         elif i < wins + losses:
@@ -55,13 +55,20 @@ def _add_picks(session, t1, t2, strat, confidence, wins, losses, sport="nba",
     session.commit()
 
 
-def test_min_picks_per_tier():
-    assert MIN_PICKS_PER_TIER == 20
+def test_min_picks_per_tier_is_large_enough_to_mean_something():
+    """Pinning the literal is what let this sit at 20 unexamined.
+
+    See test_the_minimum_is_derived_from_the_deviation_it_acts_on for the
+    relationship that actually constrains it; this only guards against a
+    value so small the tier is noise.
+    """
+    assert MIN_PICKS_PER_TIER >= 100
 
 
 def test_recalibrator_skips_small_samples():
     session, t1, t2, strat = _setup_db()
-    _add_picks(session, t1, t2, strat, confidence=5, wins=8, losses=2)
+    _add_picks(session, t1, t2, strat, confidence=5,
+               wins=MIN_PICKS_PER_TIER // 4, losses=MIN_PICKS_PER_TIER // 4)
     recal = Recalibrator(session, sport="nba")
     adjustments = recal.run()
     assert 5 not in adjustments
@@ -69,7 +76,9 @@ def test_recalibrator_skips_small_samples():
 
 def test_recalibrator_tightens_when_underperforming():
     session, t1, t2, strat = _setup_db()
-    _add_picks(session, t1, t2, strat, confidence=5, wins=11, losses=9)
+    _add_picks(session, t1, t2, strat, confidence=5,
+               wins=int(MIN_PICKS_PER_TIER * 0.55) + 1,
+               losses=MIN_PICKS_PER_TIER - int(MIN_PICKS_PER_TIER * 0.55))
     recal = Recalibrator(session, sport="nba")
     adjustments = recal.run()
     assert 5 in adjustments
@@ -79,7 +88,9 @@ def test_recalibrator_tightens_when_underperforming():
 
 def test_recalibrator_loosens_when_overperforming():
     session, t1, t2, strat = _setup_db()
-    _add_picks(session, t1, t2, strat, confidence=3, wins=18, losses=6)
+    _add_picks(session, t1, t2, strat, confidence=3,
+               wins=int(MIN_PICKS_PER_TIER * 0.75) + 1,
+               losses=MIN_PICKS_PER_TIER - int(MIN_PICKS_PER_TIER * 0.75))
     recal = Recalibrator(session, sport="nba")
     adjustments = recal.run()
     assert 3 in adjustments
@@ -89,7 +100,9 @@ def test_recalibrator_loosens_when_overperforming():
 
 def test_recalibrator_saves_to_db():
     session, t1, t2, strat = _setup_db()
-    _add_picks(session, t1, t2, strat, confidence=5, wins=11, losses=9)
+    _add_picks(session, t1, t2, strat, confidence=5,
+               wins=int(MIN_PICKS_PER_TIER * 0.55) + 1,
+               losses=MIN_PICKS_PER_TIER - int(MIN_PICKS_PER_TIER * 0.55))
     recal = Recalibrator(session, sport="nba")
     recal.run()
     rows = session.query(CalibrationHistory).all()
@@ -104,10 +117,12 @@ def test_recalibrator_only_counts_its_own_sport():
     t4 = Team(name="Team D", abbreviation="TD", sport="nfl")
     session.add_all([t3, t4])
     session.commit()
-    # 25 nba tier-5 picks, all wins
-    _add_picks(session, t1, t2, strat, confidence=5, wins=25, losses=0, sport="nba")
-    # 25 nfl tier-5 picks, all losses
-    _add_picks(session, t3, t4, strat, confidence=5, wins=0, losses=25, sport="nfl")
+    # nba tier-5 picks, all wins
+    _add_picks(session, t1, t2, strat, confidence=5,
+               wins=MIN_PICKS_PER_TIER + 1, losses=0, sport="nba")
+    # nfl tier-5 picks, all losses -- must not reach the nba run
+    _add_picks(session, t3, t4, strat, confidence=5,
+               wins=0, losses=MIN_PICKS_PER_TIER + 1, sport="nfl")
 
     recal = Recalibrator(session, sport="nba")
     recal.run()
@@ -120,7 +135,8 @@ def test_recalibrator_only_counts_its_own_sport():
 
 def test_pushes_excluded_from_win_rate():
     session, t1, t2, strat = _setup_db()
-    _add_picks(session, t1, t2, strat, confidence=5, wins=21, losses=0, pushes=9)
+    _add_picks(session, t1, t2, strat, confidence=5,
+               wins=MIN_PICKS_PER_TIER + 1, losses=0, pushes=9)
     recal = Recalibrator(session, sport="nba")
     recal.run()
     rows = session.query(CalibrationHistory).filter(
@@ -128,7 +144,7 @@ def test_pushes_excluded_from_win_rate():
     ).all()
     assert len(rows) == 1
     assert rows[0].actual_win_rate == 1.0
-    assert rows[0].sample_size == 21
+    assert rows[0].sample_size == MIN_PICKS_PER_TIER + 1
 
 
 def test_newest_threshold_wins():
@@ -145,7 +161,9 @@ def test_newest_threshold_wins():
     ))
     session.commit()
     # 25 picks that deviate enough to trigger an adjustment and record old_threshold
-    _add_picks(session, t1, t2, strat, confidence=5, wins=11, losses=14)
+    _add_picks(session, t1, t2, strat, confidence=5,
+               wins=int(MIN_PICKS_PER_TIER * 0.45),
+               losses=MIN_PICKS_PER_TIER - int(MIN_PICKS_PER_TIER * 0.45) + 1)
     recal = Recalibrator(session, sport="nba")
     adjustments = recal.run()
     assert 5 in adjustments
@@ -162,21 +180,45 @@ def test_picks_from_a_previous_season_still_count():
     On 2026-09-20 it hid 203 of the 328 graded picks in the database.
     """
     session, t1, t2, strat = _setup_db()
-    _add_picks(session, t1, t2, strat, confidence=5, wins=11, losses=14,
+    _add_picks(session, t1, t2, strat, confidence=5, wins=int(MIN_PICKS_PER_TIER * 0.45),
+               losses=MIN_PICKS_PER_TIER - int(MIN_PICKS_PER_TIER * 0.45) + 1,
                created_at=datetime(2026, 3, 1, 12, 0))
     adjustments = Recalibrator(session, sport="nba").run()
     assert 5 in adjustments
-    assert adjustments[5]["sample_size"] == 25
+    assert adjustments[5]["sample_size"] == MIN_PICKS_PER_TIER + 1
 
 
 def test_only_the_newest_picks_inside_the_cap_count():
     """The window is a count, so it must be the *most recent* count."""
     session, t1, t2, strat = _setup_db()
-    # Older: 30 losses. Newer: 25 wins. A cap of 25 must see only the wins.
-    _add_picks(session, t1, t2, strat, confidence=5, wins=0, losses=30,
+    # Older: all losses. Newer: all wins. A cap of exactly the newer batch
+    # must see only the wins.
+    _add_picks(session, t1, t2, strat, confidence=5, wins=0, losses=MIN_PICKS_PER_TIER + 1,
                created_at=datetime(2025, 11, 1, 12, 0))
-    _add_picks(session, t1, t2, strat, confidence=5, wins=25, losses=0,
+    _add_picks(session, t1, t2, strat, confidence=5, wins=MIN_PICKS_PER_TIER + 1, losses=0,
                created_at=datetime(2026, 3, 1, 12, 0))
-    adjustments = Recalibrator(session, sport="nba").run(max_picks=25)
-    assert adjustments[5]["sample_size"] == 25
+    adjustments = Recalibrator(session, sport="nba").run(max_picks=MIN_PICKS_PER_TIER + 1)
+    assert adjustments[5]["sample_size"] == MIN_PICKS_PER_TIER + 1
     assert adjustments[5]["actual_rate"] == 1.0
+
+
+def test_the_window_can_hold_the_minimum_sample():
+    """A cap below the floor makes the recalibrator inert with no error.
+
+    Every tier would fetch at most MAX_PICKS_PER_TIER picks and then be
+    rejected for having fewer than MIN_PICKS_PER_TIER, logging only the
+    ordinary "not enough picks" line. Nothing would ever recalibrate and
+    nothing would say why.
+    """
+    from backend.analysis.recalibrator import MAX_PICKS_PER_TIER
+    assert MAX_PICKS_PER_TIER >= MIN_PICKS_PER_TIER
+
+
+def test_the_minimum_is_derived_from_the_deviation_it_acts_on():
+    """Not a chosen number: the sample at which a DEVIATION_THRESHOLD-sized
+    gap is distinguishable from noise. At the old value of 20 it was 0.45
+    standard errors -- the recalibrator was adjusting on coin flips."""
+    import math
+    from backend.analysis.recalibrator import DEVIATION_THRESHOLD
+    se = 0.5 / math.sqrt(MIN_PICKS_PER_TIER)
+    assert 1.6 <= DEVIATION_THRESHOLD / se <= 1.7

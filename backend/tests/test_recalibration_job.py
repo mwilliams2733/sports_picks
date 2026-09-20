@@ -9,6 +9,7 @@ from datetime import date, datetime
 
 from backend.database import get_engine, get_session, run_migrations
 from backend.models import Game, PickModel, PickResult, StrategyModel, Team
+from backend.analysis.recalibrator import MIN_PICKS_PER_TIER
 from backend.pipeline.recalibration_job import RECALIBRATED_SPORTS, run_recalibration
 
 
@@ -52,9 +53,11 @@ def _seed(db_path: str, sport: str, *, wins: int, losses: int,
 
 def test_mlb_is_recalibrated(tmp_path):
     db = str(tmp_path / "t.db")
-    # 40 games clears the job's own `game_count < 30` gate; 18-22 at tier 5 is
-    # far enough below the 70% expectation to force a threshold move.
-    _seed(db, "mlb", wins=18, losses=22)
+    # Sized from the minimum so raising it cannot silently make this test
+    # vacuous. ~45% at tier 5 is far enough below the 70% expectation to
+    # force a threshold move, and the count clears the job's `< 30` gate.
+    wins = int(MIN_PICKS_PER_TIER * 0.45)
+    _seed(db, "mlb", wins=wins, losses=MIN_PICKS_PER_TIER - wins + 1)
     summary = run_recalibration(db)
     assert "mlb" in summary["recalibrated"], summary
 
