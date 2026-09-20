@@ -1642,3 +1642,58 @@ each group) is a separate cleanup and has not been done.
 Every regenerated `over_under` pick carries `edge_pct = 50.0` exactly. A 50%
 edge on a total priced at −110 is not plausible; it looks like the totals
 path is not computing an edge at all. Not investigated.
+
+## Duplicate picks cleaned, and what they did to ROI — 2026-09-19
+
+`generate_and_store_picks` inserted unconditionally until today, and every
+window run re-picked every scheduled game. The table carried one copy per
+run: **622 redundant rows out of 1062**.
+
+`backend/scripts/dedupe_picks.py` removes them. It keeps the lowest id in
+each `(game, strategy, pick_type, prop_player, prop_market)` group — the pick
+as first made, matching the idempotence rule the generator now follows. Prop
+player and market are part of the key because one game carries many prop
+picks; keying on `pick_type` alone calls them all duplicates of each other.
+
+**A dry run is the default and `--apply` is required.** This deletes, unlike
+the backfill scripts where the flag runs the other way.
+
+### Applied to ncaaf 2026-09-19
+
+112 groups, **221 rows deleted**, none graded. `pick_results` untouched at
+519, no orphans, `integrity_check: ok`. That date now has 119 picks and zero
+duplicate groups.
+
+### The ROI numbers in this file were measured over a duplicated table
+
+| | n | units |
+|---|---|---|
+| all graded picks, as stored | 519 | **−46.55** |
+| of which redundant copies | 316 | −32.00 |
+| **first copy only — the real book** | **203** | **−14.55** |
+
+The same wager was graded repeatedly. nba game 1018's Under carries seven
+`pick_results` rows at a payout of 0.909 each, so one bet contributed +6.36
+units. Every ROI, units and win-rate figure quoted earlier in this file —
+including the moneyline analysis and the −73.33 ncaab units — was computed
+over this table and is inflated by however many times each pick happened to
+be duplicated. **Re-measure before drawing any conclusion from them.**
+
+The copies are not even consistent with each other. ncaab game 1260's
+moneyline was "AWAY ML at +367" on the first run and "HOME ML at +150" on
+the six that followed; nba 1018's total went "Under 226.2", "Under 219.7",
+then "Over 73.3" five times. So a duplicate is not a re-record of one
+decision — it is a different decision made later, against a moved line.
+
+### Still open: 316 graded duplicates
+
+The script refuses them by design. Deleting a graded row rewrites a recorded
+result, and deciding what a graded duplicate should have been is a judgement
+it has no business making. A further 85 ungraded duplicates remain on other
+sports and dates and can be removed whenever wanted:
+
+    python -m backend.scripts.dedupe_picks --db <abs path> --apply
+
+Removing the graded ones needs a decision first: keep the first pick and drop
+its later re-prices (consistent with the generator), or treat each re-price
+as a separate wager (which is what the table currently asserts).
