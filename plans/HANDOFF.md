@@ -1991,3 +1991,53 @@ number:
 The opponent adjustment cancels in the sum. It only changes how the total
 splits between the sides, which a total discards. The code now says what it
 does, and a test pins the equivalence so the claim cannot creep back.
+
+## Home/away scoring splits: built, measured, left off — 2026-09-19
+
+`points_for_home`, `points_against_home`, `points_for_away`,
+`points_against_away` join `COMPUTED_STAT_TYPES`, and the totals model can
+use the home side's home history against the away side's road history
+instead of one blended rate.
+
+Two rules they follow:
+
+- **A neutral-site game belongs to neither venue.** It is real evidence of
+  scoring but not of home-court scoring, and ncaab's entire stored history is
+  neutral-site bracket games. Neutral games stay in the blended rates and are
+  excluded from the splits — and a neutral game ignores splits at prediction
+  time too.
+- **A thin split is worse than none.** `MIN_VENUE_GAMES = 5`; below that the
+  key is omitted and the blended rate is used.
+
+### The measurement says it changes nothing
+
+Predicted beforehand from the data: the real per-team venue effect on nba
+game totals is about **1.68 points sd** (observed spread 4.99 against 4.70
+expected from sampling noise alone, ratio 1.06, mean difference exactly
++0.000), while splitting raises each estimate's standard error from
+21.4/√78 = 2.42 to 21.4/√39 = 3.42 — roughly 2.42 points of added estimation
+noise to recover 1.68 points of signal.
+
+Measured after building, on 1068 nba games carrying both splits:
+
+```
+paired |error| difference, split minus blended
+  mean     -0.0278 points of MAE
+  t        -0.20      95% CI  -0.297 .. +0.241
+  => 0.18% of a ~15.6 MAE, indistinguishable from zero
+```
+
+`USE_VENUE_SPLITS = False`. The prediction was "slightly worse"; the
+measurement says "neither". Both agree there is nothing here, so the simpler
+predictor stays.
+
+**This does not change the betting gate.** `TOTALS_VALIDATED_SPORTS` is still
+empty — splits or not, the model does not beat the market line.
+
+### Where splits might still earn their place
+
+ncaaf's hosted games show a home/away scoring gap of **22.1 points** against
+nba's 1.6, on 19 games. If that survives a real sample it is a far larger
+venue effect than nba's, and ncaaf has no splits yet — 19 games cannot give
+any team `MIN_VENUE_GAMES` at a venue. Worth re-running `totals_report` once
+a season of ncaaf has accumulated.

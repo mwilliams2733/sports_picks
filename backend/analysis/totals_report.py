@@ -39,6 +39,16 @@ class SportResult:
     n_with_line: int = 0
     mae_vs_line: float | None = None
     line_mae: float | None = None
+    #: The same MAE using each team's venue-specific rate where available.
+    n_split: int = 0
+    split_mae: float | None = None
+    blended_mae_same_games: float | None = None
+
+    @property
+    def splits_help(self) -> bool | None:
+        if self.split_mae is None or self.blended_mae_same_games is None:
+            return None
+        return self.split_mae < self.blended_mae_same_games
 
     @property
     def beats_line(self) -> bool | None:
@@ -47,12 +57,34 @@ class SportResult:
         return self.mae_vs_line < self.line_mae
 
 
+SCORING_STATS = (
+    "points_for", "points_against",
+    "points_for_home", "points_against_home",
+    "points_for_away", "points_against_away",
+)
+
+
 def _scoring_stats(session) -> dict[tuple[int, int], dict[str, float]]:
     out: dict[tuple[int, int], dict[str, float]] = defaultdict(dict)
     for row in session.query(TeamStat).filter(
-            TeamStat.stat_type.in_(("points_for", "points_against"))):
+            TeamStat.stat_type.in_(SCORING_STATS)):
         out[(row.game_id, row.team_id)][row.stat_type] = row.value
     return out
+
+
+def split_total(home: dict, away: dict) -> float | None:
+    """The venue-split prediction, or None when either side lacks its split.
+
+    Compared against the blended prediction on exactly the same games -- a
+    split model that only covers the well-sampled matchups would otherwise
+    look better for reasons that have nothing to do with venue.
+    """
+    keys = ("points_for_home", "points_against_home")
+    akeys = ("points_for_away", "points_against_away")
+    if not all(k in home for k in keys) or not all(k in away for k in akeys):
+        return None
+    return ((home["points_for_home"] + home["points_against_home"])
+            + (away["points_for_away"] + away["points_against_away"])) / 2
 
 
 def predicted_total(home: dict, away: dict) -> float | None:
@@ -69,7 +101,7 @@ def evaluate(session) -> list[SportResult]:
     for o in session.query(Odds).filter(Odds.over_under.isnot(None)):
         lines[o.game_id].append(o.over_under)
 
-    rows: dict[str, list[tuple[float, float, float | None]]] = defaultdict(list)
+    rows: dict[str, list[tuple[float, float, float | None, float | None]]] = defaultdict(list)
     for g in session.query(Game).filter(Game.status == "final",
                                         Game.home_score.isnot(None),
                                         Game.away_score.isnot(None)):
@@ -78,12 +110,17 @@ def evaluate(session) -> list[SportResult]:
         if pred is None:
             continue
         line = statistics.mean(lines[g.id]) if g.id in lines else None
-        rows[g.sport].append((pred, float(g.home_score + g.away_score), line))
+        split = None if g.neutral_site else split_total(
+            stats.get((g.id, g.home_team_id), {}),
+            stats.get((g.id, g.away_team_id), {}))
+        rows[g.sport].append(
+            (pred, float(g.home_score + g.away_score), line, split))
 
     results = []
     for sport, data in rows.items():
-        residuals = [actual - pred for pred, actual, _ in data]
-        withline = [(p, a, ln) for p, a, ln in data if ln is not None]
+        residuals = [actual - pred for pred, actual, _, _ in data]
+        withline = [(p, a, ln) for p, a, ln, _ in data if ln is not None]
+        withsplit = [(p, a, sp) for p, a, _, sp in data if sp is not None]
         r = SportResult(
             sport=sport,
             n=len(data),
@@ -91,9 +128,14 @@ def evaluate(session) -> list[SportResult]:
             residual_sd=statistics.pstdev(residuals) if len(residuals) > 1 else 0.0,
             bias=statistics.mean(residuals),
             legacy_mae=statistics.mean(
-                abs(a - LEGACY_CONSTANT_TOTAL) for _, a, _ in data),
+                abs(a - LEGACY_CONSTANT_TOTAL) for _, a, _, _ in data),
             n_with_line=len(withline),
+            n_split=len(withsplit),
         )
+        if withsplit:
+            r.split_mae = statistics.mean(abs(a - sp) for _, a, sp in withsplit)
+            r.blended_mae_same_games = statistics.mean(
+                abs(a - p) for p, a, _ in withsplit)
         if withline:
             r.mae_vs_line = statistics.mean(abs(a - p) for p, a, _ in withline)
             r.line_mae = statistics.mean(abs(a - ln) for _, a, ln in withline)
@@ -123,6 +165,22 @@ def format_report(results: list[SportResult]) -> str:
         verdict = "YES" if r.beats_line else "no"
         lines.append(f"  {r.sport:<7} {r.n_with_line:>6} {r.mae_vs_line:>9.2f} "
                      f"{r.line_mae:>9.2f} {verdict:>11}")
+    lines.append("")
+    lines.append("  Venue splits vs one blended rate, on the same games:")
+    lines.append(f"  {'sport':<7} {'n':>6} {'split MAE':>10} {'blended':>9} "
+                 f"{'splits help':>12}")
+    lines.append("  " + "-" * 50)
+    for r in results:
+        if r.split_mae is None:
+            lines.append(f"  {r.sport:<7} {r.n_split:>6}  no game has both splits")
+            continue
+        lines.append(f"  {r.sport:<7} {r.n_split:>6} {r.split_mae:>10.2f} "
+                     f"{r.blended_mae_same_games:>9.2f} "
+                     f"{('YES' if r.splits_help else 'no'):>12}")
+    lines.append("")
+    lines.append("  Compared on identical games, so a split model that only")
+    lines.append("  covers well-sampled matchups cannot look better for that")
+    lines.append("  reason alone.")
     lines.append("")
     lines.append("  residual sd is what the over/under CDF should use; a smaller")
     lines.append("  assumed value makes the model overconfident and inflates edge.")

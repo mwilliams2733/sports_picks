@@ -136,7 +136,14 @@ def test_compute_refuses_to_emit_unmeasurable_features():
     stats = ts.compute_team_stats(games, team_id=1, before_date=date(2024, 1, 5))
     for forbidden in ("offensive_rating", "defensive_rating", "pace", "sos"):
         assert forbidden not in stats
-    assert set(stats) == set(ts.COMPUTED_STAT_TYPES)
+    # Emitted keys are a subset of the declared vocabulary -- never anything
+    # outside it -- and always include the unconditional ones. The rest are
+    # earned: points_for needs a prior game, the venue splits need
+    # MIN_VENUE_GAMES at that venue, and this fixture has one game.
+    assert set(stats) <= set(ts.COMPUTED_STAT_TYPES)
+    assert set(ts.ALWAYS_COMPUTED_STAT_TYPES) <= set(stats)
+    assert not set(ts.CONDITIONAL_STAT_TYPES) & set(stats) - {"points_for",
+                                                              "points_against"}
 
 
 # --------------------------------------------------------------------------
@@ -157,7 +164,9 @@ def test_store_team_stats_writes_rows_for_both_teams(seeded):
     n = ts.store_team_stats_for_game(session, g2, [g1])
     session.commit()
 
-    assert n == 2 * len(ts.COMPUTED_STAT_TYPES)
+    # Both teams, every unconditional stat, plus the blended scoring rates
+    # that one prior game earns. The venue splits need MIN_VENUE_GAMES.
+    assert n == 2 * (len(ts.ALWAYS_COMPUTED_STAT_TYPES) + 2)
     rows = session.query(TeamStat).filter(TeamStat.game_id == g2.id).all()
     assert {r.team_id for r in rows} == {a.id, b.id}
     home_pd = next(r.value for r in rows
@@ -325,8 +334,17 @@ def test_backfill_team_stats_does_not_assume_contiguity(seeded):
     res = ts.backfill_team_stats(session, "nba")
     session.commit()
     assert res["games_processed"] == 1
-    assert session.query(TeamStat).filter(
-        TeamStat.game_id == games[1].id).count() == 2 * len(ts.COMPUTED_STAT_TYPES)
+    # The point of the test is that the gap was refilled, not how many types
+    # it holds: which conditional stats a game earns depends on how much
+    # history precedes it.
+    refilled = session.query(TeamStat).filter(
+        TeamStat.game_id == games[1].id).all()
+    assert {r.team_id for r in refilled} == {games[1].home_team_id,
+                                             games[1].away_team_id}
+    for team_id in (games[1].home_team_id, games[1].away_team_id):
+        got = {r.stat_type for r in refilled if r.team_id == team_id}
+        assert set(ts.ALWAYS_COMPUTED_STAT_TYPES) <= got
+        assert got <= set(ts.COMPUTED_STAT_TYPES)
 
 
 def test_backfill_dry_run_writes_nothing(seeded):

@@ -70,10 +70,20 @@ DEFAULT_REST_DAYS = 3
 #: Exactly the stat types this module produces.  Anything not in here is not
 #: derivable from ``games`` alone and must not be invented -- see the module
 #: docstring.
+#: Minimum games at a venue before its split is trusted. Splitting halves
+#: the sample, which doubles each estimate's variance; measured on nba, the
+#: real per-team venue effect on game totals is about 1.68 points sd against
+#: a within-game sd of 21.4, so a thin split is pure noise.
+MIN_VENUE_GAMES = 5
+
 COMPUTED_STAT_TYPES = (
     "point_diff",
     "points_for",
     "points_against",
+    "points_for_home",
+    "points_against_home",
+    "points_for_away",
+    "points_against_away",
     "rest_days",
     "home_wins",
     "home_losses",
@@ -81,6 +91,28 @@ COMPUTED_STAT_TYPES = (
     "away_losses",
     "last_n_wins",
     "last_n_losses",
+)
+
+#: The subset always emitted, for any team with any history at all. The rest
+#: of COMPUTED_STAT_TYPES are conditional: points_for/against need at least
+#: one prior game, and the venue splits need MIN_VENUE_GAMES at that venue.
+#:
+#: The distinction matters because "absent" is a real answer here -- an
+#: invented 0.0 points-for would have the totals model predict a 0-0 game --
+#: so consumers must check rather than assume every type is present.
+ALWAYS_COMPUTED_STAT_TYPES = (
+    "point_diff",
+    "rest_days",
+    "home_wins",
+    "home_losses",
+    "away_wins",
+    "away_losses",
+    "last_n_wins",
+    "last_n_losses",
+)
+
+CONDITIONAL_STAT_TYPES = tuple(
+    t for t in COMPUTED_STAT_TYPES if t not in ALWAYS_COMPUTED_STAT_TYPES
 )
 
 #: Elo replay parameters.  This module owns the only team-sport replay;
@@ -132,8 +164,28 @@ def _team_games(prior_games: Iterable, team_id: int) -> list:
     return out
 
 
+def _at_venue(games: Sequence, team_id: int, venue: str | None) -> list:
+    """Games filtered to one venue for ``team_id``.
+
+    A neutral-site game belongs to neither venue: it is real evidence of
+    scoring, but not of home-court scoring, and ncaab's entire stored
+    history is neutral-site bracket games. ``venue=None`` keeps everything.
+    """
+    if venue is None:
+        return list(games)
+    out = []
+    for g in games:
+        if getattr(g, "neutral_site", False):
+            continue
+        is_home = g.home_team_id == team_id
+        if (venue == "home") == is_home:
+            out.append(g)
+    return out
+
+
 def rolling_points_for(prior_games: Sequence, team_id: int,
-                       lookback: int = DEFAULT_LOOKBACK) -> float | None:
+                       lookback: int = DEFAULT_LOOKBACK,
+                       venue: str | None = None) -> float | None:
     """Mean points scored over the team's most recent ``lookback`` games.
 
     ``None`` when the team has no prior games, deliberately unlike
@@ -141,21 +193,28 @@ def rolling_points_for(prior_games: Sequence, team_id: int,
     sensible neutral for a debut; zero points scored is not -- it would make
     the totals model predict a 0-0 game rather than decline to predict.
     """
-    played = _team_games(prior_games, team_id)[-lookback:]
+    pool = _at_venue(prior_games, team_id, venue)
+    played = _team_games(pool, team_id)[-lookback:]
     scored = [_points_for_against(g, team_id) for g in played]
     scored = [x for x in scored if x is not None]
     if not scored:
+        return None
+    if venue is not None and len(scored) < MIN_VENUE_GAMES:
         return None
     return sum(x[0] for x in scored) / len(scored)
 
 
 def rolling_points_against(prior_games: Sequence, team_id: int,
-                           lookback: int = DEFAULT_LOOKBACK) -> float | None:
+                           lookback: int = DEFAULT_LOOKBACK,
+                           venue: str | None = None) -> float | None:
     """Mean points conceded over the team's most recent ``lookback`` games."""
-    played = _team_games(prior_games, team_id)[-lookback:]
+    pool = _at_venue(prior_games, team_id, venue)
+    played = _team_games(pool, team_id)[-lookback:]
     scored = [_points_for_against(g, team_id) for g in played]
     scored = [x for x in scored if x is not None]
     if not scored:
+        return None
+    if venue is not None and len(scored) < MIN_VENUE_GAMES:
         return None
     return sum(x[1] for x in scored) / len(scored)
 
@@ -247,6 +306,13 @@ def compute_team_stats(games: Iterable, team_id: int, before_date: date,
         stats["points_for"] = float(points_for)
     if points_against is not None:
         stats["points_against"] = float(points_against)
+    for venue in ("home", "away"):
+        pf = rolling_points_for(prior, team_id, lookback=lookback, venue=venue)
+        pa = rolling_points_against(prior, team_id, lookback=lookback, venue=venue)
+        if pf is not None:
+            stats[f"points_for_{venue}"] = float(pf)
+        if pa is not None:
+            stats[f"points_against_{venue}"] = float(pa)
     stats.update({k: float(v) for k, v in
                   record_splits(prior, team_id, last_n=lookback).items()})
     return stats

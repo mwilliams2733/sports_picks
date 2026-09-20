@@ -28,6 +28,12 @@ class TeamStats:
     #: branch gates on both sides having both values.
     points_for: float | None = None
     points_against: float | None = None
+    #: The same rates restricted to one venue, excluding neutral-site games.
+    #: None when that venue has fewer than MIN_VENUE_GAMES of history.
+    points_for_home: float | None = None
+    points_against_home: float | None = None
+    points_for_away: float | None = None
+    points_against_away: float | None = None
 
 @dataclass
 class OddsSnapshot:

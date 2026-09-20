@@ -14,6 +14,21 @@ from backend.data_types import GameData, TeamStats, Pick
 
 logger = logging.getLogger(__name__)
 
+#: Whether the totals model uses each team's venue-specific scoring rate
+#: (home side's home history, away side's road history) instead of one
+#: blended rate. Off, because measurement says it costs more than it buys.
+#:
+#: The real per-team venue effect on nba game totals is about 1.68 points
+#: sd -- observed spread 4.99 against 4.70 expected from sampling noise
+#: alone, a ratio of 1.06, with a mean difference of exactly +0.000. But
+#: splitting halves the sample, raising each estimate's standard error from
+#: 21.4/sqrt(78) = 2.42 to 21.4/sqrt(39) = 3.42, which adds about 2.42
+#: points of estimation noise to recover 1.68 points of signal.
+#:
+#: backend.analysis.totals_report prints both predictors side by side.
+#: Turn this on when it says the split one is more accurate.
+USE_VENUE_SPLITS = False
+
 #: Sports where the totals model has been measured to predict the final
 #: total better than the market line. See the comment on the over/under
 #: branch for the numbers behind the current contents.
@@ -354,8 +369,16 @@ class EnsembleStrategy(Strategy):
         branch gates on it.
         """
         hs, aws = game.home_stats, game.away_stats
-        home_typical = hs.points_for + hs.points_against
-        away_typical = aws.points_for + aws.points_against
+        home_typical, away_typical = None, None
+        if USE_VENUE_SPLITS and not game.neutral_site:
+            if hs.points_for_home is not None and hs.points_against_home is not None:
+                home_typical = hs.points_for_home + hs.points_against_home
+            if aws.points_for_away is not None and aws.points_against_away is not None:
+                away_typical = aws.points_for_away + aws.points_against_away
+        if home_typical is None:
+            home_typical = hs.points_for + hs.points_against
+        if away_typical is None:
+            away_typical = aws.points_for + aws.points_against
         return (home_typical + away_typical) / 2
 
     def _spread_cover_prob(self, predicted_diff: float, cover_threshold: float, std: float = 12.0) -> float:

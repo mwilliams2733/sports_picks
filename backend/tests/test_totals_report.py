@@ -106,3 +106,73 @@ def test_residual_sd_is_reported(session):
     _game(session, 1, 120, 110)     # +10
     _game(session, 2, 105, 105)     # -10
     assert evaluate(session)[0].residual_sd == pytest.approx(10.0)
+
+
+# --------------------------------------------------------------------------
+# Venue splits, compared head to head with the blended rate.
+# --------------------------------------------------------------------------
+
+def _split_game(s, gid, actual_home, actual_away, *, home_split, away_split,
+                blended=110.0, neutral=False):
+    s.add(Game(id=gid, sport="nba", season="2026", date=D, status="final",
+               home_team_id=1, away_team_id=2, neutral_site=neutral,
+               home_score=actual_home, away_score=actual_away))
+    s.flush()
+    for team_id in (1, 2):
+        for k in ("points_for", "points_against"):
+            s.add(TeamStat(game_id=gid, team_id=team_id, stat_type=k,
+                           value=blended))
+    s.add(TeamStat(game_id=gid, team_id=1, stat_type="points_for_home",
+                   value=home_split[0]))
+    s.add(TeamStat(game_id=gid, team_id=1, stat_type="points_against_home",
+                   value=home_split[1]))
+    s.add(TeamStat(game_id=gid, team_id=2, stat_type="points_for_away",
+                   value=away_split[0]))
+    s.add(TeamStat(game_id=gid, team_id=2, stat_type="points_against_away",
+                   value=away_split[1]))
+    s.commit()
+
+
+def test_the_split_prediction_uses_each_sides_own_venue(session):
+    _split_game(session, 1, 120, 110, home_split=(118, 112),
+                away_split=(108, 122))
+    r = evaluate(session)[0]
+    assert r.n_split == 1
+    # (118 + 112 + 108 + 122) / 2 = 230
+    assert r.split_mae == pytest.approx(abs(230 - 230))
+
+
+def test_the_comparison_is_on_identical_games(session):
+    """A game with no split must not enter either side of the comparison."""
+    _split_game(session, 1, 120, 110, home_split=(118, 112),
+                away_split=(108, 122))
+    _game(session, 2, 130, 130)          # blended only, no splits
+    r = evaluate(session)[0]
+    assert r.n == 2
+    assert r.n_split == 1, "an unsplit game leaked into the split comparison"
+
+
+def test_a_neutral_game_is_excluded_from_the_split_comparison(session):
+    """Neither team is at home, so a venue split does not apply."""
+    _split_game(session, 1, 120, 110, home_split=(118, 112),
+                away_split=(108, 122), neutral=True)
+    assert evaluate(session)[0].n_split == 0
+
+
+def test_splits_help_is_reported_both_ways(session):
+    # Blended predicts 220, split predicts 230, actual 230 -> split wins.
+    _split_game(session, 1, 120, 110, home_split=(118, 112),
+                away_split=(108, 122))
+    assert evaluate(session)[0].splits_help is True
+
+
+def test_splits_help_is_false_when_the_blend_is_closer(session):
+    # Blended predicts 220, split predicts 260, actual 220 -> blend wins.
+    _split_game(session, 1, 110, 110, home_split=(130, 130),
+                away_split=(130, 130))
+    assert evaluate(session)[0].splits_help is False
+
+
+def test_splits_help_is_unknown_without_any_split_games(session):
+    _game(session, 1, 120, 110)
+    assert evaluate(session)[0].splits_help is None

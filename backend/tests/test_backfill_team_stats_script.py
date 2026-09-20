@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 
-from backend.pipeline.team_stats import COMPUTED_STAT_TYPES
+from backend.pipeline.team_stats import ALWAYS_COMPUTED_STAT_TYPES
 
 from backend.database import get_engine, get_session
 from backend.models import Base, Team, Game, TeamStat, EloHistory
@@ -58,11 +58,18 @@ def test_real_run_populates_every_game(db_file):
     assert n_games == 3
     assert n_elo == 6  # two teams per game
 
-    # 10 stat types, but points_for/points_against are omitted for a team
-    # with no prior games -- absent rather than a fabricated 0.0. The first
-    # game of the three has no history for either side, so it is short by
-    # those two stats for each of its two teams.
-    assert n_stats == 3 * 2 * len(COMPUTED_STAT_TYPES) - 2 * 2
+    # Conditional stats are earned, not guaranteed: points_for needs one
+    # prior game and the venue splits need MIN_VENUE_GAMES at that venue,
+    # which a three-game fixture never reaches. So every team-game carries
+    # the unconditional types, and only the later games add the blended
+    # scoring rates.
+    always = len(ALWAYS_COMPUTED_STAT_TYPES)
+    unconditional = 3 * 2 * always            # 3 games x 2 teams
+    # points_for and points_against, for both teams of games 2 and 3. Game 1
+    # has no prior history for either side. No venue split is ever earned:
+    # MIN_VENUE_GAMES is more than this fixture has.
+    earned = 2 * 2 * 2
+    assert n_stats == unconditional + earned
 
 
 def test_the_first_game_has_no_scoring_averages(db_file):
