@@ -2887,3 +2887,96 @@ carry neither an `espn_id` nor an `odds_api_id`.
   backfill for espn_ids, game flags, prop fields, team stats and UFC Elo, but
   nothing for the season label. Restoring a backup, or standing up a second
   environment, leaves no way to reproduce it.
+
+## The season label, carried the rest of the way — 2026-09-20
+
+The finding in the section above, built. `b2e6a58`, `1e26b7e`.
+
+### Nearest season, not last season started
+
+`season_label` asked whether a date was past the configured start. That is
+right at the tail and wrong at the head, for the reason already recorded: the
+`seasons` block is a coarse "is this sport active today" gate, accurate to a
+few days, and a few days is the whole width of the second question it is now
+being asked. It now measures to the whole season window and takes the nearest,
+which leaves every tail answer unchanged and moves the head ones.
+
+### ESPN's year is a candidate, never a label
+
+The plan was to store what ESPN already tells us, the way `6177d1a` did for
+`week.number`. Reading the feed changed the shape of that: **ESPN names a
+season by the year it STARTED for the football sports and by the year it ENDS
+for basketball.** The 2025-26 nba season is `year: 2026`; the 2026 nfl season
+is also `year: 2026`. Formatting either directly would have renamed the 1,237
+nba rows stored as "2025-26" to "2026-27" — the exact history the label was
+chosen to avoid rewriting.
+
+So `espn.season_year_of` returns the number and `config.season_label` resolves
+it: both readings, `Y-1` and `Y`, are offered to the nearest-season test
+alongside the two the date itself suggests. Whichever convention a sport uses,
+the right season wins, and no per-sport table of ESPN conventions is needed.
+
+A year more than one from the game's own is dropped as a bad value rather than
+resolved. A season containing a date can only be named for the year before it,
+that year, or the year after, so anything else is not a disagreement — and 0 or
+a negative reached `date()` and raised `ValueError` before this.
+
+**The odds path keeps the fix without the year.** The nearest-season rule does
+not depend on ESPN being there, which is what makes this an improvement to the
+derivation rather than a dependency on the feed.
+
+```
+  nfl    2026-08-15  espn=2026   2025-26 -> 2026-27   preseason
+  nba    2026-10-05  espn=2027   2025-26 -> 2026-27   preseason, END-year
+  ncaaf  2026-08-20  espn=2026   2025-26 -> 2026-27   week 0
+  nfl    2027-01-15  espn=2026   2026-27              unchanged
+  nba    2026-06-25  espn=2026   2025-26              unchanged, Finals
+  nba    2025-11-01  espn=2026   2025-26              unchanged, stored rows
+```
+
+`test_a_game_just_before_the_start_belongs_to_the_previous_season` asserted the
+old rule and now asserts the new one under a new name. It was the only test to
+change.
+
+### The relabel is a script now
+
+`backend/scripts/backfill_season_labels.py`. It recomputes rather than
+rewriting the old strings, because the stored label is the one value that
+cannot be trusted — three formats were in production at once. `--dry-run`
+writes nothing, needs no network, and names every distinct move.
+
+**It has not been run against production.** Back up `sports_picks.db`, dry-run
+it, then:
+
+```
+.venv/Scripts/python.exe -m backend.scripts.backfill_season_labels \
+    --db <abs win path> --dry-run
+```
+
+Expect it to report no changes. Every stored row sits inside its season window,
+where the old rule and the new one agree; the 598 rows were already relabelled
+by hand. A non-empty report means a preseason row exists that was not known
+about.
+
+### Verified
+
+`975 passed, 2 failed` (`backend/tests`, Python 3.11 in a cloud container with
+the dependencies installed fresh). 956 of those passed on `a607d98`; the 19 new
+ones are 14 in `test_season_label.py` and 5 in `test_backfill_season_labels.py`.
+
+### CI has been red on master since 248667d, and not because of any of it
+
+`test_max_edge_ceiling.py::test_the_ceiling_is_configurable` and
+`::test_the_refusal_is_logged` fail, on `master` and on every commit back to
+`d4de5d4` — **the commit that introduced them.** They have never passed in a
+clean checkout. CI runs 73 through 77 are all red on exactly these two.
+
+Both depend on the 2100-vs-1200 Elo game producing an edge at or above 20%.
+In a checkout with no database, `_legacy_calibrated_probability` cannot train —
+`sqlite3.OperationalError: no such table: games` — and the fallback it drops to
+produces a smaller edge, so the ceiling never triggers and nothing is logged.
+They presumably pass on the Windows box, where the real `sports_picks.db` sits
+in the working directory. **The tests read an ambient production database.**
+
+Not touched here: what they should assert without a trained model is a decision
+about `d4de5d4`'s evidence, not a mechanical fix.
