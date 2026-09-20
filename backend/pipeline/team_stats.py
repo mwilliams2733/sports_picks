@@ -72,6 +72,8 @@ DEFAULT_REST_DAYS = 3
 #: docstring.
 COMPUTED_STAT_TYPES = (
     "point_diff",
+    "points_for",
+    "points_against",
     "rest_days",
     "home_wins",
     "home_losses",
@@ -130,6 +132,34 @@ def _team_games(prior_games: Iterable, team_id: int) -> list:
     return out
 
 
+def rolling_points_for(prior_games: Sequence, team_id: int,
+                       lookback: int = DEFAULT_LOOKBACK) -> float | None:
+    """Mean points scored over the team's most recent ``lookback`` games.
+
+    ``None`` when the team has no prior games, deliberately unlike
+    :func:`rolling_point_diff`, which returns 0.0. A zero margin is a
+    sensible neutral for a debut; zero points scored is not -- it would make
+    the totals model predict a 0-0 game rather than decline to predict.
+    """
+    played = _team_games(prior_games, team_id)[-lookback:]
+    scored = [_points_for_against(g, team_id) for g in played]
+    scored = [x for x in scored if x is not None]
+    if not scored:
+        return None
+    return sum(x[0] for x in scored) / len(scored)
+
+
+def rolling_points_against(prior_games: Sequence, team_id: int,
+                           lookback: int = DEFAULT_LOOKBACK) -> float | None:
+    """Mean points conceded over the team's most recent ``lookback`` games."""
+    played = _team_games(prior_games, team_id)[-lookback:]
+    scored = [_points_for_against(g, team_id) for g in played]
+    scored = [x for x in scored if x is not None]
+    if not scored:
+        return None
+    return sum(x[1] for x in scored) / len(scored)
+
+
 def rolling_point_diff(prior_games: Sequence, team_id: int,
                        lookback: int = DEFAULT_LOOKBACK) -> float:
     """Mean scoring margin over the team's most recent ``lookback`` prior games.
@@ -139,14 +169,14 @@ def rolling_point_diff(prior_games: Sequence, team_id: int,
     has no prior games, which is the same value the consumers default to, so a
     debut game is not distinguishable from a missing row (it genuinely is not).
     """
-    played = _team_games(prior_games, team_id)[-lookback:]
-    if not played:
+    pf = rolling_points_for(prior_games, team_id, lookback)
+    pa = rolling_points_against(prior_games, team_id, lookback)
+    if pf is None or pa is None:
         return 0.0
-    margins = []
-    for g in played:
-        pf, pa = _points_for_against(g, team_id)
-        margins.append(pf - pa)
-    return sum(margins) / len(margins)
+    # The mean of the differences equals the difference of the means over the
+    # same window, so deriving it here keeps the three stats consistent by
+    # construction rather than by a test asserting they agree.
+    return pf - pa
 
 
 def rest_days(prior_games: Sequence, team_id: int, game_date: date,
@@ -208,6 +238,15 @@ def compute_team_stats(games: Iterable, team_id: int, before_date: date,
         "point_diff": float(rolling_point_diff(prior, team_id, lookback=lookback)),
         "rest_days": float(rest_days(prior, team_id, before_date)),
     }
+    # Omitted rather than defaulted when the team has no history, matching
+    # this module's rule that an unmeasurable feature is absent rather than
+    # invented. The totals model gates on their presence.
+    points_for = rolling_points_for(prior, team_id, lookback=lookback)
+    points_against = rolling_points_against(prior, team_id, lookback=lookback)
+    if points_for is not None:
+        stats["points_for"] = float(points_for)
+    if points_against is not None:
+        stats["points_against"] = float(points_against)
     stats.update({k: float(v) for k, v in
                   record_splits(prior, team_id, last_n=lookback).items()})
     return stats

@@ -20,13 +20,14 @@ class TeamStats:
     is_lookahead_spot: bool = False     # weak opponent now, big game next
     schedule_fatigue_score: float = 0.0  # 0 to 1 severity
     pitcher_skill_score: float | None = None  # MLB-only; 0.5 = league-average
-    #: True only when offensive_rating, defensive_rating and pace came from
-    #: real TeamStat rows rather than their fallback constants. No collector
-    #: in this repo supplies them, so this is False in production today and
-    #: the totals model refuses to bet on the resulting constant. Explicit
-    #: rather than sniffing for 100.0: a genuine 100.0 and a missing value
-    #: are different facts even when they are the same number.
-    ratings_measured: bool = False
+    #: Mean points scored and conceded over the team's recent prior games,
+    #: point-in-time. These are the totals model's only inputs.
+    #:
+    #: None means no scoring history, and that is not the same as zero: a
+    #: predicted 0-0 game is worse than declining to predict. The totals
+    #: branch gates on both sides having both values.
+    points_for: float | None = None
+    points_against: float | None = None
 
 @dataclass
 class OddsSnapshot:

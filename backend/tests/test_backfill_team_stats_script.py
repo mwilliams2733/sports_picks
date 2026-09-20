@@ -3,6 +3,8 @@ from datetime import date
 
 import pytest
 
+from backend.pipeline.team_stats import COMPUTED_STAT_TYPES
+
 from backend.database import get_engine, get_session
 from backend.models import Base, Team, Game, TeamStat, EloHistory
 from backend.scripts import backfill_team_stats as script
@@ -55,7 +57,30 @@ def test_real_run_populates_every_game(db_file):
     n_stats, n_elo, n_games = _counts(db_file)
     assert n_games == 3
     assert n_elo == 6  # two teams per game
-    assert n_stats == 3 * 2 * 8  # 3 games x 2 teams x 8 stat types
+
+    # 10 stat types, but points_for/points_against are omitted for a team
+    # with no prior games -- absent rather than a fabricated 0.0. The first
+    # game of the three has no history for either side, so it is short by
+    # those two stats for each of its two teams.
+    assert n_stats == 3 * 2 * len(COMPUTED_STAT_TYPES) - 2 * 2
+
+
+def test_the_first_game_has_no_scoring_averages(db_file):
+    """Pins the reason the count above is not a clean multiple.
+
+    A predicted total needs a scoring history; the season opener has none,
+    and inventing 0.0 would make the totals model predict a 0-0 game.
+    """
+    script.run(db_file)
+    import sqlite3
+    con = sqlite3.connect(db_file)
+    first = con.execute(
+        "SELECT id FROM games ORDER BY date, id LIMIT 1").fetchone()[0]
+    got = {r[0] for r in con.execute(
+        "SELECT stat_type FROM team_stats WHERE game_id=?", (first,))}
+    con.close()
+    assert "points_for" not in got and "points_against" not in got
+    assert "point_diff" in got, "the other stats are still written"
 
 
 def test_second_run_is_a_no_op(db_file):

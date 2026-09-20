@@ -14,6 +14,12 @@ from backend.data_types import GameData, TeamStats, Pick
 
 logger = logging.getLogger(__name__)
 
+#: Sports where the totals model has been measured to predict the final
+#: total better than the market line. See the comment on the over/under
+#: branch for the numbers behind the current contents.
+TOTALS_VALIDATED_SPORTS: frozenset[str] = frozenset()
+
+
 class EnsembleStrategy(Strategy):
     _calibrated: CalibratedModel | None = None
 
@@ -111,6 +117,25 @@ class EnsembleStrategy(Strategy):
 
         # Over/Under picks — distribution-based: P(over) via normal CDF.
         #
+        # Gated per sport on the model having been shown to predict the final
+        # total more accurately than the market line, because that is what a
+        # totals bet is against. Measured 2026-09-19 by
+        # backend.analysis.totals_report:
+        #
+        #   sport  n     our MAE   line MAE
+        #   nba    42    14.41     11.50     <- line is better
+        #   ncaab  16    11.99      6.99     <- line is much better
+        #   mlb    11     3.45      3.92     <- we are better, but n=11
+        #
+        # So the set is empty. The model is a real predictor now -- it beats
+        # the old constant-200 by a mile -- but beating a constant is not an
+        # edge, and disagreeing with a line we are demonstrably worse than
+        # just means we are wrong. mlb is the only candidate and 11 games
+        # cannot carry that decision.
+        #
+        # Add a sport here when totals_report says it beats the line on a
+        # sample worth the name.
+        #
         # Gated on the ratings actually having been measured. _predicted_total
         # is built from offensive_rating, defensive_rating and pace, none of
         # which any collector in this repo supplies, so all three fall back to
@@ -122,8 +147,11 @@ class EnsembleStrategy(Strategy):
         # Graded, it came out at 52.0% over 50 picks at -110: a coin flip
         # paying the vig. No signal, no bet.
         if (avg_odds.get("over_under") is not None
-                and game.home_stats.ratings_measured
-                and game.away_stats.ratings_measured):
+                and game.sport in TOTALS_VALIDATED_SPORTS
+                and game.home_stats.points_for is not None
+                and game.home_stats.points_against is not None
+                and game.away_stats.points_for is not None
+                and game.away_stats.points_against is not None):
             predicted_total = self._predicted_total(game)
             ou_line = avg_odds["over_under"]
             over_prob = self._over_probability(predicted_total, ou_line, std=get_total_points_std(game.sport))
@@ -299,17 +327,36 @@ class EnsembleStrategy(Strategy):
         return hs.point_diff - aws.point_diff
 
     def _predicted_total(self, game: GameData) -> float:
-        """Predict total score using matchup-based efficiency.
+        """Predict total score as the mean of both teams' typical game totals.
 
-        Each team's expected points = possessions * (own_off + opp_def) / 200.
-        This accounts for the fact that a great offense vs bad defense scores more.
+        A team's typical game total is what it scores plus what it concedes.
+        The prediction is the average of the two.
+
+        Written this way on purpose. The obvious "matchup" form -- each side
+        scoring the mean of its own rate and the opponent's concession rate --
+        is *algebraically the same number*:
+
+            (hf + ad)/2 + (af + hd)/2  ==  (hf + hd + af + ad)/2
+
+        The opponent adjustment cancels in the sum; it only changes how the
+        total is split between the sides, which a total discards. Claiming
+        matchup sophistication here would be describing something the
+        arithmetic does not do. (For a spread, where the split is the answer,
+        it would matter.)
+
+        This replaces a formula built on offensive_rating, defensive_rating
+        and pace, which need possession counts no collector in this repo
+        supplies. All three fell back to 100.0, so it returned exactly 200.0
+        for every game in every sport -- above every ncaab, ncaaf and mlb
+        line and below every nba one, which decided the side by itself.
+
+        Caller must have checked both sides carry the inputs; the totals
+        branch gates on it.
         """
         hs, aws = game.home_stats, game.away_stats
-        avg_pace = (hs.pace + aws.pace) / 2
-        possessions = avg_pace
-        home_pts = possessions * (hs.offensive_rating + aws.defensive_rating) / 200
-        away_pts = possessions * (aws.offensive_rating + hs.defensive_rating) / 200
-        return home_pts + away_pts
+        home_typical = hs.points_for + hs.points_against
+        away_typical = aws.points_for + aws.points_against
+        return (home_typical + away_typical) / 2
 
     def _spread_cover_prob(self, predicted_diff: float, cover_threshold: float, std: float = 12.0) -> float:
         """Probability that home margin exceeds the cover threshold.

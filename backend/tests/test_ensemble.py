@@ -1,18 +1,33 @@
 from datetime import date
+import backend.analysis.variants.ensemble as ens
 from backend.analysis.variants.ensemble import EnsembleStrategy
 from backend.backtesting.backtester import Backtester
 from backend.data_types import GameData, TeamStats, OddsSnapshot, Pick
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _totals_enabled(monkeypatch):
+    """Treat nba as a validated totals sport for this module.
+
+    TOTALS_VALIDATED_SPORTS is empty in production because the model
+    does not beat the market line anywhere on a sample worth the name.
+    These tests are about the strategy's mechanics, not that decision;
+    test_totals_model.py owns the gate itself.
+    """
+    monkeypatch.setattr(ens, "TOTALS_VALIDATED_SPORTS",
+                        frozenset({"nba", "ncaab"}))
 
 def _stats(**kw):
-    # ratings_measured=True because these fixtures supply real rating values.
-    # The flag exists to stop the totals model betting on its fallback
-    # constants in production, where no collector fills them in; it is not a
-    # statement about the strategy's logic, which is what these tests cover.
-    # Pass ratings_measured=False explicitly to exercise the guard.
+    # points_for/points_against default to 105 each, so two default teams
+    # predict a 210-point total -- the same value the old rating-based
+    # formula produced for these fixtures, which keeps the totals tests below
+    # asserting what they always asserted. Pass None to exercise the guard
+    # that refuses a pick when a team has no scoring history.
     defaults = dict(point_diff=0.0, home_record=(0, 0), away_record=(0, 0),
         last_n_record=(0, 0), offensive_rating=100.0, defensive_rating=100.0,
         pace=100.0, strength_of_schedule=0.5, elo_rating=1500.0, rest_days=2,
-        ratings_measured=True)
+        points_for=105.0, points_against=105.0)
     defaults.update(kw)
     return TeamStats(**defaults)
 
@@ -75,10 +90,9 @@ def test_spread_pick_away_side():
 
 def test_over_under_pick_generated():
     """O/U pick generated when predicted total differs from line."""
-    # Matchup-based formula: each team's pts = pace * (own_off + opp_def) / 200
-    # pace=100, off_rtg=110, def_rtg=100 for both
-    # home_pts = 100 * (110 + 100) / 200 = 105
-    # away_pts = 100 * (110 + 100) / 200 = 105
+    # Matchup average: each side's expected score is the mean of its own
+    # scoring rate and the opponent's concession rate.
+    # home_pts = (105 + 105) / 2 = 105; away_pts = 105
     # predicted_total = 210, line=225 => Under pick
     game = GameData(game_id=1, sport="nba", date=date(2026, 3, 13),
         home_team_id=1, away_team_id=2,

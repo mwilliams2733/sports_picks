@@ -423,8 +423,8 @@ def _get_team_stats(session: Session, team_id: int, sport: str,
         offensive_rating=stats_dict.get("offensive_rating", 100.0),
         defensive_rating=stats_dict.get("defensive_rating", 100.0),
         pace=stats_dict.get("pace", 100.0), strength_of_schedule=stats_dict.get("sos", 0.5),
-        ratings_measured=all(k in stats_dict for k in
-                             ("offensive_rating", "defensive_rating", "pace")),
+        points_for=stats_dict.get("points_for"),
+        points_against=stats_dict.get("points_against"),
         elo_rating=elo_rating, rest_days=int(stats_dict.get("rest_days", 2)),
         turnover_margin=stats_dict.get("turnover_margin"), red_zone_pct=stats_dict.get("red_zone_pct"),
         conference_strength=stats_dict.get("conference_strength"))

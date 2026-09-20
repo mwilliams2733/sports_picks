@@ -1926,3 +1926,68 @@ data that exists. Scores are in `games.home_score`/`away_score`, so a
 points-for / points-against average per team is reachable; it needs new
 `TeamStat` rows from `_refresh_team_stats` and its own validation before
 anything should bet on it. Not attempted here.
+
+## The points-for totals model — 2026-09-19
+
+Replaces the constant-200 predictor. Reproducible:
+
+    python -m backend.analysis.totals_report --db <abs path>
+
+### What was built
+
+`points_for` and `points_against` join `COMPUTED_STAT_TYPES` in
+`team_stats.py`, computed by the same `strictly_before` filter as everything
+else, so a game's own score can never reach its own features.
+
+They are **omitted, not defaulted, when a team has no history.** Unlike
+`rolling_point_diff`, where 0.0 is a sensible neutral margin, zero points
+scored would make the model predict a 0-0 game. `rolling_point_diff` is now
+derived from the two means, so the three stats agree by construction.
+
+`_predicted_total` is the mean of the two teams' typical game totals.
+
+### It does predict. It does not beat the line.
+
+| sport | n | MAE | resid sd | legacy(200) MAE |
+|---|---|---|---|---|
+| nba | 1229 | 15.61 | 19.57 | 31.62 |
+| mlb | 79 | 3.22 | 4.21 | 191.99 |
+| ncaab | 22 | 12.75 | 16.03 | 50.18 |
+
+Against the market line, which is what a bet is actually against:
+
+| sport | n | our MAE | line MAE | beats line |
+|---|---|---|---|---|
+| nba | 42 | 14.41 | 11.50 | **no** |
+| ncaab | 16 | 11.99 | 6.99 | **no** |
+| mlb | 11 | 3.45 | 3.92 | yes, but n=11 |
+
+**So `TOTALS_VALIDATED_SPORTS` is empty and no totals picks are generated.**
+Beating a constant by 2x is not an edge. Disagreeing with a line we are
+measurably worse than just means we are wrong, which is exactly what the old
+version did for months at 52.0% and −0.007 ROI. mlb is the only candidate and
+11 games cannot carry that decision.
+
+Add a sport to that frozenset when `totals_report` says it beats the line on
+a real sample. That is the whole gate.
+
+### The assumed spreads were too small
+
+`TOTAL_POINTS_STD` is the standard deviation of *the model's own residuals*,
+which is what the over/under CDF needs. Every measured value is larger than
+the guess it replaced — nba 15.0 → 19.6, ncaab 12.0 → 16.0, mlb 4.0 → 4.2.
+A too-small value makes the model overconfident and inflates every edge it
+claims. nfl, ncaaf, boxing and mma remain unmeasured guesses.
+
+### A docstring that claimed more than the arithmetic did
+
+The first version described the standard matchup form — each side scoring
+the mean of its own rate and the opponent's concession rate. Mutation
+testing found no test could tell the two apart, because they are the same
+number:
+
+    (hf + ad)/2 + (af + hd)/2  ==  (hf + hd + af + ad)/2
+
+The opponent adjustment cancels in the sum. It only changes how the total
+splits between the sides, which a total discards. The code now says what it
+does, and a test pins the equivalence so the claim cannot creep back.
