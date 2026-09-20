@@ -195,3 +195,27 @@ def test_odds_finalizers_run_before_grading(monkeypatch):
 
     assert order.index("scores:boxing") < order.index("grade_games")
     assert order.index("scores:mma") < order.index("grade_games")
+
+
+# --- a silent no-op is indistinguishable from never running ---------------
+
+def test_the_finalizers_log_even_when_they_do_nothing(monkeypatch, caplog):
+    """Combat cards are weekly and the window is three days, so "nothing to
+    do" is the NORMAL outcome -- it is what the 8 AM scout will show almost
+    every morning. Logging only the interesting case makes that ordinary
+    path byte-identical in the log to the code having been deleted, which
+    is exactly how this repository's dead wiring hid for months. The forced
+    scout on 2026-09-20 emitted no combat line at all."""
+    import logging
+    caplog.set_level(logging.INFO, logger="backend.pipeline.scheduler")
+
+    _scout_with_stubs(monkeypatch,
+                      finalizer=lambda s, *a, **k: {"finalized": 0, "dates": 0})
+
+    messages = [r.getMessage().lower() for r in caplog.records]
+    # Each finalizer separately: one of them staying silent is exactly the
+    # failure being guarded, and asserting on "any combat line" lets the
+    # other one cover for it.
+    assert any("mma espn finalize" in m for m in messages),         "the ESPN mma finalizer logged nothing on a zero run"
+    assert any("mma odds finalize" in m for m in messages),         "the odds mma finalizer logged nothing on a zero run"
+    assert any("boxing odds finalize" in m for m in messages),         "the odds boxing finalizer logged nothing on a zero run"

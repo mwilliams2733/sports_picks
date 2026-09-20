@@ -207,9 +207,12 @@ def morning_scout(config, engine, scheduler, is_retry=False):
         # cannot change.
         try:
             mma = finalize_stuck_bouts(session, lookback_days=LOOKBACK_DAYS)
-            if mma["finalized"]:
-                logger.info("Finalized %d mma bout(s) over %d date(s)",
-                            mma["finalized"], mma["dates"])
+            # Logged unconditionally. "Nothing to do" is the NORMAL outcome
+            # here -- cards are weekly, the window is days -- so a silent
+            # no-op would be what this prints almost every morning, and it
+            # would read exactly like the call having been deleted.
+            logger.info("mma ESPN finalize: %d finalized over %d date(s)",
+                        mma["finalized"], mma["dates"])
         except Exception:
             logger.exception(
                 "mma finalization failed; grading with what is present")
@@ -222,9 +225,13 @@ def morning_scout(config, engine, scheduler, is_retry=False):
             try:
                 scored = finalize_from_scores(
                     session, combat_sport, config.get("odds_api_key"))
-                if scored["finalized"]:
-                    logger.info("Finalized %d %s bout(s) from the odds feed",
-                                scored["finalized"], combat_sport)
+                # Unconditional, for the same reason as above: zero is the
+                # expected answer most days and must still be visible.
+                logger.info(
+                    "%s odds finalize: %d finalized, %d considered, "
+                    "%d unmatched%s", combat_sport, scored["finalized"],
+                    scored["considered"], scored["unmatched"],
+                    " (no api key)" if scored["skipped_no_key"] else "")
             except Exception:
                 logger.exception(
                     "%s odds-feed finalization failed; grading with what is "
@@ -382,9 +389,14 @@ def _run_window(config, engine, sport: str, window: dict):
             StrategyModel.is_active == True, StrategyModel.strategy_type == "prop",
         ).first()
         try:
+            # Scoped to this window's sport. Unscoped, each window
+            # collected player stats for every sport playing that day:
+            # three windows on 2026-09-20 fetched every NFL roster three
+            # times, and ESPN throttles with 403 once asked quickly enough.
             result = asyncio.run(run_prop_pipeline(
                 session, target_date=today,
                 strategy_id=prop_strategy.id if prop_strategy else None,
+                sports=(sport,),
             ))
             logger.info(f"Prop pipeline: {result}")
         except Exception as e:

@@ -51,16 +51,35 @@ def build_default_collector() -> PlayerStatsCollector:
     })
 
 async def run_prop_pipeline(session: Session, target_date: date | None = None,
-                            strategy_id: int | None = None) -> dict:
+                            strategy_id: int | None = None,
+                            sports: tuple[str, ...] | None = None) -> dict:
+    """Collect player stats and generate prop picks for ``target_date``.
+
+    ``sports`` limits which of the day's games are considered. It exists
+    because `_run_window` runs once per window and called this with no
+    filter, so every window collected stats for every sport playing that
+    day: three windows on 2026-09-20 fetched every NFL roster three times.
+    ESPN has no published rate limit but starts returning 403 once a
+    client asks quickly enough, so the redundant volume is not free.
+
+    ``None`` still means every sport, which is what `fetch_odds_now` and
+    the pipeline API deliberately want.
+    """
     target_date = target_date or et_today()
     collector = build_default_collector()
     try:
-        return await _run_prop_pipeline_inner(session, collector, target_date, strategy_id)
+        return await _run_prop_pipeline_inner(session, collector, target_date,
+                                              strategy_id, sports=sports)
     finally:
         await collector.close()
 
-async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id):
-    games = session.query(Game).filter(Game.date == target_date, Game.status == "scheduled").all()
+async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
+                                   sports=None):
+    game_q = session.query(Game).filter(Game.date == target_date,
+                                        Game.status == "scheduled")
+    if sports:
+        game_q = game_q.filter(Game.sport.in_(list(sports)))
+    games = game_q.all()
     if not games:
         return {"games": 0, "stats_fetched": 0, "props_analyzed": 0, "picks_generated": 0}
 
