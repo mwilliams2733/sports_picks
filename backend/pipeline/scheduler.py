@@ -138,6 +138,50 @@ def run_pipeline(config_path: str = "config.yaml"):
         scheduler.shutdown()
 
 
+def windowless_sports(active_sports) -> list[str]:
+    """In-season sports that get no window, so nothing fetches their odds.
+
+    A window is clustered around ESPN start times, so it only exists for
+    sports with an ESPN schedule. boxing and mma have none -- their games
+    come from the Odds API itself -- so they fell out of the only code path
+    that calls `fetch_and_store_odds`, and went unfetched from 2026-05-24
+    until this was noticed.
+    """
+    return [s for s in active_sports if s not in ESPN_TEAM_SPORTS]
+
+
+def fetch_windowless_odds(config, engine, sports) -> None:
+    """Fetch odds, and generate picks, for sports that get no window.
+
+    There is nothing to cluster a window around: these games are created by
+    the odds fetch itself. Failures are logged rather than raised -- boxing
+    being unavailable must not cost the rest of the scout.
+    """
+    if not sports:
+        return
+    api_key = config.get("odds_api_key")
+    if not api_key:
+        logger.info("No odds_api_key; skipping %s", ", ".join(sports))
+        return
+    budget = config.get("odds_budget", DEFAULT_BUDGET)
+    session = get_session(engine)
+    try:
+        asyncio.run(fetch_and_store_odds(session, list(sports), api_key,
+                                         budget=budget))
+        strategy = session.query(StrategyModel).filter(
+            StrategyModel.is_active == True,           # noqa: E712
+            StrategyModel.strategy_type == "game",
+        ).first()
+        if strategy is not None:
+            count = generate_and_store_picks(
+                session, strategy.id, date.today(), sports=tuple(sports))
+            logger.info("Generated %d picks for %s", count, ", ".join(sports))
+    except Exception:
+        logger.exception("Odds fetch failed for %s", ", ".join(sports))
+    finally:
+        session.close()
+
+
 def morning_scout(config, engine, scheduler, is_retry=False):
     session = get_session(engine)
     try:
@@ -190,6 +234,10 @@ def morning_scout(config, engine, scheduler, is_retry=False):
                 scheduler.remove_job(retry_id)
             except Exception:
                 pass
+
+        # Sports with no ESPN schedule never get a window, so this is the
+        # only thing that fetches their odds at all.
+        fetch_windowless_odds(config, engine, windowless_sports(active_sports))
 
         existing_jobs = {j.id for j in scheduler.get_jobs()}
         # Windows already due are collected here and run after every sport has

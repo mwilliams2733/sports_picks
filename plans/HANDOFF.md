@@ -2410,3 +2410,52 @@ Verified by re-running the sweep that died: 195 dates, **completed in 30s**,
 **The fix was not exercised against a real timeout on that run**: no retry
 warnings appeared, so the network was simply healthy. It is proven by the
 tests, not by reproducing the production failure.
+
+## Boxing odds were never fetched at all — 2026-09-19
+
+Not "games without odds". **Nothing fetched boxing or mma odds since
+2026-05-24**, and the rows that looked like unpriced fixtures were the
+residue of that last run.
+
+### The structural gap
+
+```
+fetch_and_store_odds  <- called ONLY from _run_window
+_run_window jobs      <- created only for scheduled_sports
+scheduled_sports      <- active_sports INTERSECT ESPN_TEAM_SPORTS
+ESPN_TEAM_SPORTS      <- ("nba","nfl","ncaab","ncaaf","mlb")
+```
+
+A window is clustered around ESPN start times, so it only exists for sports
+with an ESPN schedule. boxing and mma have none — *their games are created by
+the odds fetch itself* — so they fell out of the only code path that fetches
+odds. They are in `ALL_SPORTS` and in season all year, and were simply never
+reached.
+
+`windowless_sports()` and `fetch_windowless_odds()` now run from
+`morning_scout` for exactly those sports. Failures are logged, not raised:
+boxing being unavailable must not cost the rest of the scout.
+
+### Measured
+
+The Odds API had **39 boxing events**, 28 of them real upcoming fights. The
+table held none of those. After one fetch:
+
+| sport | upcoming games | with odds |
+|---|---|---|
+| boxing | 28 real fights | **28** |
+| mma | 41 | 35 |
+
+109 boxing and 92 mma odds rows stored, 2 credits.
+
+### Still open: the 2026-12-31 placeholder rows
+
+25 boxing and 10 mma games sit on `2026-12-31`, which is the Odds API's date
+for an undated event. They are not fixtures — they are speculative matchup
+markets: eleven different "Moses Itauma vs X", seven "Daniel Dubois vs X".
+
+**They will be picked on 2026-12-31**, because `generate_and_store_picks`
+filters on `Game.date == target_date` and nothing marks them as
+hypothetical. That is a latent problem, not a current one, and it is not
+fixed here. The cleanest signal is probably that a real fight's
+`commence_time` carries a time of day while these do not.
