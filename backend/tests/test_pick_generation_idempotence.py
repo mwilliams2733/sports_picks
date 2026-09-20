@@ -17,6 +17,21 @@ import pytest
 from backend.database import get_engine, get_session
 from backend.models import Base, Game, Odds, PickModel, StrategyModel, Team
 from backend.pipeline.pick_generator import generate_and_store_picks
+import backend.analysis.variants.ensemble as ens
+
+
+@pytest.fixture(autouse=True)
+def _markets_enabled(monkeypatch):
+    """Treat these fixtures' sports as validated for spreads.
+
+    SPREAD_VALIDATED_SPORTS is empty in production because the margin model
+    loses to the market line. This module is about idempotence and refresh
+    mechanics, and without a second market most of its fixtures would
+    produce only a moneyline -- or nothing -- and stop testing what they
+    claim to. test_spread_gate.py owns the gate decision.
+    """
+    monkeypatch.setattr(ens, "SPREAD_VALIDATED_SPORTS",
+                        frozenset({"mlb", "ncaaf", "nba"}))
 
 from backend.time_utils import et_today
 

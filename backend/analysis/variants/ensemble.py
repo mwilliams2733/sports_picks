@@ -109,6 +109,32 @@ USE_VENUE_SPLITS = False
 #: branch for the numbers behind the current contents.
 TOTALS_VALIDATED_SPORTS: frozenset[str] = frozenset()
 
+#: Sports where the spread model has been measured to predict the final
+#: margin better than the market line. Same contract as
+#: TOTALS_VALIDATED_SPORTS, and empty for the same reason.
+#:
+#: Shrinking the rolling margin made the predictor far less wrong -- nba
+#: 12.447 -> 11.832 mean absolute error over 1253 games, ncaaf 30.913 ->
+#: 26.043 -- and in doing so turned nfl from producing no spread picks into
+#: producing nine, because `max_edge` had been refusing every absurd claim.
+#: Less wrong is not right. Against the market line the model still loses
+#: everywhere there is data to check:
+#:
+#:     nba    11.832 vs  8.591        ncaab  14.525 vs  9.564
+#:     ncaaf  26.043 vs  8.176        mlb     3.308 vs  2.507
+#:
+#: A spread pick is a claim that the line is wrong. Made by a predictor
+#: measurably worse than that line, it is a claim we have no standing to
+#: make, and the edge it reports is mostly our own error.
+#:
+#: Read the baselines with their limits in view: ncaaf's 68 comparable games
+#: come from a single date and mlb's 23 from two. nba's 42 across 11 dates is
+#: the most credible and still shows a 3.2-point gap.
+#:
+#: Add a sport here when `backend.analysis.margin_report` says it beats the
+#: line on a sample worth the name, and put the numbers in this comment.
+SPREAD_VALIDATED_SPORTS: frozenset[str] = frozenset()
+
 
 class EnsembleStrategy(Strategy):
     _calibrated: CalibratedModel | None = None
@@ -182,8 +208,11 @@ class EnsembleStrategy(Strategy):
                     suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction),
                     factors=self._build_factors(game, "away")))
 
-        # Spread picks — distribution-based: P(cover) via normal CDF
-        if avg_odds.get("spread_home") is not None:
+        # Spread picks — distribution-based: P(cover) via normal CDF.
+        # Gated per sport on the margin model having been shown to beat the
+        # line; see SPREAD_VALIDATED_SPORTS.
+        if (avg_odds.get("spread_home") is not None
+                and game.sport in SPREAD_VALIDATED_SPORTS):
             predicted_diff, diff_std = self._predicted_point_diff_ml(game)
             spread_home = avg_odds["spread_home"]  # e.g., -3.5 for home favorite
             # Home covers when margin > abs(spread) for favorites

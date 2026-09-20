@@ -22,6 +22,19 @@ def _totals_enabled(monkeypatch):
     monkeypatch.setattr(ens, "TOTALS_VALIDATED_SPORTS",
                         frozenset({"nba", "ncaab"}))
 
+
+@pytest.fixture(autouse=True)
+def _spreads_enabled(monkeypatch):
+    """Treat nba as a validated spread sport for this module.
+
+    SPREAD_VALIDATED_SPORTS is empty in production for the same reason as
+    the totals one: the margin model loses to the market line everywhere
+    there is data. These tests are about the strategy's mechanics;
+    test_spread_gate.py owns the gate itself.
+    """
+    monkeypatch.setattr(ens, "SPREAD_VALIDATED_SPORTS",
+                        frozenset({"nba", "ncaab"}))
+
 def _stats(**kw):
     # points_for/points_against default to 105 each, so two default teams
     # predict a 210-point total -- the same value the old rating-based
