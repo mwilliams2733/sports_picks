@@ -270,6 +270,10 @@ def _store_games(session: Session, sport: str, target_date: date,
                 existing.espn_id = espn_id
             if g.get("season_type") and g["season_type"] != "unknown":
                 existing.season_type = g["season_type"]
+            if existing.week is None and g.get("week") is not None:
+                # Fill-if-null, unlike neutral_site: every row predating this
+                # is NULL, and a week never changes once ESPN has assigned it.
+                existing.week = g["week"]
             if "neutral_site" in g:
                 # ESPN is authoritative here and the Odds API carries no
                 # venue, so a row created from odds starts hosted and is
@@ -288,6 +292,7 @@ def _store_games(session: Session, sport: str, target_date: date,
             status=g["status"],
             neutral_site=g.get("neutral_site", False),
             season_type=g.get("season_type", "unknown"),
+            week=g.get("week"),
         )
         session.add(game)
         touched.append(game)

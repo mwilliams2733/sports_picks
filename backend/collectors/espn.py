@@ -41,6 +41,25 @@ def season_type_of(event: dict, competition: dict) -> str:
         return "allstar"
     return SEASON_TYPE_MAP.get((event.get("season") or {}).get("type"), "unknown")
 
+def week_of(event: dict) -> int | None:
+    """ESPN's week number for one event, or None where the sport has none.
+
+    Read from the EVENT rather than the scoreboard block: a scoreboard
+    response is keyed by the requested date and can carry a game filed under
+    a different week, so the event is the authoritative one for its own game.
+
+    None is not zero. ESPN omits the block entirely for sports without weeks
+    -- nba, mlb and ncaab return nothing at either level -- so the payload
+    itself says which sports have one and no allowlist is needed here. A
+    defaulted 0 would make "no such concept" indistinguishable from "week
+    zero", which ncaaf really does play.
+    """
+    number = (event.get("week") or {}).get("number")
+    if isinstance(number, bool) or not isinstance(number, (int, float)):
+        return None
+    return int(number)
+
+
 STATUS_MAP = {
     "STATUS_SCHEDULED": "scheduled",
     "STATUS_IN_PROGRESS": "in_progress",
@@ -81,6 +100,7 @@ class ESPNCollector:
                 # some feeds, so default to hosted rather than guessing.
                 "neutral_site": bool(competition.get("neutralSite", False)),
                 "season_type": season_type_of(event, competition),
+                "week": week_of(event),
             })
         return games
 
