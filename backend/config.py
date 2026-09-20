@@ -3,6 +3,7 @@ import os
 import pathlib
 from datetime import date
 import yaml
+from functools import lru_cache
 from dotenv import load_dotenv
 
 load_dotenv(override=False)
@@ -84,6 +85,60 @@ def load_config(path: str) -> dict:
     if api_key:
         config["odds_api_key"] = api_key
     return config
+
+def season_label(sport: str, game_date: date, seasons: dict) -> str:
+    """The canonical name of the season ``game_date`` falls in, for ``sport``.
+
+    One function, because three sites used to build this string three
+    different ways -- ``f"{y}-{str(y+1)[-2:]}"`` in the backtesting loader,
+    ``f"{y}-{y+1}"`` on the ESPN path and ``f"{y}"`` on the odds path -- so
+    the same season was recorded differently depending on which collector
+    happened to create the row. nba carried four labels for two seasons.
+
+    A season that crosses the new year is named for the year it STARTED:
+    ``2026-27`` covers September 2026 through February 2027. Deriving that
+    from the configured start date is what fixes the second form, which read
+    a January 2027 game's own year and called it ``2027-2028``.
+
+    A season contained in one calendar year -- mlb, and the year-round combat
+    sports -- is just that year.
+
+    The two-digit suffix matches the 1,237 nba rows already stored as
+    ``2025-26``: the canonical form is the one that does not require
+    rewriting the history.
+
+    Falls back to the bare year for an unknown sport or malformed config,
+    mirroring :func:`is_sport_in_season`, because a label that is merely
+    coarse beats refusing to store the game at all.
+    """
+    season = seasons.get(sport)
+    if not season:
+        return str(game_date.year)
+    try:
+        start_month, start_day = map(int, season["start"].split("-"))
+        end_month, end_day = map(int, season["end"].split("-"))
+    except (KeyError, ValueError, TypeError, AttributeError) as e:
+        logger.error("Malformed season config for %r (%r): %s", sport, season, e)
+        return str(game_date.year)
+
+    if (start_month, start_day) <= (end_month, end_day):
+        return str(game_date.year)          # contained in one calendar year
+
+    start_year = (game_date.year
+                  if (game_date.month, game_date.day) >= (start_month, start_day)
+                  else game_date.year - 1)
+    return f"{start_year}-{str(start_year + 1)[-2:]}"
+
+
+@lru_cache(maxsize=4)
+def seasons_config(path: str = "config.yaml") -> dict:
+    """The seasons block, cached so per-game labelling does not re-read YAML."""
+    try:
+        return load_config(path).get("seasons", {}) or {}
+    except (OSError, yaml.YAMLError) as e:
+        logger.error("Could not load seasons from %r: %s", path, e)
+        return {}
+
 
 def is_sport_in_season(sport: str, seasons: dict, today: date | None = None) -> bool:
     today = today or date.today()

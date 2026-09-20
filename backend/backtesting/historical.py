@@ -3,6 +3,7 @@ import logging
 from datetime import date, timedelta, datetime, timezone
 from sqlalchemy.orm import Session
 from backend.collectors.espn import ESPNCollector
+from backend.config import season_label, seasons_config
 from backend.models import Team, Game, EloRating
 from backend.time_utils import et_date
 
@@ -57,7 +58,7 @@ async def fetch_season_games(sport: str, season_year: int, rate_limit: float = 1
 
 def store_games(session: Session, sport: str, season_year: int, games: list[dict]) -> int:
     """Store fetched games into the database. Returns count of new games added."""
-    season_label = f"{season_year}-{str(season_year + 1)[-2:]}"
+    seasons = seasons_config()
     team_cache: dict[str, int] = {}
     count = 0
 
@@ -84,7 +85,8 @@ def store_games(session: Session, sport: str, season_year: int, games: list[dict
             continue
 
         game = Game(
-            sport=sport, season=season_label, date=et_date(g["date"]),
+            sport=sport, season=season_label(sport, et_date(g["date"]), seasons),
+            date=et_date(g["date"]),
             home_team_id=home_id, away_team_id=away_id,
             home_score=g["home_score"], away_score=g["away_score"],
             status=g["status"],
@@ -93,7 +95,7 @@ def store_games(session: Session, sport: str, season_year: int, games: list[dict
         count += 1
 
     session.commit()
-    logger.info(f"Stored {count} new {sport} games for season {season_label}")
+    logger.info(f"Stored {count} new {sport} games for {season_year}")
     return count
 
 

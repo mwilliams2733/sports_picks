@@ -3,6 +3,7 @@ import logging
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from sqlalchemy.orm import Session
+from backend.config import season_label, seasons_config
 from backend.collectors.espn import ESPNCollector
 from backend.time_utils import et_date
 from backend.collectors.odds_api import OddsAPICollector, redact_api_key
@@ -185,7 +186,7 @@ def _store_games(session: Session, sport: str, target_date: date,
     """
     team_cache: dict[str, int] = {}
     count = 0
-    season_label = f"{target_date.year}-{target_date.year + 1}"
+    seasons = seasons_config()
     # Rows we touched this run, so their point-in-time team_stats can be
     # (re)computed once scores have landed. See _refresh_team_stats below.
     touched: list[Game] = []
@@ -285,7 +286,8 @@ def _store_games(session: Session, sport: str, target_date: date,
             continue
 
         game = Game(
-            sport=sport, season=season_label, date=game_date,
+            sport=sport, season=season_label(sport, game_date, seasons),
+            date=game_date,
             start_time=start_time, espn_id=espn_id,
             home_team_id=home_id, away_team_id=away_id,
             home_score=g["home_score"], away_score=g["away_score"],
@@ -619,9 +621,10 @@ def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
         else:
             away_team = team
 
-    season_label = f"{game_date.year}"
+
     session.add(Game(
-        sport=sport, season=season_label, date=game_date,
+        sport=sport, season=season_label(sport, game_date, seasons_config()),
+        date=game_date,
         home_team_id=home_team.id, away_team_id=away_team.id,
         status="scheduled", odds_api_id=odds_api_id,
     ))
