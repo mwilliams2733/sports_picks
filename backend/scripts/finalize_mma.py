@@ -32,7 +32,7 @@ import asyncio
 import logging
 import os
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 
@@ -44,12 +44,24 @@ from backend.time_utils import et_today
 logger = logging.getLogger(__name__)
 
 
-def stuck_bouts(session, today: date) -> dict[date, list[Game]]:
-    """Scheduled mma games whose date has passed, grouped by date."""
-    rows = (session.query(Game)
-            .filter(Game.sport == "mma", Game.status == "scheduled",
-                    Game.date < today)
-            .order_by(Game.date.asc()).all())
+def stuck_bouts(session, today: date, *,
+                since: date | None = None) -> dict[date, list[Game]]:
+    """Scheduled mma games whose date has passed, grouped by date.
+
+    ``since`` is a date floor. It exists because an unmatched bout stays
+    stuck forever: the odds feed carries promotions ESPN's UFC scoreboard
+    does not cover, and on 2026-09-20 that was 64 bouts across 18 distinct
+    dates reaching back to 2026-03-16. Without a floor, a daily caller pays
+    one request per such date every morning for an answer that cannot
+    change, and the set only grows. Unbounded by default, because the
+    manual catch-up run wants exactly that.
+    """
+    q = (session.query(Game)
+         .filter(Game.sport == "mma", Game.status == "scheduled",
+                 Game.date < today))
+    if since is not None:
+        q = q.filter(Game.date >= since)
+    rows = q.order_by(Game.date.asc()).all()
     out: dict[date, list[Game]] = defaultdict(list)
     for g in rows:
         out[g.date].append(g)
@@ -90,7 +102,27 @@ async def _finalize(session, games_by_date, *, dry_run: bool) -> dict:
     return summary
 
 
-def run(db_path: str, *, dry_run: bool = False, today: date | None = None) -> dict:
+def finalize_stuck_bouts(session, today: date | None = None, *,
+                         lookback_days: int | None = None,
+                         dry_run: bool = False) -> dict:
+    """Finalize matchable stuck bouts on an open session. Returns a summary.
+
+    The session-level entry point, so a caller that already holds one (the
+    morning scout) shares its transaction instead of opening a second
+    connection to the same database. ``run`` is this plus the engine setup,
+    so the scheduled path and the CLI cannot drift.
+
+    ``lookback_days`` bounds how far back dates are requested; ``None``
+    means all history. See `stuck_bouts`.
+    """
+    today = today or et_today()
+    since = today - timedelta(days=lookback_days) if lookback_days else None
+    return asyncio.run(_finalize(
+        session, stuck_bouts(session, today, since=since), dry_run=dry_run))
+
+
+def run(db_path: str, *, dry_run: bool = False, today: date | None = None,
+        lookback_days: int | None = None) -> dict:
     """Finalize every matchable stuck mma bout. Returns a summary.
 
     Raises ``FileNotFoundError`` if ``db_path`` does not exist: otherwise the
@@ -106,9 +138,8 @@ def run(db_path: str, *, dry_run: bool = False, today: date | None = None) -> di
     run_migrations(engine)
     session = get_session(engine)
     try:
-        return asyncio.run(_finalize(
-            session, stuck_bouts(session, today or et_today()),
-            dry_run=dry_run))
+        return finalize_stuck_bouts(session, today, dry_run=dry_run,
+                                    lookback_days=lookback_days)
     finally:
         session.close()
 

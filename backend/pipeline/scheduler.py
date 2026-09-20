@@ -12,6 +12,7 @@ from backend.pipeline.full_pipeline import (
     fetch_and_store_games, fetch_and_store_odds, fetch_and_store_props, ALL_SPORTS,
 )
 from backend.pipeline.pick_generator import generate_and_store_picks
+from backend.scripts.finalize_mma import finalize_stuck_bouts
 from backend.pipeline.prop_pipeline import run_prop_pipeline
 from backend.pipeline.grader import grade_pick, grade_prop_pick, payout_for, capture_closing_odds, grade_completed_games
 from backend.collectors.espn_box_score import collect_box_scores_for_final_games
@@ -76,10 +77,12 @@ def _build_window(games: list[dict]) -> dict:
 #: gap is visible.
 LOOKBACK_DAYS = 3
 
-#: Team sports whose games come from ESPN's scoreboard. mma and boxing are
-#: excluded deliberately: fetch_ufc_events writes their finals directly and
-#: grade_completed_games owns their Elo, so pulling them through this path
-#: would create a second writer for the same rows.
+#: Team sports whose games come from ESPN's scoreboard, which is keyed by
+#: team abbreviation. mma is excluded because a bout is keyed by fighter
+#: pair instead: `finalize_stuck_bouts` owns its finals, and it runs below.
+#: Boxing is excluded because ESPN publishes no boxing scoreboard at all --
+#: its rows need a source this repository does not have, and are left
+#: `scheduled` rather than guessed at.
 ESPN_TEAM_SPORTS = ("nba", "nfl", "ncaab", "ncaaf", "mlb")
 
 
@@ -193,6 +196,22 @@ def morning_scout(config, engine, scheduler, is_retry=False):
             collect_box_scores_for_final_games(session)
         except Exception:
             logger.exception("Box score collection failed; grading with what is present")
+        # Before grading, not after: grade_completed_games applies combat
+        # Elo and grades a bout's picks in the same pass, so a bout
+        # finalized after it would sit a full day waiting for tomorrow's
+        # scout. Bounded by the same LOOKBACK_DAYS the scoreboard windows
+        # use -- an unmatched bout is unmatchable forever (non-UFC
+        # promotions ESPN does not cover), so re-asking about all of them
+        # every morning is a permanently growing bill for an answer that
+        # cannot change.
+        try:
+            mma = finalize_stuck_bouts(session, lookback_days=LOOKBACK_DAYS)
+            if mma["finalized"]:
+                logger.info("Finalized %d mma bout(s) over %d date(s)",
+                            mma["finalized"], mma["dates"])
+        except Exception:
+            logger.exception(
+                "mma finalization failed; grading with what is present")
         grade_pending_picks(session)
         grade_completed_games(session)
         active_sports = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]
