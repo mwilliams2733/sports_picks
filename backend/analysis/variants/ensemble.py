@@ -138,17 +138,17 @@ class EnsembleStrategy(Strategy):
             home_edge = (home_prob - implied_home) * 100
             away_edge = (away_prob - implied_away) * 100
             if _takeable(home_edge, "moneyline"):
-                models = self._count_agreeing_models(game, "home")
+                models, available = self._count_agreeing_models(game, "home")
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="HOME ML",
-                    confidence=calculate_confidence(home_edge, models, self.thresholds), edge_pct=round(home_edge, 1),
+                    confidence=calculate_confidence(home_edge, models, self.thresholds, available), edge_pct=round(home_edge, 1),
                     model_probability=round(home_prob, 4), implied_probability=round(implied_home, 4),
                     odds_at_pick=avg_odds["moneyline_home"],
                     suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction),
                     factors=self._build_factors(game, "home")))
             elif _takeable(away_edge, "moneyline"):
-                models = self._count_agreeing_models(game, "away")
+                models, available = self._count_agreeing_models(game, "away")
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
-                    confidence=calculate_confidence(away_edge, models, self.thresholds), edge_pct=round(away_edge, 1),
+                    confidence=calculate_confidence(away_edge, models, self.thresholds, available), edge_pct=round(away_edge, 1),
                     model_probability=round(away_prob, 4), implied_probability=round(implied_away, 4),
                     odds_at_pick=avg_odds["moneyline_away"],
                     suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction),
@@ -166,23 +166,23 @@ class EnsembleStrategy(Strategy):
             home_spread_edge = (home_cover_prob - spread_fair) * 100
             away_spread_edge = (away_cover_prob - spread_fair) * 100
             if _takeable(home_spread_edge, "spread"):
-                models = self._count_agreeing_models(game, "home")
+                models, available = self._count_agreeing_models(game, "home")
                 pick_value = f"HOME {spread_home:+g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="spread",
                     pick_value=pick_value,
-                    confidence=calculate_confidence(home_spread_edge, models, self.thresholds),
+                    confidence=calculate_confidence(home_spread_edge, models, self.thresholds, available),
                     edge_pct=round(home_spread_edge, 1),
                     model_probability=round(home_cover_prob, 4),
                     implied_probability=spread_fair,
                     odds_at_pick=-110,
                     suggested_unit_size=fractional_kelly(home_cover_prob, -110, kelly_fraction)))
             elif _takeable(away_spread_edge, "spread"):
-                models = self._count_agreeing_models(game, "away")
+                models, available = self._count_agreeing_models(game, "away")
                 spread_away = avg_odds["spread_away"]
                 pick_value = f"AWAY +{spread_away:g}" if spread_away >= 0 else f"AWAY {spread_away:g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="spread",
                     pick_value=pick_value,
-                    confidence=calculate_confidence(away_spread_edge, models, self.thresholds),
+                    confidence=calculate_confidence(away_spread_edge, models, self.thresholds, available),
                     edge_pct=round(away_spread_edge, 1),
                     model_probability=round(away_cover_prob, 4),
                     implied_probability=spread_fair,
@@ -234,22 +234,22 @@ class EnsembleStrategy(Strategy):
             over_edge = (over_prob - ou_fair) * 100
             under_edge = (under_prob - ou_fair) * 100
             if _takeable(over_edge, "over_under"):
-                models = self._count_total_agreeing_models(game, True)
+                models, available = self._count_total_agreeing_models(game, True)
                 pick_value = f"Over {ou_line:g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="over_under",
                     pick_value=pick_value,
-                    confidence=calculate_confidence(over_edge, models, self.thresholds),
+                    confidence=calculate_confidence(over_edge, models, self.thresholds, available),
                     edge_pct=round(over_edge, 1),
                     model_probability=round(over_prob, 4),
                     implied_probability=ou_fair,
                     odds_at_pick=-110,
                     suggested_unit_size=fractional_kelly(over_prob, -110, kelly_fraction)))
             elif _takeable(under_edge, "over_under"):
-                models = self._count_total_agreeing_models(game, False)
+                models, available = self._count_total_agreeing_models(game, False)
                 pick_value = f"Under {ou_line:g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="over_under",
                     pick_value=pick_value,
-                    confidence=calculate_confidence(under_edge, models, self.thresholds),
+                    confidence=calculate_confidence(under_edge, models, self.thresholds, available),
                     edge_pct=round(under_edge, 1),
                     model_probability=round(under_prob, 4),
                     implied_probability=ou_fair,
@@ -464,33 +464,66 @@ class EnsembleStrategy(Strategy):
         """Probability that total points exceeds the O/U line."""
         return float(norm.sf(ou_line, loc=predicted_total, scale=std))
 
-    def _count_total_agreeing_models(self, game: GameData, is_over: bool) -> int:
-        """Count models that agree with over/under prediction."""
-        hs, aws = game.home_stats, game.away_stats
-        count = 0
-        # Pace-based: high pace suggests over
-        avg_pace = (hs.pace + aws.pace) / 2
-        if is_over and avg_pace > 100: count += 1
-        elif not is_over and avg_pace <= 100: count += 1
-        # Offensive rating: high combined offense suggests over
-        combined_off = hs.offensive_rating + aws.offensive_rating
-        if is_over and combined_off > 200: count += 1
-        elif not is_over and combined_off <= 200: count += 1
-        # Defensive rating: high combined defense (bad defense) suggests over
-        combined_def = hs.defensive_rating + aws.defensive_rating
-        if is_over and combined_def > 200: count += 1
-        elif not is_over and combined_def <= 200: count += 1
-        return count
+    def _count_total_agreeing_models(self, game: GameData,
+                                     is_over: bool) -> tuple[int, int]:
+        """No model evidence is available for totals. Returns ``(0, 0)``.
 
-    def _count_agreeing_models(self, game: GameData, side: str) -> int:
-        count = 0
+        This used to weigh three signals -- average pace, combined offensive
+        rating, combined defensive rating -- against the constants 100, 200
+        and 200. All three read stats this repository deliberately never
+        computes: they require possessions, and no collector fetches them
+        (see the "What is deliberately NOT computed" note in
+        `backend/pipeline/team_stats.py`). Both sides therefore carried the
+        100.0 default, every comparison landed exactly on its constant, and
+        `<=` handed all three to the under: **every under scored 3 of 3 and
+        every over 0 of 3, for every game in every sport.** In the database
+        that is all 42 ncaab tier-5 picks being unders, and every over across
+        boxing, mlb, mma and ncaaf pinned to tier 1. The tier recorded which
+        side of the bet it was, not how good it was.
+
+        Reporting nothing is the honest answer while the inputs do not exist,
+        and it keeps totals at tier 1 until they do. The edge still decides
+        whether the pick is taken at all; only the confidence claim is
+        withdrawn. If possessions are ever collected, this becomes a real
+        counter again and `models_available` rises with it.
+        """
+        return 0, 0
+
+    def _count_agreeing_models(self, game: GameData,
+                               side: str) -> tuple[int, int]:
+        """Return ``(agreeing, available)`` for one side of a game.
+
+        A signal is *available* when it separates the two teams at all, and
+        *agreeing* when it favours ``side``. The distinction is the whole
+        point: a tie is absence of evidence, not evidence against, and
+        counting it as a dissenting vote is what made tier 5 unreachable.
+
+        The third signal, net rating, is the reason. `offensive_rating` and
+        `defensive_rating` are never computed (they need possessions, which
+        nothing fetches), so both sides read the same 100.0 default and their
+        difference is `0.0` for every game ever played. It could never agree,
+        so no pick from this path could ever reach the 3 votes tier 5 asks
+        for. Treating it as unavailable restores the top tier to games where
+        the signals that do exist are unanimous.
+
+        The same arithmetic covers a team with no history: point_diff 0 and
+        the Elo seed on both sides tie as well, so nothing is available and
+        the tier is capped at 1 -- which is what ncaaf's 119 picks, every one
+        of them tier 1, were really saying before the games were backfilled.
+        """
         hs, aws = game.home_stats, game.away_stats
-        if side == "home":
-            if hs.point_diff > aws.point_diff: count += 1
-            if hs.elo_rating > aws.elo_rating: count += 1
-            if (hs.offensive_rating - hs.defensive_rating) > (aws.offensive_rating - aws.defensive_rating): count += 1
-        else:
-            if aws.point_diff > hs.point_diff: count += 1
-            if aws.elo_rating > hs.elo_rating: count += 1
-            if (aws.offensive_rating - aws.defensive_rating) > (hs.offensive_rating - hs.defensive_rating): count += 1
-        return count
+        mine, theirs = (hs, aws) if side == "home" else (aws, hs)
+        pairs = (
+            (mine.point_diff, theirs.point_diff),
+            (mine.elo_rating, theirs.elo_rating),
+            (mine.offensive_rating - mine.defensive_rating,
+             theirs.offensive_rating - theirs.defensive_rating),
+        )
+        agreeing = available = 0
+        for ours, theirs_value in pairs:
+            if ours == theirs_value:
+                continue
+            available += 1
+            if ours > theirs_value:
+                agreeing += 1
+        return agreeing, available
