@@ -2523,3 +2523,55 @@ Bookmaker count is not a usable second signal — these carry 0-2 books, but so
 does a real small-hall fight (Nelson Birchall vs Lewis Morris, 1 book, a
 genuine 2026-09-26 bout). A horizon cap would catch the 2027 rows but not
 2026-12-31, which is only three months out.
+
+## The placeholder rows: the feed moves dates, and every move made a row
+
+The seven leftovers were not seven markets. The Odds API **drifts** the
+placeholder date it gives an undated event, and `_ensure_game_from_odds`
+matched on `(sport, date, teams)`, so each drift looked like a new fixture:
+
+| stored | pairing | feed now says |
+|---|---|---|
+| 2026-12-31 | Makhachev v Usman | 2027-07-02 |
+| 2027-07-01 | Makhachev v Usman | 2027-07-02 |
+| 2027-07-02 | Makhachev v Usman | 2027-07-02 |
+
+One market, three rows. Holloway/Pimblett and Pimblett/McGregor were each a
+day off the live date, so the next fetch would have made two more.
+
+### The fix is the one that already worked for ESPN
+
+The Odds API gives every event a stable id. The collector has always returned
+it as `odds_api_id` and it was **discarded for want of a column** — exactly
+the situation `espn_id` was in. `games.odds_api_id` now exists, is matched
+first, moves the date when the feed moves it, and is adopted onto rows that
+predate it.
+
+Coverage after one fetch: boxing 28/28 upcoming carry an id, mma 22/26.
+
+### Cleanup
+
+Seven rows became four. Two were stale (Aspinall/Gane, Dalton Smith/Azim —
+no longer in the feed at all), two were duplicates of the Makhachev market,
+and one was stranded: its date had *already* drifted, so the
+`(sport, date, teams)` adoption path could not reach it and a fresh row was
+created alongside. 0 picks and 0 graded results depended on any of them.
+
+### The four that remain, and why
+
+```
+2026-12-31  Max Holloway vs Paddy Pimblett
+2026-12-31  Conor McGregor vs Jorge Masvidal
+2027-07-01  Islam Makhachev vs Kamaru Usman
+2027-07-10  Paddy Pimblett vs Conor McGregor
+```
+
+One-off futures: no competitor faces two opponents **on the same date**, so
+the invariant cannot see them. They will no longer multiply, because each
+now carries its event id.
+
+A cross-date rule would catch three of them — Pimblett appears in two pending
+bouts and McGregor in two. It was **not** added: a fighter can legitimately
+have a next fight announced while another is booked, and the cost of a false
+positive here is deleting a real bout. Worth revisiting with more evidence
+than one snapshot.

@@ -27,6 +27,13 @@ class Game(Base):
     #: rows were identified by (date, teams) instead -- which cannot connect
     #: the same game arriving under two date conventions.
     espn_id = Column(String, nullable=True, index=True)
+    #: The Odds API's stable event id. Captured by the collector since the
+    #: beginning and discarded for want of a column, so a game was identified
+    #: by (sport, date, teams) instead -- which cannot recognise the same
+    #: event after the feed moves its date. The API drifts the placeholder
+    #: date it uses for undated events, so one Makhachev-Usman future
+    #: accumulated three rows.
+    odds_api_id = Column(String, nullable=True, index=True)
     date = Column(Date, nullable=False)
     start_time = Column(DateTime, nullable=True)
     home_team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)

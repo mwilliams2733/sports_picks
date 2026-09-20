@@ -241,6 +241,27 @@ def migrate_game_season_type(engine):
                     "VARCHAR NOT NULL DEFAULT 'unknown'"))
 
 
+def migrate_game_odds_api_id(engine):
+    """Add games.odds_api_id if missing.
+
+    The Odds API's stable event id. Without it a game is identified by
+    (sport, date, teams), which cannot recognise the same event once the feed
+    moves its date -- and the feed does move the placeholder date it uses for
+    undated events.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "games" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("games")]
+        if "odds_api_id" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE games ADD COLUMN odds_api_id VARCHAR"))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_games_odds_api_id "
+                    "ON games (odds_api_id)"))
+
+
 MIGRATIONS = (
     migrate_api_usage,
     migrate_game_start_time,
@@ -255,6 +276,7 @@ MIGRATIONS = (
     migrate_pick_odds_reconstructed,
     migrate_game_neutral_site,
     migrate_game_season_type,
+    migrate_game_odds_api_id,
 )
 
 

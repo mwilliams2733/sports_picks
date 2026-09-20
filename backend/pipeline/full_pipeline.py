@@ -512,6 +512,21 @@ def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
     # against game rows that are now Eastern-dated. Using a different
     # convention here would recreate the very split this fixes.
     game_date = et_date(commence)
+    odds_api_id = event.get("odds_api_id")
+
+    # The Odds API's own event id is the only stable identity this path has.
+    # Matching on it first is what lets the same event be recognised after the
+    # feed moves its date -- which it does for the placeholder date it gives
+    # an undated event, so one future accumulated a row per drift.
+    if odds_api_id:
+        existing = session.query(Game).filter(
+            Game.sport == sport, Game.odds_api_id == odds_api_id).first()
+        if existing is not None:
+            if existing.date != game_date:
+                logger.info("Odds event %s moved: %s -> %s (game %s)",
+                            odds_api_id, existing.date, game_date, existing.id)
+                existing.date = game_date
+            return
 
     # Resolve BEFORE the duplicate check below: that check is gated on both
     # sides resolving, so an unmatched label used to skip it and insert a twin
@@ -535,6 +550,10 @@ def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
             .first()
         )
         if existing:
+            # Rows predating the column adopt the id as they are seen, so the
+            # next date drift matches above instead of inserting a twin.
+            if odds_api_id and existing.odds_api_id is None:
+                existing.odds_api_id = odds_api_id
             return
 
     # Create teams only if they don't exist.
@@ -577,7 +596,7 @@ def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
     session.add(Game(
         sport=sport, season=season_label, date=game_date,
         home_team_id=home_team.id, away_team_id=away_team.id,
-        status="scheduled",
+        status="scheduled", odds_api_id=odds_api_id,
     ))
     session.commit()
 
