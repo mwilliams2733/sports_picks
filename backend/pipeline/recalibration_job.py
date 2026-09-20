@@ -26,11 +26,14 @@ def run_recalibration(db_path: str = "sports_picks.db") -> dict:
     """
     engine = get_engine(db_path)
     session = get_session(engine)
-    summary = {"graded": 0, "recalibrated": {}, "model_retrained": False}
+    summary = {"graded": 0, "graded_paper": 0, "recalibrated": {},
+               "model_retrained": False}
 
     try:
         # Step 1: Grade remaining picks
-        grade_pending_picks(session)
+        graded = grade_pending_picks(session)
+        summary["graded"] = graded["strategy"]
+        summary["graded_paper"] = graded["paper"]
 
         # Step 2: Recalibrate confidence thresholds per sport
         for sport in RECALIBRATED_SPORTS:

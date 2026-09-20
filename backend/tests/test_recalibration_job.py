@@ -12,7 +12,8 @@ from backend.models import Game, PickModel, PickResult, StrategyModel, Team
 from backend.pipeline.recalibration_job import RECALIBRATED_SPORTS, run_recalibration
 
 
-def _seed(db_path: str, sport: str, *, wins: int, losses: int) -> None:
+def _seed(db_path: str, sport: str, *, wins: int, losses: int,
+          ungraded: int = 0) -> None:
     engine = get_engine(db_path)
     run_migrations(engine)
     session = get_session(engine)
@@ -23,7 +24,7 @@ def _seed(db_path: str, sport: str, *, wins: int, losses: int) -> None:
     strat = StrategyModel(name="t", sport=sport, config_json="{}")
     session.add(strat)
     session.commit()
-    for i in range(wins + losses):
+    for i in range(wins + losses + ungraded):
         game = Game(
             sport=sport, season="2026", date=date(2026, 6, i % 28 + 1),
             home_team_id=t1.id, away_team_id=t2.id,
@@ -38,6 +39,8 @@ def _seed(db_path: str, sport: str, *, wins: int, losses: int) -> None:
         )
         session.add(pick)
         session.commit()
+        if i >= wins + losses:
+            continue  # left ungraded on purpose, for the job to grade
         session.add(PickResult(
             pick_id=pick.id,
             result="win" if i < wins else "loss",
@@ -64,3 +67,16 @@ def test_both_loops_share_one_sport_list():
     # No loop may carry its own inline list of sports.
     assert "for sport in (" not in src
     assert "mlb" in RECALIBRATED_SPORTS
+
+
+def test_summary_reports_what_was_actually_graded(tmp_path):
+    """`summary["graded"]` was initialised to 0 and never assigned.
+
+    `grade_pending_picks` counted its work, logged it, and returned None, so
+    the job reported "graded: 0" in the same breath as a log line saying it
+    had graded 122 picks. A summary that cannot be wrong is not a summary.
+    """
+    db = str(tmp_path / "t.db")
+    _seed(db, "mlb", wins=18, losses=22, ungraded=7)
+    summary = run_recalibration(db)
+    assert summary["graded"] == 7, summary

@@ -361,7 +361,14 @@ def _run_window(config, engine, sport: str, window: dict):
         session.close()
 
 
-def grade_pending_picks(session):
+def grade_pending_picks(session) -> dict:
+    """Grade every pick whose game has finished. Returns what it did.
+
+    The counts are returned rather than only logged because the nightly job
+    reports them: it used to print "graded: 0" beside a log line saying 122
+    picks had just been graded, because this function computed both numbers
+    and threw them away.
+    """
     ungraded = (
         session.query(PickModel, Game)
         .join(Game, PickModel.game_id == Game.id)
@@ -456,6 +463,8 @@ def grade_pending_picks(session):
 
     session.commit()
     logger.info(f"Auto-graded {paper_graded} paper picks")
+    return {"strategy": len(ungraded) - skipped, "skipped": skipped,
+            "paper": paper_graded}
 
 
 async def fetch_pitcher_scores_for_date(target_date) -> dict[tuple[str, str], dict[str, float]]:
