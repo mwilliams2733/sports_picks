@@ -28,8 +28,14 @@ def _stats(**kw):
     # formula produced for these fixtures, which keeps the totals tests below
     # asserting what they always asserted. Pass None to exercise the guard
     # that refuses a pick when a team has no scoring history.
+    # last_n_record sums to the games the rolling point_diff was averaged
+    # over, which is what `shrink_margin` discounts by. A full window is the
+    # neutral default: a fixture asserting a team averages +10 a game is
+    # describing a team that has played, and n=0 would shrink every margin in
+    # this file to zero and quietly stop the spread tests testing anything.
+    # Tests about a team with little history pass last_n_record explicitly.
     defaults = dict(point_diff=0.0, home_record=(0, 0), away_record=(0, 0),
-        last_n_record=(0, 0), offensive_rating=100.0, defensive_rating=100.0,
+        last_n_record=(5, 5), offensive_rating=100.0, defensive_rating=100.0,
         pace=100.0, strength_of_schedule=0.5, elo_rating=1500.0, rest_days=2,
         points_for=105.0, points_against=105.0)
     defaults.update(kw)

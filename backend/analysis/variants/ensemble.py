@@ -37,6 +37,34 @@ logger = logging.getLogger(__name__)
 #: Override per strategy with config["max_edge"].
 DEFAULT_MAX_EDGE = 20.0
 
+#: How many games of evidence a rolling margin needs before it is taken at
+#: close to face value. Measured, not chosen: `backend.analysis.margin_report`
+#: sweeps it against realised margins, and 5 minimises mean absolute error in
+#: each of the three sports that carry any signal -- nba (1253 games over 175
+#: dates, 12.45 -> 11.83), ncaaf (260 over 12, 30.91 -> 26.04) and ncaab (72
+#: over 8, 16.19 -> 14.53). The minimum is flat either side of 5, so this is
+#: not fitted to a spike, and the same value winning in three sports is why it
+#: is one constant rather than a per-sport table.
+#:
+#: mlb shows no signal at all (a gain of 0.001 over predicting nothing) and
+#: nfl cannot be measured yet (17 games over 5 dates). Neither argues for a
+#: different k; both argue that the spread model is weak, which the report
+#: says plainly.
+MARGIN_SHRINKAGE_K = 5.0
+
+
+def shrink_margin(point_diff: float, games: int) -> float:
+    """Regress a rolling mean margin toward zero by how little it rests on.
+
+    ``games`` is how many games the mean was averaged over, capped by the
+    rolling window. Zero games returns zero: no evidence is not the same as
+    evidence of no difference, and the caller must not read the difference of
+    two seeds as a prediction.
+    """
+    if games <= 0:
+        return 0.0
+    return point_diff * games / (games + MARGIN_SHRINKAGE_K)
+
 #: Whether the totals model uses opponent-adjusted scoring rates, which
 #: shift each prior game by how much that opponent usually concedes or
 #: scores relative to the league.
@@ -396,9 +424,21 @@ class EnsembleStrategy(Strategy):
         return max(0.01, min(0.99, prob))
 
     def _predicted_point_diff(self, game: GameData) -> float:
-        """Predict home margin of victory using model components."""
+        """Predict the home margin from both sides' rolling mean margins.
+
+        Each side is shrunk toward zero first. Taking the raw difference is
+        what produced a predicted +39 and -45 in NFL week 2, when every team
+        had one or two games: cover probabilities of 0.9936 and 0.0002, edges
+        up to 50%, and `max_edge` correctly refusing all of them, so the sport
+        produced no spread picks at all.
+
+        ``last_n_record`` sums to the number of games the mean was actually
+        averaged over -- the rolling window, not the season -- which is the
+        quantity the shrinkage is calibrated against.
+        """
         hs, aws = game.home_stats, game.away_stats
-        return hs.point_diff - aws.point_diff
+        return (shrink_margin(hs.point_diff, sum(hs.last_n_record))
+                - shrink_margin(aws.point_diff, sum(aws.last_n_record)))
 
     def _predicted_total(self, game: GameData) -> float:
         """Predict total score as the mean of both teams' typical game totals.
