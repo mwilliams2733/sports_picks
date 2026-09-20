@@ -10,7 +10,7 @@ import pytest
 
 from backend.database import get_engine, get_session
 from backend.models import Base, Game, Team
-from backend.scripts.backfill_neutral_site import dates_to_check, run
+from backend.scripts.backfill_game_flags import dates_to_check, run
 from backend.tests.test_espn_game_identity import NBA_SB, _event
 
 pytestmark = pytest.mark.httpx_mock(
@@ -37,11 +37,20 @@ def _db(tmp_path, rows):
     return str(db)
 
 
-def _game(gid, espn_id, home=1, away=2, day=DAY, neutral=False):
+def _game(gid, espn_id, home=1, away=2, day=DAY, neutral=False,
+          season_type="unknown"):
     return Game(id=gid, sport="nba", season="2025-26", date=day,
                 espn_id=espn_id, home_team_id=home, away_team_id=away,
                 status="final", home_score=100, away_score=99,
-                neutral_site=neutral)
+                neutral_site=neutral, season_type=season_type)
+
+
+def _season_type_of(db, gid):
+    session = get_session(get_engine(db))
+    try:
+        return session.query(Game).filter(Game.id == gid).one().season_type
+    finally:
+        session.close()
 
 
 def _neutral_of(db, gid):
@@ -236,3 +245,68 @@ def test_a_row_no_neighbour_lists_is_still_left_alone(tmp_path, httpx_mock):
 
     assert _neutral_of(db, 1) is True
     assert summary["per_sport"]["nba"]["no_match"] == 1
+
+
+# --------------------------------------------------------------------------
+# season_type.
+#
+# Postseason basketball scores far less than the regular season -- the model
+# misses those games by -17.09 points on average (t = -3.80) -- and nothing
+# already stored distinguishes them. A long layoff is NOT a usable proxy: of
+# 33 long-layoff nba games only 10 are postseason, and the other 23 are
+# in-season breaks that need +2.08 rather than a large negative.
+# --------------------------------------------------------------------------
+
+def test_the_season_phase_is_recorded(tmp_path, httpx_mock):
+    db = _db(tmp_path, [_game(1, "401")])
+    _scoreboard(httpx_mock, [
+        _event("401", "MIA", "ORL", "STATUS_FINAL", 100, 99, season_type=3)])
+
+    run(db, sports=("nba",))
+
+    assert _season_type_of(db, 1) == "postseason"
+
+
+def test_a_regular_season_game_is_recorded_as_such(tmp_path, httpx_mock):
+    db = _db(tmp_path, [_game(1, "401")])
+    _scoreboard(httpx_mock, [
+        _event("401", "MIA", "ORL", "STATUS_FINAL", 100, 99, season_type=2)])
+
+    run(db, sports=("nba",))
+
+    assert _season_type_of(db, 1) == "regular"
+
+
+def test_an_all_star_game_is_labelled(tmp_path, httpx_mock):
+    """Three of these sit in the table as nba finals with totals near 80."""
+    db = _db(tmp_path, [_game(1, "401")])
+    _scoreboard(httpx_mock, [
+        _event("401", "MIA", "ORL", "STATUS_FINAL", 42, 40, season_type=4)])
+
+    run(db, sports=("nba",))
+
+    assert _season_type_of(db, 1) == "allstar"
+
+
+def test_an_unknown_phase_never_overwrites_a_known_one(tmp_path, httpx_mock):
+    """ESPN saying nothing is not ESPN saying 'regular'."""
+    db = _db(tmp_path, [_game(1, "401", season_type="postseason")])
+    _scoreboard(httpx_mock, [
+        _event("401", "MIA", "ORL", "STATUS_FINAL", 100, 99)])   # no season
+
+    run(db, sports=("nba",))
+
+    assert _season_type_of(db, 1) == "postseason"
+
+
+def test_both_flags_are_filled_in_one_pass(tmp_path, httpx_mock):
+    db = _db(tmp_path, [_game(1, "401")])
+    _scoreboard(httpx_mock, [
+        _event("401", "MIA", "ORL", "STATUS_FINAL", 100, 99,
+               neutral=True, season_type=3)])
+
+    summary = run(db, sports=("nba",))
+
+    assert _neutral_of(db, 1) is True
+    assert _season_type_of(db, 1) == "postseason"
+    assert summary["per_sport"]["nba"]["changed"] == 1, "counted twice"

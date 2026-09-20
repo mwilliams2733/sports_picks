@@ -105,6 +105,10 @@ class GameData:
     #: showcase). Home advantage does not apply, so the model's per-sport
     #: home slot must not fire. Mirrors `Game.neutral_site`.
     neutral_site: bool = False
+    #: ESPN's season phase for this game: "regular", "postseason",
+    #: "preseason", "allstar" or "unknown". The totals model corrects a
+    #: measured per-sport bias on it.
+    season_type: str = "unknown"
     home_fighter: "FighterStats | None" = None
     away_fighter: "FighterStats | None" = None
 

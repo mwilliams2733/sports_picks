@@ -62,6 +62,33 @@ def get_point_diff_std(sport: str) -> float:
     return POINT_DIFF_STD.get(sport, 12.0)
 
 
+#: Measured mean error of the totals model by (sport, season phase), in
+#: points of total. Subtracted from the prediction.
+#:
+#: Only entries that were measured appear. nba postseason scores far less
+#: than the regular season -- 210.5 against 231.1 -- and the model, fitted
+#: on regular-season scoring rates, misses those games by -17.09 on average
+#: (n=21, sd 20.6, t = -3.80).
+#:
+#: This is ONE postseason of evidence and the interval is wide, roughly
+#: -26.5 to -7.7. The direction is not in doubt; the magnitude is. Re-measure
+#: with `backend.analysis.totals_report` as playoffs accumulate.
+#:
+#: Deliberately keyed on (sport, phase) rather than phase alone: ncaab
+#: postseason shows no bias at all (-1.58, t = -0.50, n=20), because a
+#: single-elimination tournament is played at roughly regular-season pace
+#: while an nba playoff series is not. A global playoff correction would
+#: have been wrong for it.
+TOTAL_BIAS_BY_PHASE = {
+    ("nba", "postseason"): -17.1,
+}
+
+
+def get_total_bias(sport: str, season_type: str) -> float:
+    """Measured bias for this sport and phase, or 0.0 when unmeasured."""
+    return TOTAL_BIAS_BY_PHASE.get((sport, season_type), 0.0)
+
+
 def get_total_points_std(sport: str) -> float:
     return TOTAL_POINTS_STD.get(sport, 15.0)
 

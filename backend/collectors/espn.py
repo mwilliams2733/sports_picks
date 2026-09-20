@@ -12,6 +12,15 @@ SPORT_URLS = {
 }
 # Boxing has no ESPN scoreboard API — games come from Odds API only
 
+#: ESPN's numeric season phase. Read from the EVENT, not the league block,
+#: which still reports 2 on a playoff date.
+SEASON_TYPE_MAP = {
+    1: "preseason",
+    2: "regular",
+    3: "postseason",
+    4: "allstar",
+}
+
 STATUS_MAP = {
     "STATUS_SCHEDULED": "scheduled",
     "STATUS_IN_PROGRESS": "in_progress",
@@ -51,6 +60,8 @@ class ESPNCollector:
                 # ESPN marks tournament and showcase games here. Absent on
                 # some feeds, so default to hosted rather than guessing.
                 "neutral_site": bool(competition.get("neutralSite", False)),
+                "season_type": SEASON_TYPE_MAP.get(
+                    (event.get("season") or {}).get("type"), "unknown"),
             })
         return games
 

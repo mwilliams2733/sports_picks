@@ -2166,3 +2166,65 @@ That is a far larger effect than opponent strength (which moved MAE by 0.11)
 and it is a bias, not noise. n=21 is too thin to calibrate a correction, and
 the postseason data is sparse for other reasons, but a phase indicator is the
 obvious next lever if playoff coverage improves.
+
+## The postseason bias, fixed — 2026-09-19
+
+`games.season_type` now records ESPN's season phase, and the totals model
+corrects a measured per-sport bias on it.
+
+### Making the phase knowable
+
+ESPN reports it at **event** level: `event["season"]["type"]` — 1 preseason,
+2 regular, 3 postseason, 4 all-star. Read the event's block, not the
+league's: on a playoff date the league block still says type 2, so the
+obvious field is the wrong one.
+
+`backfill_neutral_site` is now `backfill_game_flags` and fills both
+ESPN-sourced flags in one pass, since it already matches by `espn_id`:
+
+    python -m backend.scripts.backfill_game_flags --db <abs path>
+
+Backfilled: nba 1231 regular / 21 postseason, ncaab 9 regular / 65
+postseason, mlb 112 regular, ncaaf 75, nfl 1. No unmatched rows.
+
+**A long layoff is not a usable proxy for this**, which is why the field was
+needed: of 33 long-layoff nba games only 10 are postseason, and the other 23
+are in-season breaks (December, and the February All-Star break) whose bias
+is **+2.08** — the opposite sign.
+
+### The correction is per sport, not per phase
+
+| sport | phase | n | bias | t |
+|---|---|---|---|---|
+| nba | regular | 1208 | −0.17 | −0.30 |
+| **nba** | **postseason** | **21** | **−17.09** | **−3.80** |
+| ncaab | postseason | 20 | −1.58 | −0.50 |
+| mlb | regular | 79 | +0.54 | +1.30 |
+
+**ncaab postseason shows no bias at all.** A global "playoff games score
+less" rule would have been wrong for it. The NCAA tournament is
+single-elimination at roughly regular-season pace; an nba playoff series is
+seven games of tighter defence and shorter rotations. `TOTAL_BIAS_BY_PHASE`
+is therefore keyed on `(sport, phase)` and holds only measured entries.
+
+### Result
+
+| sport | phase | n | bias before | after | MAE before | after |
+|---|---|---|---|---|---|---|
+| nba | postseason | 21 | −17.09 | **+0.01** | 20.73 | **17.05** |
+
+Everything else is untouched by construction. Overall MAE across all 1330
+scored games moves 14.685 → 14.627.
+
+**This is one postseason of evidence.** The interval is roughly −26.5 to
+−7.7: the direction is not in doubt, the magnitude is. Re-measure with
+`totals_report` as playoffs accumulate.
+
+### A correction to an earlier note
+
+I suggested `season_type` would also separate the three All-Star exhibition
+games. **It does not** — ESPN labels them type 2, regular season, so they are
+stored as `regular`. They remain in `CalibratedModel`'s training pool with
+totals of 72, 82 and 93. Identifying them needs something else, probably
+`competition.type.abbreviation`, which reads "STD" for a normal game and
+"SEMI" for a conference final.

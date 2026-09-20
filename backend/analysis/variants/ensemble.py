@@ -9,7 +9,8 @@ from backend.analysis.odds_utils import american_to_implied_prob, remove_vig
 from backend.analysis.calibrated_model import CalibratedModel, extract_features, features_to_array, _stat_value
 from backend.analysis.ml_model import LightGBMModel, MIN_ML_GAMES
 from backend.analysis.kelly import fractional_kelly
-from backend.analysis.sport_constants import get_point_diff_std, get_total_points_std, get_home_win_rate
+from backend.analysis.sport_constants import (get_point_diff_std, get_total_bias,
+                                             get_total_points_std, get_home_win_rate)
 from backend.data_types import GameData, TeamStats, Pick
 
 logger = logging.getLogger(__name__)
@@ -409,7 +410,10 @@ class EnsembleStrategy(Strategy):
             home_typical = hs.points_for + hs.points_against
         if away_typical is None:
             away_typical = aws.points_for + aws.points_against
-        return (home_typical + away_typical) / 2
+        predicted = (home_typical + away_typical) / 2
+        # Measured per-sport, per-phase correction. Zero wherever it has not
+        # been measured, so this can never quietly move an unstudied sport.
+        return predicted + get_total_bias(game.sport, game.season_type)
 
     def _spread_cover_prob(self, predicted_diff: float, cover_threshold: float, std: float = 12.0) -> float:
         """Probability that home margin exceeds the cover threshold.

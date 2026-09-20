@@ -43,6 +43,16 @@ class Game(Base):
     #: with no database default, drifting from what the migration writes.
     neutral_site = Column(Boolean, nullable=False, default=False,
                           server_default="0")
+    #: ESPN's season phase: "regular", "postseason", "preseason", "allstar".
+    #: Read from the EVENT's season block, not the league's -- the league
+    #: block still reports type 2 on a playoff date.
+    #:
+    #: Postseason basketball scores far less: the 21 postseason games here
+    #: average 210.5 against a regular-season 231.1, and the totals model,
+    #: fitted on regular-season rates, misses them by -17.09 on average
+    #: (t = -3.80). "unknown" for rows that predate the column.
+    season_type = Column(String, nullable=False, default="unknown",
+                         server_default="unknown")
     home_team = relationship("Team", foreign_keys=[home_team_id])
     away_team = relationship("Team", foreign_keys=[away_team_id])
 

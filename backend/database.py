@@ -222,6 +222,25 @@ def migrate_game_neutral_site(engine):
                     "BOOLEAN NOT NULL DEFAULT 0"))
 
 
+def migrate_game_season_type(engine):
+    """Add games.season_type if missing.
+
+    Existing rows default to "unknown" rather than "regular": most of them
+    are regular-season, but guessing would be indistinguishable from having
+    measured, and the postseason rows are exactly the ones that matter.
+    `backfill_game_flags` fills them from ESPN.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "games" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("games")]
+        if "season_type" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE games ADD COLUMN season_type "
+                    "VARCHAR NOT NULL DEFAULT 'unknown'"))
+
+
 MIGRATIONS = (
     migrate_api_usage,
     migrate_game_start_time,
@@ -235,6 +254,7 @@ MIGRATIONS = (
     migrate_game_espn_id,
     migrate_pick_odds_reconstructed,
     migrate_game_neutral_site,
+    migrate_game_season_type,
 )
 
 

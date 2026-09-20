@@ -1,11 +1,18 @@
-"""Backfill ``games.neutral_site`` from ESPN.
+"""Backfill the ESPN-sourced game flags: ``neutral_site`` and ``season_type``.
 
 Why this exists
 ---------------
-A game at a neutral venue has no host, so ``home_team_id`` is a bracket or
-seed designation rather than a team playing at home. The migration that added
-the column defaulted every existing row to ``0`` -- deliberately, because a
+Both are facts ESPN reports per event and neither is derivable from anything
+already stored, so their migrations defaulted every existing row -- a
 migration that guessed would be indistinguishable from one that measured.
+
+A game at a neutral venue has no host, so ``home_team_id`` is a bracket or
+seed designation rather than a team playing at home.
+
+``season_type`` separates regular season from postseason, preseason and
+all-star. It matters because postseason basketball scores far less: the
+totals model, fitted on regular-season rates, misses those games by -17.09
+points on average.
 
 That default is wrong for a known set of rows. Every ncaab final game in
 production falls between 2026-03-14 and 2026-03-22: the First Four, Round 1
@@ -54,9 +61,12 @@ async def _check_one_date(session, collector, sport: str, day: date,
                           *, dry_run: bool) -> Counter:
     counts: Counter = Counter()
 
-    async def scoreboard(d: date) -> dict[str, bool]:
+    async def scoreboard(d: date) -> dict[str, dict]:
         events = await collector.fetch_scoreboard(sport, d.strftime("%Y%m%d"))
-        return {e["espn_id"]: bool(e.get("neutral_site", False)) for e in events}
+        return {e["espn_id"]: {
+            "neutral_site": bool(e.get("neutral_site", False)),
+            "season_type": e.get("season_type", "unknown"),
+        } for e in events}
 
     by_id = await scoreboard(day)
 
@@ -81,13 +91,24 @@ async def _check_one_date(session, collector, sport: str, day: date,
             counts["no_match"] += 1
             continue
         want = by_id[row.espn_id]
-        if bool(row.neutral_site) == want:
+        changed = False
+        if bool(row.neutral_site) != want["neutral_site"]:
+            counts["neutral" if want["neutral_site"] else "hosted"] += 1
+            changed = True
+            if not dry_run:
+                row.neutral_site = want["neutral_site"]
+        # "unknown" from ESPN is not an answer, so it never overwrites one.
+        if (want["season_type"] != "unknown"
+                and row.season_type != want["season_type"]):
+            counts[f"season:{want['season_type']}"] += 1
+            changed = True
+            if not dry_run:
+                row.season_type = want["season_type"]
+        if changed:
+            counts["changed"] += 1
+        else:
             counts["already_correct"] += 1
             continue
-        counts["neutral" if want else "hosted"] += 1
-        counts["changed"] += 1
-        if not dry_run:
-            row.neutral_site = want
     return counts
 
 
@@ -146,6 +167,8 @@ def format_summary(summary: dict, dry_run: bool) -> str:
             f"{c.get('hosted', 0):>9} {c.get('already_correct', 0):>8} "
             f"{c.get('no_match', 0):>9}"
         )
+        for key in sorted(k for k in c if k.startswith("season:")):
+            lines.append(f"      {key.split(':')[1]:<14} {c[key]:>6}")
     lines.append("")
     lines.append("  no_match rows are left as they are, never guessed at.")
     return "\n".join(lines)
