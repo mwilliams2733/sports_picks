@@ -2647,3 +2647,150 @@ claimed edge of **19.5%**.
 Gone were the least plausible: a 49.0% nfl moneyline, and `WSH +1.5` at
 44.2% on a baseball runline where a 44-point probability edge would be
 extraordinary.
+
+## The tiers were recording which side of the bet it was — 2026-09-20
+
+Three commits, one arc: NFL's entire board came back tier 1, and chasing that
+went through the confidence counters, into Elo, and back to a coverage gap
+nobody had noticed. `248667d`, `be86eac`, `726a3ca`.
+
+### The gap: collection began on 2026-09-17 and never looked back
+
+Nothing ever fetched what came before that date. NFL was missing week 1
+entirely; NCAAF was missing 08-24 through 09-16. The scheduler looks at today
+plus a short finalize-only lookback, so **the hole was permanent** — running
+the pipeline forward would never close it.
+
+`backend/scripts/backfill_date_range.py` delegates every date to
+`fetch_and_store_games`, the same function the scheduler calls. The older
+`backtesting.historical.store_games` also stores games and was the obvious
+candidate, but it drops ESPN's event id, writes neither `neutral_site` nor
+`season_type`, and never calls `_refresh_team_stats` — its rows cannot be found
+by the odds matcher and arrive with no features at all. Reconciliation is off,
+as the pipeline already documents for lookback days: on a past date a thin
+scoreboard is ordinary, and reconciling would mark real games canceled,
+destroying history while claiming to add it.
+
+`fetch_and_store_games` swallowed a per-sport fetch failure and returned 0 —
+which is also what an off-day returns. For a backfill those must be
+distinguishable, because a silently skipped date is a permanent hole rather
+than a retry, so it now takes an optional `errors` sink. Every existing caller
+is untouched.
+
+Inserting games *earlier* than rows already written left `elo_history`
+incoherent, because `backfill_elo_history` skips games it has already seen:
+team DEL read 1500.0 on 09-03, 1529.2 on 09-12 and **1500.0 again on 09-19**,
+still carrying the seed from when the database held no DEL history. `rebuild=True`
+discards one sport's history and replays the whole chain; the combat-sport
+refusal is checked first so the flag cannot route around it.
+
+```
+  nfl     1 -> 17 finals   (week 1 complete: 16 games)
+  ncaaf  73 -> 258 finals  (185 games added, 0 dates failed)
+```
+
+All rows carry `espn_id`, no duplicate ids, every final has both `elo_history`
+and `team_stats`. DEL now reads 1500.0 -> 1529.2 -> 1510.1, and no team's
+rating regresses to the seed after a later game.
+
+### Both vote counters were reading stats nothing computes
+
+`offensive_rating` and `defensive_rating` need possessions, which no collector
+fetches, so `_get_team_stats` hands both sides the same `100.0` default —
+deliberately, and documented as such in `team_stats.py`. What was never noticed
+is that two callers then treat those constants as evidence.
+
+The moneyline/spread counter's third comparison is `(off - def) > (off - def)`,
+i.e. **`0 > 0` for every game ever played**. It could never agree, so that path
+was capped at 2 of the 3 votes tier 5 requires and **the top tier was
+unreachable**. The same arithmetic collapses a team with no history at all:
+`point_diff` 0, and the Elo seed ties too — which is what NCAAF's 119 picks,
+every single one tier 1, were really saying.
+
+The totals counter is worse. It compares those defaults against constants:
+`pace <= 100`, `combined_off <= 200`, `combined_def <= 200`. All three are true
+by construction, so **every under scored a perfect 3 and every over a 0**. In
+the database that is all 42 NCAAB tier-5 picks being unders, and every over
+across boxing, MLB, MMA and NCAAF pinned to tier 1. The tier recorded which
+side of the bet it was, not how good it was — **and the recalibrator had just
+finished tightening NCAAB tier 5 on 37 of those**.
+
+The fix distinguishes absent evidence from contrary evidence. Both counters
+return `(agreeing, available)`; a signal that cannot separate the two sides is
+not available and does not vote either way. `calculate_confidence` scales the
+requirement to what was available, **rounding up** so 2-of-3 becomes 2-of-2
+rather than 1-of-2, and caps the tier at 1 when nothing is available — an edge
+no signal supports is an unsupported edge however large. The totals counter
+reports `(0, 0)` and says why. Callers that pass no availability are unchanged.
+
+### Elo served every team a rating one game stale
+
+`elo_history` stores the **pre**-game rating. A scheduled game has no row yet,
+so `_team_elo` fell back to the most recent prior row — which holds *that*
+game's pre-game rating. Every team read a rating one game behind. In NFL week 2
+each team's only prior row was its week 1 game, holding the 1500.0 seed: all 32
+teams identical, every signal tied, every pick tier 1. This is why NFL stayed
+flat even after the counter fix.
+
+The fix advances one step from the two stored pre-game ratings and the prior
+game's score. That is **not lookahead** — the game being advanced past is final
+and strictly earlier than the one being priced, and a game that already has its
+own row still reads that row untouched.
+
+The step goes through a new `elo.apply_result`, which the chronological replay
+in `backfill_elo_history` now calls too. One function decides what a result
+does to a rating, because the replay produces what the model **trains** on and
+this lookup produces what it is **served**; if they ever disagreed the
+difference would be invisible and systematic. A drawn game is skipped by both,
+as the replay always did. It degrades to the stored rating when the step cannot
+be taken honestly — missing opponent row, no scores, a draw — because those are
+cases where the rating genuinely did not move, and inventing a movement is
+worse than staleness.
+
+### Measured, on real upcoming games
+
+Votes shown as `(agreeing, available)`, with `team_stats` refreshed over the
+newly backfilled history:
+
+```
+  ncaaf  after be86eac  (1,1) x14, (2,2) x1, (0,2) x1, (0,1) x4
+  nfl    after be86eac  (0,0) x20                       still flat
+  nfl    after 726a3ca  (2,2) x12, (0,2) x12, (1,2) x1  30 distinct Elo values, 1464.3..1535.7
+  ncaaf  after 726a3ca  (2,2) x10, (1,2) x8, (0,2) x7
+```
+
+### Still open
+
+- **Totals stay at tier 1 by construction.** The totals counter now honestly
+  reports no available signals, which is the truth: pace, offensive and
+  defensive rating all need possessions, and no collector fetches them. Totals
+  confidence cannot mean anything until that changes. This is the same
+  structural refusal plan 008 recorded.
+- **Every tier grade recorded before `be86eac` is suspect**, and the NCAAB
+  tier-5 tightening the recalibrator applied to 37 unders was tightening a
+  label that meant "this is an under". Nothing has been re-graded or
+  un-tightened.
+- Four `2026-12-31` placeholder rows, the one-off-future limitation in the
+  combat-sport matchup detector, and the 316 graded duplicates are all
+  unchanged from their sections above.
+
+### Verifying locally
+
+No CI run covers these three commits yet; the suite has not been run since
+`726a3ca`. The new tests are `test_backfill_date_range.py`,
+`test_elo_history_rebuild.py`, `test_confidence_signal_availability.py` and
+`test_elo_staleness.py`.
+
+```
+.venv/Scripts/python.exe -m pytest backend/tests -q
+```
+
+The backfill is re-runnable and idempotent on dates already stored:
+
+```
+.venv/Scripts/python.exe -m backend.scripts.backfill_date_range \
+    --db <abs win path> --sport nfl --start 2026-09-04 --end 2026-09-16
+```
+
+**Back up `sports_picks.db` before any run that writes**, as every production
+section above does.
