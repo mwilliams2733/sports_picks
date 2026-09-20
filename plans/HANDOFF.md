@@ -2228,3 +2228,48 @@ stored as `regular`. They remain in `CalibratedModel`'s training pool with
 totals of 72, 82 and 93. Identifying them needs something else, probably
 `competition.type.abbreviation`, which reads "STD" for a normal game and
 "SEMI" for a conference final.
+
+## All-Star games separated — 2026-09-19
+
+### The season block could not find them
+
+ESPN labels All-Star games `season.type = 2` — regular season — so
+`season_type` derived from that block alone stored them as `regular`. The
+**competition** block does distinguish them:
+
+| game | `season.type` | `competition.type.abbreviation` |
+|---|---|---|
+| normal | 2 | `STD` |
+| conference final | 3 | `SEMI` |
+| **All-Star** | **2** | **`ALLSTAR`** |
+
+`espn.season_type_of(event, competition)` now prefers the competition block
+where the two disagree, because it is the more specific one. Backfilled: the
+three rows are now `allstar`, and nothing else in nba changed (1249 already
+correct).
+
+The separation is clean — nba `allstar` averages a total of **82.3** against
+`regular` at 231.2.
+
+### They are out of the model's training pool
+
+`CalibratedModel.train_from_db` selected every final game with no filter. It
+now excludes `NON_COMPETITIVE_PHASES = ("allstar", "preseason")`: 1435 final
+games, 3 excluded, 1432 trained on.
+
+`unknown` is deliberately kept — it is what every row predating the column
+carries, and dropping those would discard most of the history. `postseason`
+is kept too: playoff games are real results, however differently they score,
+and the totals model corrects their bias rather than ignoring them.
+
+### What this did and did not affect
+
+The All-Star squads are separate `Team` rows and **only ever play each
+other** — 0 games pair a squad with a real team — so no real team's scoring
+history, Elo or record was ever polluted. The contamination was confined to
+the training pool and to any league-wide average computed over `games`,
+which is how it was found: it dragged the nba baseline down 6.5 points and
+produced an impossible all-positive schedule-strength deviation.
+
+ESPN lists a **fourth** All-Star event that day, `401838143` (the
+Championship), which is not in the table at all. Not chased.

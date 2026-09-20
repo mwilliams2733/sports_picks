@@ -24,6 +24,10 @@ MIN_TRAINING_GAMES = 30
 #:
 #: A sport absent from this tuple sets no slot and falls back to the shared
 #: intercept -- the old behaviour, which is a safe degradation.
+#: Season phases whose results do not describe competitive basketball and
+#: must not train a model that prices real games.
+NON_COMPETITIVE_PHASES: tuple[str, ...] = ("allstar", "preseason")
+
 SPORT_VOCAB: tuple[str, ...] = (
     "boxing", "mlb", "mma", "nba", "ncaab", "ncaaf", "nfl",
 )
@@ -169,6 +173,14 @@ class CalibratedModel:
                     Game.status == "final",
                     Game.home_score.isnot(None),
                     Game.away_score.isnot(None),
+                    # Exhibitions are not results. The 2026 NBA All-Star
+                    # round robin sits in `games` as three nba finals with
+                    # totals of 72, 82 and 93 against a real average of
+                    # 230.9, and its squads are not teams anyone bets on.
+                    # `unknown` is kept: it is what every row predating
+                    # season_type carries, and dropping those would throw
+                    # away most of the history.
+                    Game.season_type.notin_(NON_COMPETITIVE_PHASES),
                 )
             )
             .all()

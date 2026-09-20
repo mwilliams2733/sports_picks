@@ -21,6 +21,26 @@ SEASON_TYPE_MAP = {
     4: "allstar",
 }
 
+#: Competition-type abbreviations that mean the game is an exhibition, not a
+#: result. ESPN labels All-Star games ``season.type = 2`` -- regular season --
+#: so the season block alone cannot find them. The competition block can:
+#: a normal game is "STD", a conference final "SEMI", an All-Star game
+#: "ALLSTAR". The 2026 NBA All-Star round robin produced totals of 72, 82
+#: and 93 against a real nba average of 230.9.
+EXHIBITION_COMPETITION_TYPES = {"ALLSTAR"}
+
+
+def season_type_of(event: dict, competition: dict) -> str:
+    """The season phase, preferring the competition type where it disagrees.
+
+    ESPN's two blocks can contradict each other and the competition block is
+    the more specific one, so it wins.
+    """
+    abbr = ((competition.get("type") or {}).get("abbreviation") or "").upper()
+    if abbr in EXHIBITION_COMPETITION_TYPES:
+        return "allstar"
+    return SEASON_TYPE_MAP.get((event.get("season") or {}).get("type"), "unknown")
+
 STATUS_MAP = {
     "STATUS_SCHEDULED": "scheduled",
     "STATUS_IN_PROGRESS": "in_progress",
@@ -60,8 +80,7 @@ class ESPNCollector:
                 # ESPN marks tournament and showcase games here. Absent on
                 # some feeds, so default to hosted rather than guessing.
                 "neutral_site": bool(competition.get("neutralSite", False)),
-                "season_type": SEASON_TYPE_MAP.get(
-                    (event.get("season") or {}).get("type"), "unknown"),
+                "season_type": season_type_of(event, competition),
             })
         return games
 
