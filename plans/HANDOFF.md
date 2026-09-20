@@ -2459,3 +2459,67 @@ filters on `Game.date == target_date` and nothing marks them as
 hypothetical. That is a latent problem, not a current one, and it is not
 fixed here. The cleanest signal is probably that a real fight's
 `commence_time` carries a time of day while these do not.
+
+## Speculative matchups no longer become fixtures — 2026-09-19
+
+The Odds API sells futures — "who will X fight next" — as ordinary events,
+**structurally identical to a real bout**. Same keys, same shape; the raw
+payload for a Joshua-Fury future and a real Kameda-Hernandez bout differ only
+in their values. They all carry the far-future `commence_time` the API uses
+for an undated event, and `_ensure_game_from_odds` made a Game row for each.
+
+### The detector is an invariant, not a date rule
+
+**A competitor cannot face two different opponents at the same time.**
+`speculative_competitors()` groups an event list by date, and any name with
+more than one distinct opponent that day has all of its bouts skipped —
+there is no way to tell which, if any, is real.
+
+This passes a doubleheader (the same pair twice, which mlb does routinely)
+and catches a futures block (one name against many). A Dec-31 rule would
+have done neither: it would have broken on the mma futures dated
+**2027-01-01, 2027-04-25 and 2027-08-01**, which this catches.
+
+Against the live API: boxing 39 events → keep 28, skip 11. mma 31 → keep 22,
+skip 9. Every kept boxing event is on a real date.
+
+Scoped to the odds path. ESPN-sourced games genuinely can have one side
+facing several opponents in a day — an All-Star round robin does.
+
+### Retroactive cleanup had to be narrower, and here is why
+
+Applying the same invariant to the stored table flags **50** rows, but 12 of
+them are on real past dates and must not be deleted. The table accumulates
+across API snapshots, so an opponent change leaves both rows behind: boxing
+2026-03-21 has "Leli Buttigieg vs Jake Goodwin" *and* "Emmanuel Buttigieg vs
+Jake Goodwin", and one of those is a real fight.
+
+Prevention sees a single snapshot where everything is live at once; cleanup
+sees history. Only the 38 rows on a placeholder date were deleted — 0 picks
+and 0 graded results depended on them, 14 odds rows went with them,
+`integrity_check: ok`, `foreign_key_check` clean.
+
+| | before | after |
+|---|---|---|
+| boxing upcoming with odds | 29 / 53 | **28 / 29** |
+| mma upcoming with odds | 35 / 41 | **24 / 27** |
+
+### Known limitation: a one-off future survives
+
+The invariant needs a repeated name. Seven combat rows remain on a
+placeholder date because no competitor repeats *on that date*:
+
+```
+mma     2026-12-31  Islam Makhachev vs Kamaru Usman
+mma     2026-12-31  Tom Aspinall vs Ciryl Gane
+boxing  2026-12-31  Dalton Smith vs Adam Azim
+mma     2026-12-31  Max Holloway vs Paddy Pimblett
+mma     2027-07-01  Islam Makhachev vs Kamaru Usman
+mma     2027-07-02  Islam Makhachev vs Kamaru Usman
+mma     2027-07-10  Paddy Pimblett vs Conor McGregor
+```
+
+Bookmaker count is not a usable second signal — these carry 0-2 books, but so
+does a real small-hall fight (Nelson Birchall vs Lewis Morris, 1 book, a
+genuine 2026-09-26 bout). A horizon cap would catch the 2027 rows but not
+2026-12-31, which is only three months out.

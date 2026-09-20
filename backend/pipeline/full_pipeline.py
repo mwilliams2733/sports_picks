@@ -1,5 +1,6 @@
 """Full pipeline: fetch games, odds, props from APIs → store in DB → generate picks."""
 import logging
+from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from sqlalchemy.orm import Session
 from backend.collectors.espn import ESPNCollector
@@ -66,8 +67,23 @@ async def fetch_and_store_odds(session: Session, sports: list[str], api_key: str
                         break
                 odds_data = await collector.fetch_odds(sport)
                 record_api_call(session, "odds", sport, collector.requests_remaining)
+                # Futures markets arrive looking exactly like fixtures. A
+                # competitor facing several different opponents at one time
+                # cannot be a schedule, so no game is created for any of them
+                # -- there is no way to tell which, if any, is the real bout.
+                unreal = speculative_competitors(odds_data)
+                if unreal:
+                    logger.info(
+                        "%s: %d speculative matchup(s) skipped (%s)", sport,
+                        len(unreal),
+                        ", ".join(sorted(n for _, n in unreal)[:5]),
+                    )
                 # For each event, ensure a game exists (creates from Odds API if needed)
                 for event in odds_data:
+                    day = (event.get("commence_time") or "")[:10]
+                    if ((day, event.get("home_team")) in unreal
+                            or (day, event.get("away_team")) in unreal):
+                        continue
                     _ensure_game_from_odds(session, sport, event)
                 stored = _store_odds(session, sport, odds_data)
                 total += stored
@@ -336,6 +352,37 @@ def _reconcile_against_espn(session: Session, sport: str, target_date: date,
         else:
             if db_game.status != "canceled":
                 db_game.status = "canceled"
+
+
+def speculative_competitors(events: list[dict]) -> set[tuple[str, str]]:
+    """``(date, competitor)`` pairs that cannot all be real fixtures.
+
+    The Odds API sells futures -- "who will X fight next" -- as ordinary
+    events, structurally identical to a real bout and all sharing the
+    far-future commence_time it uses for an undated event. Nothing in the
+    payload marks them, so this uses an invariant instead: **a competitor
+    cannot face two different opponents at the same time.**
+
+    That passes a doubleheader, which is the same pair twice, and catches a
+    futures market, which is one name against many. Both sides of a flagged
+    pairing are returned: if Joshua appears against five opponents, every
+    bout naming Joshua that day is unusable, and so is any opponent who is
+    themselves listed against several.
+
+    Scoped to the odds path on purpose. ESPN-sourced games genuinely can
+    have one side facing several opponents in a day -- an All-Star round
+    robin does -- and those arrive with a real schedule behind them.
+    """
+    opponents: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for e in events:
+        when = e.get("commence_time")
+        home, away = e.get("home_team"), e.get("away_team")
+        if not when or not home or not away:
+            continue
+        day = when[:10]
+        opponents[(day, home)].add(away)
+        opponents[(day, away)].add(home)
+    return {key for key, opps in opponents.items() if len(opps) > 1}
 
 
 def _event_start(event: dict) -> datetime | None:
