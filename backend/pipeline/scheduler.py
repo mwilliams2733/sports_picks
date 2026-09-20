@@ -13,6 +13,7 @@ from backend.pipeline.full_pipeline import (
 )
 from backend.pipeline.pick_generator import generate_and_store_picks
 from backend.scripts.finalize_mma import finalize_stuck_bouts
+from backend.scripts.finalize_combat import COMBAT_SPORTS, finalize_from_scores
 from backend.pipeline.prop_pipeline import run_prop_pipeline
 from backend.pipeline.grader import grade_pick, grade_prop_pick, payout_for, capture_closing_odds, grade_completed_games
 from backend.collectors.espn_box_score import collect_box_scores_for_final_games
@@ -212,6 +213,22 @@ def morning_scout(config, engine, scheduler, is_retry=False):
         except Exception:
             logger.exception(
                 "mma finalization failed; grading with what is present")
+        # The odds feed is the only source for boxing -- ESPN has no boxing
+        # sport at all, so 140 rows had never been finalized -- and it
+        # covers the regional mma promotions the UFC scoreboard misses,
+        # which was 51% of our bouts. It reaches back 3 days only, so it
+        # complements the ESPN pass above rather than replacing it.
+        for combat_sport in COMBAT_SPORTS:
+            try:
+                scored = finalize_from_scores(
+                    session, combat_sport, config.get("odds_api_key"))
+                if scored["finalized"]:
+                    logger.info("Finalized %d %s bout(s) from the odds feed",
+                                scored["finalized"], combat_sport)
+            except Exception:
+                logger.exception(
+                    "%s odds-feed finalization failed; grading with what is "
+                    "present", combat_sport)
         grade_pending_picks(session)
         grade_completed_games(session)
         active_sports = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]

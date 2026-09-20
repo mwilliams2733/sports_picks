@@ -121,6 +121,13 @@ def _scout_with_stubs(monkeypatch, *, finalizer):
         return finalizer(session, *a, **k)
 
     monkeypatch.setattr(sched, "finalize_stuck_bouts", wrapped)
+
+    def scores_stub(session, sport, api_key, *a, **k):
+        order.append(f"scores:{sport}")
+        return {"sport": sport, "considered": 0, "finalized": 0,
+                "unmatched": 0, "skipped_no_key": False}
+
+    monkeypatch.setattr(sched, "finalize_from_scores", scores_stub)
     monkeypatch.setattr(sched, "is_sport_in_season", lambda *a, **k: False)
 
     class _Sched:
@@ -167,3 +174,24 @@ def test_a_finalizer_failure_does_not_stop_grading(monkeypatch):
 
     assert "grade_games" in order and "grade_picks" in order, (
         "an ESPN outage must not cost the grading of games already final")
+
+
+# --- the odds-feed finalizer must run too ---------------------------------
+
+def test_scout_finalizes_both_combat_sports_from_the_odds_feed(monkeypatch):
+    """boxing has no other source at all: ESPN answers "Invalid sport
+    (boxing)". mma needs it too -- ESPN's UFC scoreboard misses 51% of our
+    bouts, which are regional promotions the odds feed does carry."""
+    order = _scout_with_stubs(
+        monkeypatch, finalizer=lambda s, *a, **k: {"finalized": 0})
+
+    assert "scores:boxing" in order, "boxing would never be finalized at all"
+    assert "scores:mma" in order
+
+
+def test_odds_finalizers_run_before_grading(monkeypatch):
+    order = _scout_with_stubs(
+        monkeypatch, finalizer=lambda s, *a, **k: {"finalized": 0})
+
+    assert order.index("scores:boxing") < order.index("grade_games")
+    assert order.index("scores:mma") < order.index("grade_games")
