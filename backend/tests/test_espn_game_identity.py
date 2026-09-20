@@ -28,7 +28,8 @@ UTC_DAY = datetime.date(2026, 3, 15)     # the date a naive parser produces
 
 
 def _event(event_id, home, away, status, home_score=None, away_score=None,
-           when="2026-03-15T00:00Z", neutral=None, season_type=None):
+           when="2026-03-15T00:00Z", neutral=None, season_type=None,
+           season_year=None):
     def side(abbr, home_away, score):
         c = {"homeAway": home_away,
              "team": {"abbreviation": abbr, "displayName": f"{abbr} Team"}}
@@ -36,12 +37,18 @@ def _event(event_id, home, away, status, home_score=None, away_score=None,
             c["score"] = str(score)
         return c
 
+    season = {}
+    if season_type is not None:
+        season["type"] = season_type
+    if season_year is not None:
+        season["year"] = season_year
+
     return {
         "id": event_id,
         "date": when,
-        # Omitted entirely when None, so the collector's absent-field default
-        # stays exercised by the existing callers.
-        **({} if season_type is None else {"season": {"type": season_type}}),
+        # Omitted entirely when neither is given, so the collector's
+        # absent-field defaults stay exercised by the existing callers.
+        **({} if not season else {"season": season}),
         "status": {"type": {"name": status}},
         "competitions": [{
             "competitors": [

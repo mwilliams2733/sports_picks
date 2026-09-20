@@ -59,6 +59,27 @@ def season_type_of(event: dict, competition: dict) -> str:
         return "allstar"
     return SEASON_TYPE_MAP.get((event.get("season") or {}).get("type"), "unknown")
 
+def season_year_of(event: dict) -> int | None:
+    """ESPN's own season year for one event, or None where it says nothing.
+
+    Read from the EVENT for the reason ``week_of`` gives: a scoreboard
+    response is keyed by the requested date and can carry a game filed under
+    a different season, so the event is authoritative for its own game.
+
+    **This number is not a label.** ESPN names a season by the year it
+    STARTED for the football sports and by the year it ENDS for basketball:
+    the 2025-26 nba season is ``year: 2026``, the 2026 nfl season is
+    ``year: 2026``. Formatting it directly would call the nba season already
+    stored as "2025-26" by the name "2026-27". It is handed to
+    :func:`backend.config.season_label`, which resolves it against the
+    configured window instead of trusting the convention.
+    """
+    year = (event.get("season") or {}).get("year")
+    if isinstance(year, bool) or not isinstance(year, (int, float)):
+        return None
+    return int(year)
+
+
 def week_of(event: dict) -> int | None:
     """ESPN's week number for one event, or None where the sport has none.
 
@@ -127,6 +148,7 @@ class ESPNCollector:
                 # some feeds, so default to hosted rather than guessing.
                 "neutral_site": bool(competition.get("neutralSite", False)),
                 "season_type": season_type_of(event, competition),
+                "season_year": season_year_of(event),
                 "week": week_of(event),
             })
         return games
