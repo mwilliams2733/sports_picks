@@ -106,3 +106,44 @@ def test_a_row_without_an_espn_id_is_still_adopted(session, httpx_mock):
     games = session.query(Game).all()
     assert len(games) == 1, "created a duplicate instead of adopting the row"
     assert games[0].id == 99 and games[0].espn_id == "401873647"
+
+
+# --------------------------------------------------------------------------
+# A wrong score must be able to heal.
+#
+# Scores were written only on the transition to final, so a row that was
+# already final kept whatever it had forever. Eight rows carried another
+# game's result -- four of them the score of an adjacent fixture folded in
+# by the espn_id-less fallback -- and no amount of re-running could fix them.
+# --------------------------------------------------------------------------
+
+def test_a_wrong_score_on_a_final_game_is_corrected(session, httpx_mock):
+    _run(session, httpx_mock, [_event("401873647", "2026-05-23T17:10Z", 1, 8)])
+    game = session.query(Game).one()
+    game.home_score, game.away_score = 99, 99       # wrong, and already final
+    session.commit()
+
+    _run(session, httpx_mock, [_event("401873647", "2026-05-23T17:10Z", 1, 8)])
+
+    game = session.query(Game).one()
+    assert (game.home_score, game.away_score) == (1, 8)
+
+
+def test_a_correct_score_is_left_alone(session, httpx_mock):
+    for _ in range(2):
+        _run(session, httpx_mock, [_event("401873647", "2026-05-23T17:10Z", 1, 8)])
+    game = session.query(Game).one()
+    assert (game.home_score, game.away_score) == (1, 8)
+
+
+def test_a_scoreless_payload_does_not_wipe_a_stored_score(session, httpx_mock):
+    """ESPN reporting nothing is not ESPN reporting 0-0."""
+    _run(session, httpx_mock, [_event("401873647", "2026-05-23T17:10Z", 1, 8)])
+
+    blank = _event("401873647", "2026-05-23T17:10Z", 1, 8)
+    for c in blank["competitions"][0]["competitors"]:
+        c.pop("score")
+    _run(session, httpx_mock, [blank])
+
+    game = session.query(Game).one()
+    assert (game.home_score, game.away_score) == (1, 8)

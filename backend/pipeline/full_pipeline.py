@@ -216,10 +216,26 @@ def _store_games(session: Session, sport: str, target_date: date,
             ).first()
 
         if existing:
-            if g["status"] == "final" and existing.status != "final":
-                existing.home_score = g["home_score"]
-                existing.away_score = g["away_score"]
-                existing.status = g["status"]
+            if g["status"] == "final" and g["home_score"] is not None:
+                if existing.status != "final":
+                    existing.home_score = g["home_score"]
+                    existing.away_score = g["away_score"]
+                    existing.status = g["status"]
+                elif (existing.home_score, existing.away_score) != (
+                        g["home_score"], g["away_score"]):
+                    # A score used to be written only on the transition to
+                    # final, so a wrong one could never heal. Eight rows
+                    # carried another game's result that way -- four of them
+                    # the score of a same-day or adjacent fixture that the
+                    # espn_id-less fallback had folded in.
+                    logger.warning(
+                        "Correcting %s game %s (%s) score: %s-%s -> %s-%s",
+                        sport, existing.id, espn_id,
+                        existing.home_score, existing.away_score,
+                        g["home_score"], g["away_score"],
+                    )
+                    existing.home_score = g["home_score"]
+                    existing.away_score = g["away_score"]
             if existing.start_time is None:
                 existing.start_time = start_time
             if existing.espn_id is None and espn_id:

@@ -2322,3 +2322,63 @@ reported 741 missing across 125 dates. That was wrong: ESPN files by Eastern
 date and a game stored under a neighbouring date counted as absent. Checking
 each espn_id against the whole table gives **7**. Compare identities against
 the whole set, not per bucket, whenever the bucket key is itself uncertain.
+
+## The four missing games — and eight wrong scores — 2026-09-19
+
+All four were fetched: `401810284` (NO/PHX 2025-12-26), `401810547`,
+`401810600`, `401810627`. Games 1835 → 1839.
+
+### Fetching them exposed something worse
+
+The newly fetched NO/PHX game came back 108-115 — **the same score already
+stored on the 12-27 game**. ESPN says 12-26 was 108-115 and 12-27 was
+114-123, so the stored row was wearing the wrong game's result.
+
+An audit of every stored final against ESPN — **1393 checked, 8 mismatched**:
+
+| game | stored | actual |
+|---|---|---|
+| nba 469 (2025-12-27) | 108-115 | 114-123 |
+| nba 745 (2026-02-01) | 118-125 | 134-91 |
+| nba 790 (2026-02-07) | 135-115 | 122-115 |
+| nba 817 (2026-02-11) | 102-95 | 102-105 |
+| nba 844 (2026-02-20) | 112-105 | 131-118 |
+| mlb 1600/1601/1602 (2026-05-24) | — | — |
+
+Four of the five nba rows are exactly the pairings whose twin was missing:
+they had absorbed the adjacent fixture's result.
+
+### A wrong score could never heal
+
+`fetch_and_store_games` wrote scores **only on the transition to final**:
+
+```python
+if g["status"] == "final" and existing.status != "final":
+```
+
+so a row that was already final kept whatever it had, permanently, no matter
+how many times the date was re-fetched. It now corrects a final game whose
+score disagrees with ESPN, and logs each correction. A payload with no score
+still never overwrites a stored one — ESPN reporting nothing is not ESPN
+reporting 0-0.
+
+All eight were repaired by re-running their dates through the fixed code.
+**Re-audit: 1390 checked, 0 mismatched.**
+
+### Blast radius
+
+**0 picks and 0 graded results** on any of the eight, so no ROI, grading or
+pick history was affected. Only `elo_history` (16 rows) and `team_stats` (232
+rows) depended on them, and both were rebuilt — nba and mlb recomputed with
+`--force`, 1253 and 96 games. `integrity_check: ok`.
+
+Inserting historical games invalidates every point-in-time stat computed
+after them, so that rebuild is not optional; it is part of the repair.
+
+### Notes
+
+- A later absence sweep reported "77 missing". That set excluded
+  scheduled and postponed rows, of which 79 carry espn_ids. Not a real gap.
+- That sweep also hit `httpx.ReadTimeout` after ~200 rapid requests.
+  `espn_http.get_with_retry` retries on status codes only, not on timeouts.
+  Worth widening.
