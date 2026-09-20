@@ -1808,3 +1808,59 @@ designated home side really does win about 70%. Applied to those 18 games it
 would have favoured the higher seed and declined the bet. It remains wrong
 for a neutral game with no seeding — the 6 nba ones — which is a narrower
 problem than first described.
+
+## Spread and over_under buckets — 2026-09-19
+
+    python -m backend.analysis.edge_buckets --db <abs path> --pick-type spread
+    python -m backend.analysis.edge_buckets --db <abs path> --pick-type over_under
+
+### Spread: the cleanest evidence of the inversion, n = 47
+
+Every spread pick is priced at **−110**, so the price confound that muddies
+the moneyline buckets is absent by construction. This is a like-for-like
+comparison in a way the moneyline table is not.
+
+| edge | n | win% | units | roi | away | neutral |
+|---|---|---|---|---|---|---|
+| 0-20% | 23 | 60.9% | +3.73 | **+0.162** | 17 | 13 |
+| 20-35% | 10 | 30.0% | −4.27 | −0.427 | 10 | 8 |
+| 35%+ | 14 | 35.7% | −4.45 | −0.318 | 14 | 14 |
+
+Aggregated: **edge <20% wins 60.9% (+0.162 ROI); edge ≥20% wins 33.3%
+(−0.364)**, against a breakeven of 52.4% at −110.
+
+Same fingerprint as the moneyline: **all 24 high-edge picks are AWAY picks,
+22 of 24 at neutral venues, 22 of 24 ncaab.** At a constant price this
+cannot be a big-underdog artifact — the model is taking the wrong side.
+
+P(≤8 wins of 24 | breakeven, independent) = **0.048**. The low bucket's
+14-of-23 is unremarkable on its own (p = 0.27); the signal is in the high
+bucket underperforming, not the low one outperforming. And the 24 span five
+dates, mostly the same tournament weekend, so they are not 24 independent
+trials.
+
+### over_under: the buckets cannot be read, because the edge is broken
+
+| edge | n | win% | units | roi |
+|---|---|---|---|---|
+| 0-20% | 2 | 100.0% | +1.82 | +0.909 |
+| 20-35% | 0 | — | — | — |
+| 35%+ | 50 | 52.0% | −0.36 | −0.007 |
+
+Fifty of 52 graded picks fall in one bucket, which is not a distribution.
+Looking at the column directly: **113 of the 147 over_under picks in the
+table carry `edge_pct` of exactly 50.0**, and eight graded ones carry an edge
+**above 100%** — 130.2%, 128.8%, 124.3% and so on.
+
+An edge above 100 percentage points is not a possible probability edge. On a
+two-way market at −110 the largest sensible value is about 47.6%. So
+`edge_pct` for totals is not measuring what its name says, and bucketing by
+it is meaningless until that is fixed.
+
+What the results do say, independent of the edge column: 52.0% win rate over
+50 picks at −110 is a coin flip bleeding the vig (−0.007 ROI). The totals
+model has no demonstrated skill either way on this sample.
+
+**Not investigated.** It is a separate defect from the home-advantage work
+and affects `over_under` across every sport — 361 picks in the table before
+deduplication, the largest single market.
