@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from sqlalchemy.orm import Session
 from backend.config import season_label, seasons_config
-from backend.collectors.espn import ESPNCollector
+from backend.collectors.espn import CANCELED, ESPNCollector
 from backend.time_utils import et_date
 from backend.collectors.odds_api import OddsAPICollector, redact_api_key
 from backend.collectors.budget import check_budget, record_api_call, BudgetStatus
@@ -364,11 +364,11 @@ def _reconcile_against_espn(session: Session, sport: str, target_date: date,
             continue
         pair = frozenset({db_game.home_team_id, db_game.away_team_id})
         if pair in espn_pairs:
-            if db_game.status == "canceled":
+            if db_game.status == CANCELED:
                 db_game.status = "scheduled"
         else:
-            if db_game.status != "canceled":
-                db_game.status = "canceled"
+            if db_game.status != CANCELED:
+                db_game.status = CANCELED
 
 
 def speculative_competitors(events: list[dict]) -> set[tuple[str, str]]:

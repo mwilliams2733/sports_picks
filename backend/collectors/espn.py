@@ -60,12 +60,20 @@ def week_of(event: dict) -> int | None:
     return int(number)
 
 
+#: The one spelling of this status. ESPN's map used the double-l British
+#: form while full_pipeline's reconciliation wrote and read the single-l
+#: one, so a game ESPN reported as called off would have been invisible to
+#: the path that restores a rescheduled game -- and uncounted by
+#: catch_up_finals. No row had ever carried either value, so nothing broke;
+#: it was waiting to.
+CANCELED = "canceled"
+
 STATUS_MAP = {
     "STATUS_SCHEDULED": "scheduled",
     "STATUS_IN_PROGRESS": "in_progress",
     "STATUS_FINAL": "final",
     "STATUS_POSTPONED": "postponed",
-    "STATUS_CANCELED": "cancelled",
+    "STATUS_CANCELED": CANCELED,
 }
 
 class ESPNCollector:
