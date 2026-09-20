@@ -196,6 +196,7 @@ def _apply_combat_elo_update(session, game) -> None:
     from backend.analysis.elo import get_k_factor
     from backend.models import EloRating, EloHistory
     K = get_k_factor(game.sport)
+    SEED_RATING = 1500.0
 
     home_elo_row = (session.query(EloRating)
                     .filter(EloRating.team_id == game.home_team_id, EloRating.sport == game.sport)
@@ -203,8 +204,22 @@ def _apply_combat_elo_update(session, game) -> None:
     away_elo_row = (session.query(EloRating)
                     .filter(EloRating.team_id == game.away_team_id, EloRating.sport == game.sport)
                     .first())
-    if home_elo_row is None or away_elo_row is None:
-        return  # missing Elo rows; skip rather than crash
+    # A fighter with no rating row is a fighter we have not rated yet, not a
+    # reason to decline. This used to return, and nothing else ever created a
+    # combat EloRating row -- the database held zero of them -- so combat Elo
+    # could never start: every bout skipped, every fighter permanently at the
+    # seed, every combat pick priced on two indistinguishable opponents.
+    if home_elo_row is None:
+        home_elo_row = EloRating(team_id=game.home_team_id, sport=game.sport,
+                                 rating=SEED_RATING,
+                                 updated_at=datetime.now(tz=timezone.utc))
+        session.add(home_elo_row)
+    if away_elo_row is None:
+        away_elo_row = EloRating(team_id=game.away_team_id, sport=game.sport,
+                                 rating=SEED_RATING,
+                                 updated_at=datetime.now(tz=timezone.utc))
+        session.add(away_elo_row)
+    session.flush()
 
     h, a = home_elo_row.rating, away_elo_row.rating
     expected_home = 1 / (1 + 10 ** ((a - h) / 400))

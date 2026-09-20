@@ -120,13 +120,40 @@ def test_a_pick_on_an_unstarted_game_follows_the_market(session):
     assert set(after) >= set(before), "a refresh must not drop a pick row"
     assert any(after[k] != before[k] for k in before), (
         "an unstarted game's pick should have followed the market")
-    # Only moneylines carry the quote that moved; spreads and totals are
-    # priced at -110 and would not change here.
-    moneylines = {p.id: p.odds_at_pick for p in _picks(session)
-                  if p.pick_type == "moneyline"}
-    assert moneylines, "fixture produced no moneyline picks"
-    assert all(a in (-400, 320) for a in moneylines.values()), (
-        f"every refreshed moneyline should be the current quote: {moneylines}")
+    # Only the picks the model still makes get refreshed, and only
+    # moneylines carry the quote that moved -- spreads and totals are priced
+    # at -110 and would not change here.
+    changed = {k for k in before if after[k] != before[k]}
+    assert changed, "nothing followed the market"
+    assert all(after[k] in (-400, 320) for k in changed), (
+        f"a refreshed price should be the current quote: "
+        f"{ {k: after[k] for k in changed} }")
+
+
+def test_a_pick_the_model_would_no_longer_make_is_left_standing(session):
+    """A known gap, asserted so it is visible rather than surprising.
+
+    Refresh replaces a pick with the freshly computed one for the same
+    market. When the market moves far enough that the model produces no pick
+    there at all, there is nothing to replace it with, so the original stays
+    -- at its original price, still presented as current advice.
+
+    Removing it would be the other reasonable choice. It is not made here
+    because a pick that vanishes between runs is harder to reason about than
+    one that goes stale, and nothing yet measures which costs more.
+    """
+    generate_and_store_picks(session, 1, TODAY)
+    before = {p.id: (p.pick_value, p.odds_at_pick) for p in _picks(session)}
+
+    for o in session.query(Odds).all():
+        o.moneyline_home, o.moneyline_away = -400, 320
+    session.commit()
+    generate_and_store_picks(session, 1, TODAY)
+
+    after = {p.id: (p.pick_value, p.odds_at_pick) for p in _picks(session)}
+    assert set(after) >= set(before), "no pick is dropped by a refresh"
+    assert any(after[k] == before[k] for k in before), (
+        "at least one pick the model no longer makes should be untouched")
 
 
 def test_a_sport_filter_leaves_other_sports_alone(session):
