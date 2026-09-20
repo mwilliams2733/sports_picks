@@ -23,6 +23,11 @@ from dataclasses import dataclass
 from backend.database import get_engine, get_session
 from backend.models import Game, Odds, TeamStat
 
+#: Combined rest (home + away days) above which a game is almost certainly
+#: not a normal one. nba regular-season games average 4.3; the postseason
+#: games in the table average 19.6 because of the layoff before them.
+LONG_LAYOFF_DAYS = 10
+
 #: The prediction the model made before points_for existed, kept as a
 #: reference column. See the module docstring.
 LEGACY_CONSTANT_TOTAL = 200.0
@@ -46,6 +51,13 @@ class SportResult:
     n_adj: int = 0
     adj_mae: float | None = None
     raw_mae_same_games: float | None = None
+    #: Residual split by whether the game followed a long layoff. Rest itself
+    #: does not predict totals within either group; the split exists because
+    #: pooling them manufactures a rest effect that is really a phase effect.
+    n_normal_rest: int = 0
+    n_long_layoff: int = 0
+    bias_normal_rest: float | None = None
+    bias_long_layoff: float | None = None
 
     @property
     def adjustment_helps(self) -> bool | None:
@@ -97,6 +109,13 @@ def split_total(home: dict, away: dict) -> float | None:
             + (away["points_for_away"] + away["points_against_away"])) / 2
 
 
+def _rest_by_game(session) -> dict[int, dict[int, float]]:
+    out: dict[int, dict[int, float]] = defaultdict(dict)
+    for r in session.query(TeamStat).filter(TeamStat.stat_type == "rest_days"):
+        out[r.game_id][r.team_id] = r.value
+    return out
+
+
 def adjusted_total(home: dict, away: dict) -> float | None:
     """The opponent-adjusted prediction, or None when either side lacks it."""
     keys = ("points_for_adj", "points_against_adj")
@@ -116,6 +135,7 @@ def predicted_total(home: dict, away: dict) -> float | None:
 
 def evaluate(session) -> list[SportResult]:
     stats = _scoring_stats(session)
+    rest = _rest_by_game(session)
     lines: dict[int, list[float]] = defaultdict(list)
     for o in session.query(Odds).filter(Odds.over_under.isnot(None)):
         lines[o.game_id].append(o.over_under)
@@ -133,15 +153,23 @@ def evaluate(session) -> list[SportResult]:
         a = stats.get((g.id, g.away_team_id), {})
         split = None if g.neutral_site else split_total(h, a)
         adj = adjusted_total(h, a)
+        hr = rest.get(g.id, {}).get(g.home_team_id)
+        ar = rest.get(g.id, {}).get(g.away_team_id)
+        combined = (hr + ar) if hr is not None and ar is not None else None
         rows[g.sport].append(
-            (pred, float(g.home_score + g.away_score), line, split, adj))
+            (pred, float(g.home_score + g.away_score), line, split, adj,
+             combined))
 
     results = []
     for sport, data in rows.items():
-        residuals = [actual - pred for pred, actual, _, _, _ in data]
-        withline = [(p, a, ln) for p, a, ln, _, _ in data if ln is not None]
-        withsplit = [(p, a, sp) for p, a, _, sp, _ in data if sp is not None]
-        withadj = [(p, a, ad) for p, a, _, _, ad in data if ad is not None]
+        residuals = [actual - pred for pred, actual, _, _, _, _ in data]
+        withline = [(p, a, ln) for p, a, ln, _, _, _ in data if ln is not None]
+        withsplit = [(p, a, sp) for p, a, _, sp, _, _ in data if sp is not None]
+        withadj = [(p, a, ad) for p, a, _, _, ad, _ in data if ad is not None]
+        normal = [a - p for p, a, _, _, _, c in data
+                  if c is not None and c < LONG_LAYOFF_DAYS]
+        layoff = [a - p for p, a, _, _, _, c in data
+                  if c is not None and c >= LONG_LAYOFF_DAYS]
         r = SportResult(
             sport=sport,
             n=len(data),
@@ -149,10 +177,14 @@ def evaluate(session) -> list[SportResult]:
             residual_sd=statistics.pstdev(residuals) if len(residuals) > 1 else 0.0,
             bias=statistics.mean(residuals),
             legacy_mae=statistics.mean(
-                abs(a - LEGACY_CONSTANT_TOTAL) for _, a, _, _, _ in data),
+                abs(a - LEGACY_CONSTANT_TOTAL) for _, a, _, _, _, _ in data),
             n_with_line=len(withline),
             n_split=len(withsplit),
             n_adj=len(withadj),
+            n_normal_rest=len(normal),
+            n_long_layoff=len(layoff),
+            bias_normal_rest=statistics.mean(normal) if normal else None,
+            bias_long_layoff=statistics.mean(layoff) if layoff else None,
         )
         if withadj:
             r.adj_mae = statistics.mean(abs(a - ad) for _, a, ad in withadj)
@@ -191,6 +223,20 @@ def format_report(results: list[SportResult]) -> str:
         verdict = "YES" if r.beats_line else "no"
         lines.append(f"  {r.sport:<7} {r.n_with_line:>6} {r.mae_vs_line:>9.2f} "
                      f"{r.line_mae:>9.2f} {verdict:>11}")
+    lines.append("")
+    lines.append(f"  Bias after a long layoff (combined rest >= {LONG_LAYOFF_DAYS} days):")
+    lines.append(f"  {'sport':<7} {'normal n':>9} {'bias':>8} {'layoff n':>9} {'bias':>8}")
+    lines.append("  " + "-" * 46)
+    for r in results:
+        nb = f"{r.bias_normal_rest:+.2f}" if r.bias_normal_rest is not None else "-"
+        lb = f"{r.bias_long_layoff:+.2f}" if r.bias_long_layoff is not None else "-"
+        lines.append(f"  {r.sport:<7} {r.n_normal_rest:>9} {nb:>8} "
+                     f"{r.n_long_layoff:>9} {lb:>8}")
+    lines.append("")
+    lines.append("  Rest does NOT predict totals within either group -- the nba")
+    lines.append("  regular-season slope is +0.135 (t +0.47). Pooling them")
+    lines.append("  manufactures a rest effect that is really a phase effect:")
+    lines.append("  playoff games carry a long layoff AND score far less.")
     lines.append("")
     lines.append("  Opponent-adjusted vs raw rates, on the same games:")
     lines.append(f"  {'sport':<7} {'n':>6} {'adj MAE':>9} {'raw':>9} {'adj helps':>11}")

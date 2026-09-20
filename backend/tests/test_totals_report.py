@@ -176,3 +176,58 @@ def test_splits_help_is_false_when_the_blend_is_closer(session):
 def test_splits_help_is_unknown_without_any_split_games(session):
     _game(session, 1, 120, 110)
     assert evaluate(session)[0].splits_help is None
+
+
+# --------------------------------------------------------------------------
+# Long-layoff bias.
+#
+# Rest does not predict totals within a phase -- the nba regular-season
+# slope is +0.135 (t +0.47) and the postseason slope -0.123 (t -0.49). But
+# pooled they give -0.342 (t -2.25), because playoff games carry a long
+# layoff AND score about 20 points less. Splitting keeps that from being
+# modelled as a rest effect.
+# --------------------------------------------------------------------------
+
+def _rested_game(s, gid, actual_home, actual_away, rest_each, *, blended=110.0):
+    s.add(Game(id=gid, sport="nba", season="2026", date=D, status="final",
+               home_team_id=1, away_team_id=2,
+               home_score=actual_home, away_score=actual_away))
+    s.flush()
+    for team_id in (1, 2):
+        for k in ("points_for", "points_against"):
+            s.add(TeamStat(game_id=gid, team_id=team_id, stat_type=k,
+                           value=blended))
+        s.add(TeamStat(game_id=gid, team_id=team_id, stat_type="rest_days",
+                       value=rest_each))
+    s.commit()
+
+
+def test_normal_and_long_layoff_games_are_split(session):
+    _rested_game(session, 1, 120, 110, rest_each=2.0)    # combined 4
+    _rested_game(session, 2, 100, 100, rest_each=10.0)   # combined 20
+    r = evaluate(session)[0]
+    assert r.n_normal_rest == 1
+    assert r.n_long_layoff == 1
+
+
+def test_the_two_biases_are_reported_separately(session):
+    # Both predict 220. Normal game lands on it; layoff game lands 20 under.
+    _rested_game(session, 1, 110, 110, rest_each=2.0)
+    _rested_game(session, 2, 100, 100, rest_each=10.0)
+    r = evaluate(session)[0]
+    assert r.bias_normal_rest == pytest.approx(0.0)
+    assert r.bias_long_layoff == pytest.approx(-20.0)
+
+
+def test_a_game_without_rest_data_enters_neither_group(session):
+    """Missing is not normal; counting it as such would dilute the split."""
+    _game(session, 1, 120, 110)          # no rest_days rows
+    r = evaluate(session)[0]
+    assert r.n == 1
+    assert r.n_normal_rest == 0 and r.n_long_layoff == 0
+
+
+def test_the_boundary_is_inclusive_on_the_layoff_side(session):
+    from backend.analysis.totals_report import LONG_LAYOFF_DAYS
+    _rested_game(session, 1, 110, 110, rest_each=LONG_LAYOFF_DAYS / 2)
+    assert evaluate(session)[0].n_long_layoff == 1

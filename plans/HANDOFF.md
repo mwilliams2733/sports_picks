@@ -2103,3 +2103,66 @@ how they were noticed.
 
 Three games of 1248 is a small contamination, and the squads are separate
 `Team` rows so no real team's stats are touched. Not fixed here.
+
+## Pace and rest: neither can be added — 2026-09-19
+
+Both were measured. Neither produced a feature.
+
+### Pace is not computable from the data this repo holds
+
+Possessions are `FGA − ORB + TOV + 0.44 × FTA`. `player_stats` carries
+minutes, points, rebounds, assists, threes, steals, blocks and turnovers —
+**no field-goal attempts, no free-throw attempts, and rebounds are not split
+offensive/defensive.** Three of the four inputs are missing.
+
+This is the same wall the calibration report's standing caveat describes, and
+it is why `offensive_rating`, `defensive_rating` and `pace` were never
+written. Nothing has changed that.
+
+For a totals model it matters less than it sounds: pace only reaches the
+scoreboard through points, and `points_for + points_against` already embeds
+pace × efficiency. A separate pace term would only help if pace were more
+*stable* than the combined rate — which cannot be tested without possessions.
+Manufacturing a "pace" feature out of points would be circular.
+
+### Rest predicts nothing, and the signal that looks like rest is a phase effect
+
+The pooled regression is tempting: **slope −0.342 points of total per extra
+day of combined rest, t = −2.25.** It does not survive splitting by phase.
+
+| phase | n | mean combined rest | mean total | mean residual |
+|---|---|---|---|---|
+| regular season | 1208 | 4.27 | 231.1 | −0.17 |
+| postseason | 21 | **19.62** | **210.5** | **−17.09** |
+
+| slope of residual on rest | n | slope | t |
+|---|---|---|---|
+| pooled | 1229 | −0.342 | −2.25 |
+| within regular season | 1208 | +0.135 | +0.47 |
+| within postseason | 21 | −0.123 | −0.49 |
+
+Rest predicts nothing inside either group. The pooled effect is entirely
+between-phase: playoff games carry a long layoff **and** score about 20 points
+less. A rest adjustment fitted on the pooled data would be a playoff detector
+wearing a rest costume, and it would misprice every well-rested
+regular-season game.
+
+Nothing was added to the model. `totals_report` now prints residual bias
+split at `LONG_LAYOFF_DAYS = 10` so the question stays answerable:
+
+```
+  sport    normal n     bias  layoff n     bias
+  nba          1196    -0.50        33    -4.37
+  mlb            64    +0.38        15    +0.94
+```
+
+### The finding worth more than either of them
+
+**The model over-predicts postseason totals badly.** Playoff games in the
+table average 210.5 against a regular-season 231.1, and the model — fitted on
+regular-season scoring rates — carries a **−17.09 mean residual** on them.
+
+That is a far larger effect than opponent strength (which moved MAE by 0.11)
+and it is a bias, not noise. n=21 is too thin to calibrate a correction, and
+the postseason data is sparse for other reasons, but a phase indicator is the
+obvious next lever if playoff coverage improves.
