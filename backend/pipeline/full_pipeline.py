@@ -195,12 +195,24 @@ def _store_games(session: Session, sport: str, target_date: date,
                 existing.date = game_date
 
         if existing is None:
-            # Fallback for rows created before espn_id existed.
+            # Fallback for rows that have no espn_id yet -- ones created
+            # before the column existed, or created from the Odds API, which
+            # carries no ESPN identity.
+            #
+            # `espn_id.is_(None)` is load-bearing. Without it this matched any
+            # row sharing (sport, date, teams), including rows that already
+            # carry a DIFFERENT espn_id, so a genuinely distinct second game
+            # between the same teams on the same day was silently folded into
+            # the first. That is not hypothetical: mlb doubleheaders lost
+            # their second game (CIN/STL 2026-05-23, BAL/DET 2026-05-24) and
+            # so did the 2026 NBA All-Star Championship, which repeated the
+            # round-robin's STRIPES v STARS pairing.
             existing = session.query(Game).filter(
                 Game.sport == sport,
                 Game.date == game_date,
                 Game.home_team_id == home_id,
                 Game.away_team_id == away_id,
+                Game.espn_id.is_(None),
             ).first()
 
         if existing:

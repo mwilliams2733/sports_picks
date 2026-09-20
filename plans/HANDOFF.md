@@ -2273,3 +2273,52 @@ produced an impossible all-positive schedule-strength deviation.
 
 ESPN lists a **fourth** All-Star event that day, `401838143` (the
 Championship), which is not in the table at all. Not chased.
+
+## The missing All-Star event, and what it led to — 2026-09-19
+
+`401838143` (the All-Star Championship) was absent. Chasing it found a
+matcher bug and, separately, a coverage gap.
+
+### The bug: a same-day rematch was folded into the first game
+
+`fetch_and_store_games` looks a game up by `espn_id`, then falls back to
+`(sport, date, home_team, away_team)` — a fallback whose comment says it is
+"for rows created before espn_id existed", but which had no `espn_id`
+constraint. So it also matched rows that already carried a **different**
+espn_id, and a genuinely distinct second meeting was folded into the first
+and lost.
+
+Three real games were lost this way:
+
+| event | what it was |
+|---|---|
+| `401815461` | mlb CIN/STL 2026-05-23, the second of a doubleheader (17:10Z and 23:15Z share an Eastern date) |
+| `401873649` | mlb BAL/DET 2026-05-24, same |
+| `401838143` | nba All-Star Championship, repeating the round robin's STRIPES v STARS pairing |
+
+Fixed by adding `Game.espn_id.is_(None)` to the fallback, which is what the
+comment always claimed it did. All three have been recovered: games 1832 →
+1835, `integrity_check: ok`.
+
+The fallback's real purpose still works — rows created from the Odds API
+carry no ESPN identity and are still adopted rather than duplicated.
+
+### The coverage gap: four nba games were never collected
+
+`401810284` (NO/PHX 2025-12-26), `401810547`, `401810600`, `401810627`. These
+are **not** the matcher bug: each has an Eastern date of its own and no
+same-date rematch. The stored row for that pairing is the *next day's*
+different event, carries `start_time = None`, and was created from the Odds
+API and later given its id by `backfill_espn_ids` — so the ESPN games path
+never saw that date at all.
+
+They date from the months the scheduler was producing nothing. Four of 1245
+nba games. Not a code defect and not repaired.
+
+### A measurement error worth recording
+
+The first sweep compared ESPN's events against our rows **per date** and
+reported 741 missing across 125 dates. That was wrong: ESPN files by Eastern
+date and a game stored under a neighbouring date counted as absent. Checking
+each espn_id against the whole table gives **7**. Compare identities against
+the whole set, not per bucket, whenever the bucket key is itself uncertain.
