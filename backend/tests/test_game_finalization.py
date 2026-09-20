@@ -14,6 +14,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from backend.models import Base, Game, Team
 from backend.pipeline.scheduler import morning_scout
 
+from backend.time_utils import et_today
+
 
 #: pytest-httpx 0.36 configures the fixture through a MARKER, not through
 #: fixture overrides. These tests register a stub per (sport, day) in the
@@ -48,7 +50,7 @@ NBA_SB = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboar
 NCAAB_SB = ("https://site.api.espn.com/apis/site/v2/sports/basketball/"
             "mens-college-basketball/scoreboard")
 
-TODAY = datetime.date.today()
+TODAY = et_today()
 YESTERDAY = TODAY - datetime.timedelta(days=1)
 
 

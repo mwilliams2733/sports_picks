@@ -12,6 +12,7 @@ from backend.analysis.variants.sport_specific import SportSpecificStrategy
 from backend.analysis.variants.prop_value import PropValueStrategy
 from backend.analysis.variants.combat_sports import CombatSportsStrategy
 from backend.analysis.confidence import get_thresholds
+from backend.time_utils import et_today
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,8 @@ def generate_and_store_picks(session: Session, strategy_id: int,
     real wager. A game with no start_time is kept: unknown is not past.
     Backtests pass False, since they deliberately pick games long over.
     """
-    target_date = target_date or date.today()
+    # Eastern, because Game.date is: see time_utils.et_today.
+    target_date = target_date or et_today()
     strat_row = session.get(StrategyModel, strategy_id)
     if not strat_row: return 0
     config = json.loads(strat_row.config_json)

@@ -11,6 +11,7 @@ from backend.analysis.prop_analyzer import PropAnalyzer
 from backend.analysis.prop_confidence import get_prop_thresholds
 from backend.analysis.odds_utils import calculate_payout, InvalidOddsError
 from backend.data_types import PropAnalysis
+from backend.time_utils import et_today
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ def build_default_collector() -> PlayerStatsCollector:
 
 async def run_prop_pipeline(session: Session, target_date: date | None = None,
                             strategy_id: int | None = None) -> dict:
-    target_date = target_date or date.today()
+    target_date = target_date or et_today()
     collector = build_default_collector()
     try:
         return await _run_prop_pipeline_inner(session, collector, target_date, strategy_id)

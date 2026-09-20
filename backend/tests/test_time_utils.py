@@ -48,3 +48,56 @@ def test_there_is_one_ET_and_everything_shares_it():
     from backend.pipeline import scheduler
     assert job.ET is ET
     assert scheduler.ET is ET
+
+
+# --------------------------------------------------------------------------
+# "Today" must mean today in Eastern time.
+#
+# Games are stored under their Eastern date (et_date), but the pipeline asked
+# `date.today()`, which is the machine's LOCAL date. This box runs Pacific,
+# so between 21:00 and midnight PT -- midnight to 03:00 ET -- the two
+# disagree and pick generation looks for the wrong day. Observed at 01:26 ET
+# on 2026-09-20: 14 NFL games dated 09-20 were stored, and generation for
+# "today" found none because locally it was still 09-19.
+# --------------------------------------------------------------------------
+
+import datetime
+
+from backend.time_utils import ET, et_today
+
+
+def test_et_today_is_the_eastern_date(monkeypatch):
+    """Not the machine's date, and not UTC's."""
+    import backend.time_utils as tu
+
+    class _Fixed(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            # 02:00 ET on the 20th, which is 06:00 UTC and 23:00 PT on the 19th.
+            return datetime.datetime(2026, 9, 20, 6, 0,
+                                     tzinfo=datetime.timezone.utc).astimezone(tz)
+
+    monkeypatch.setattr(tu, "datetime", _Fixed)
+    assert et_today() == datetime.date(2026, 9, 20)
+
+
+def test_et_today_rolls_over_at_eastern_midnight(monkeypatch):
+    import backend.time_utils as tu
+
+    class _Fixed(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            # 23:30 ET on the 19th = 03:30 UTC on the 20th.
+            return datetime.datetime(2026, 9, 20, 3, 30,
+                                     tzinfo=datetime.timezone.utc).astimezone(tz)
+
+    monkeypatch.setattr(tu, "datetime", _Fixed)
+    assert et_today() == datetime.date(2026, 9, 19)
+
+
+def test_et_today_agrees_with_et_date_on_the_same_instant():
+    """The two must not use different conventions for the same moment."""
+    now = datetime.datetime.now(ET)
+    from backend.time_utils import et_date
+    assert et_today() == et_date(now.astimezone(datetime.timezone.utc)
+                                 .strftime("%Y-%m-%dT%H:%M:%SZ"))

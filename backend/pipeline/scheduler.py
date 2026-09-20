@@ -23,7 +23,7 @@ from backend.models import (
 from backend.analysis.odds_utils import calculate_payout
 
 logger = logging.getLogger(__name__)
-from backend.time_utils import ET  # noqa: F401  (re-exported)
+from backend.time_utils import ET, et_today  # noqa: F401  (ET re-exported)
 LEAD_TIME = timedelta(hours=2)
 
 
@@ -174,7 +174,7 @@ def fetch_windowless_odds(config, engine, sports) -> None:
         ).first()
         if strategy is not None:
             count = generate_and_store_picks(
-                session, strategy.id, date.today(), sports=tuple(sports))
+                session, strategy.id, et_today(), sports=tuple(sports))
             logger.info("Generated %d picks for %s", count, ", ".join(sports))
     except Exception:
         logger.exception("Odds fetch failed for %s", ", ".join(sports))
@@ -200,7 +200,7 @@ def morning_scout(config, engine, scheduler, is_retry=False):
         if not scheduled_sports:
             logger.info("No auto-scheduled sports in season today")
             return
-        today = date.today()
+        today = et_today()
         # Today's pass reconciles: a postponed game must drop out of Today's
         # Picks. The lookback days are finalize-only -- their job is to capture
         # scores for games that had not been played when this ran yesterday.
@@ -316,7 +316,7 @@ def morning_scout(config, engine, scheduler, is_retry=False):
 def _run_window(config, engine, sport: str, window: dict):
     session = get_session(engine)
     try:
-        today = date.today()
+        today = et_today()
         budget = config.get("odds_budget", DEFAULT_BUDGET)
         api_key = config.get("odds_api_key")
         window_game_ids = {g["id"] for g in window["games"]}

@@ -9,6 +9,8 @@ test without mocking time, so these tests focus on:
 """
 import os
 
+from backend.time_utils import et_today
+
 
 def test_configure_scheduler_registers_expected_cron_jobs():
     """configure_scheduler must wire the four cron jobs the deployment
@@ -116,7 +118,7 @@ def test_morning_scout_removes_stale_window_jobs_after_recluster(monkeypatch):
     ])
     session.flush()
 
-    today = _date.today()
+    today = et_today()
     far_future_base = datetime.now(tz=timezone.utc) + timedelta(hours=6)
     session.add_all([
         Game(id=1, sport="nba", season="2025-26", date=today,

@@ -37,3 +37,17 @@ def et_date(date_str: str) -> date:
     date a game is *filed under* is timezone-dependent.
     """
     return datetime.fromisoformat(date_str.replace("Z", "+00:00")).astimezone(ET).date()
+
+
+def et_today() -> date:
+    """Today's Eastern calendar date.
+
+    Not ``date.today()``. That is the *machine's* date, and games are filed
+    under their Eastern one by :func:`et_date`. On a host west of ET the two
+    disagree for the last hours of every local day: observed at 01:26 ET on
+    2026-09-20, where 14 NFL games dated the 20th were stored and pick
+    generation for "today" found none, because locally it was still the 19th.
+
+    Anything that compares against ``Game.date`` must use this.
+    """
+    return datetime.now(ET).date()

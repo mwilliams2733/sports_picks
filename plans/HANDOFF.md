@@ -2575,3 +2575,39 @@ bouts and McGregor in two. It was **not** added: a fighter can legitimately
 have a next fight announced while another is booked, and the cost of a false
 positive here is deleting a real bout. Worth revisiting with more evidence
 than one snapshot.
+
+## NFL readiness, and the local-date bug it exposed — 2026-09-20
+
+At 01:26 ET on Sunday, game day, the table held **one** nfl game (a final
+from 09-17), **two** nfl teams and **zero** nfl odds. ESPN had 14 games for
+the day plus Monday night; the Odds API had 29 events.
+
+Fetched and verified end to end:
+
+| | |
+|---|---|
+| nfl games | 1 → 16 |
+| odds | 0 → 273 rows, every game at 11 books |
+| picks | **25** (11 moneyline, 14 spread) |
+
+No over/under picks, which is correct — `TOTALS_VALIDATED_SPORTS` is empty.
+Kickoff is 13:00 ET, so this was ~11 hours ahead of the first game.
+
+### `date.today()` is the machine's date, not the schedule's
+
+The odds run produced **0 picks** at first. `generate_and_store_picks`
+filters `Game.date == date.today()`, but games are filed under their
+**Eastern** date by `et_date`. This host runs Pacific, so at 01:26 ET —
+22:26 PT — `date.today()` returned 2026-09-19 while the games were dated
+2026-09-20.
+
+The two disagree for the last three hours of every local day. The 08:00 ET
+scout is safe (05:00 PT, same date), so this did not cause today's gap, but
+it is the same class of defect as the UTC/Eastern game-date split.
+
+`time_utils.et_today()` now exists and every caller that compares against
+`Game.date` uses it: `pick_generator`, `prop_pipeline`, `scheduler` (both
+the windowless path and `_run_window`), and `fetch_odds_now`.
+
+Six test modules seeded fixtures with `date.today()` and were switched too —
+they would have started failing nightly otherwise, for three hours at a time.

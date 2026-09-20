@@ -32,6 +32,7 @@ import os
 from datetime import date
 
 from backend.collectors.budget import DEFAULT_BUDGET, get_credit_summary
+from backend.time_utils import et_today
 from backend.config import is_sport_in_season, load_config
 from backend.database import get_engine, get_session, run_migrations
 from backend.models import StrategyModel
@@ -74,7 +75,7 @@ def run(db_path: str, *, sports=None, with_picks: bool = True,
     run_migrations(engine)
     session = get_session(engine)
 
-    today = date.today()
+    today = et_today()
     budget = config.get("odds_budget", DEFAULT_BUDGET)
     api_key = config.get("odds_api_key")
     target = list(sports) if sports else in_season_sports(config)

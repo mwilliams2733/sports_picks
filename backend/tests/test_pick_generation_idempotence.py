@@ -18,7 +18,9 @@ from backend.database import get_engine, get_session
 from backend.models import Base, Game, Odds, PickModel, StrategyModel, Team
 from backend.pipeline.pick_generator import generate_and_store_picks
 
-TODAY = datetime.date.today()
+from backend.time_utils import et_today
+
+TODAY = et_today()
 
 
 @pytest.fixture()

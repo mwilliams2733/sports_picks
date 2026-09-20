@@ -13,7 +13,9 @@ import pytest
 from backend.database import get_engine, get_session
 from backend.models import Base, Game, StrategyModel, Team
 
-TODAY = datetime.date.today()
+from backend.time_utils import et_today
+
+TODAY = et_today()
 
 
 @pytest.fixture()
