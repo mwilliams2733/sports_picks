@@ -2794,3 +2794,96 @@ The backfill is re-runnable and idempotent on dates already stored:
 
 **Back up `sports_picks.db` before any run that writes**, as every production
 section above does.
+
+## The season label, the week, and a recalibration floor — 2026-09-20
+
+Three more commits, pushed straight to `master`: `c676277`, `6177d1a`,
+`a607d98`. Reviewed here rather than written here.
+
+### The recalibrator was tightening thresholds on coin flips
+
+`MIN_PICKS_PER_TIER` was 20. At n=20 the standard error of a win rate near 0.5
+is 11.2 points, so the 5-point deviation the recalibrator acts on is **0.45 SE**
+— well inside noise. It was not measuring calibration; it was moving thresholds
+one point per night, indefinitely. The floor is now derived from the deviation
+rather than chosen, `n = (z * 0.5 / DEVIATION_THRESHOLD) ** 2` at z = 1.645,
+one-sided because the recalibrator only ever moves a threshold in the direction
+the deviation points: **271 decided picks**, where a 5-point gap is 1.65 SE.
+`DEVIATION_THRESHOLD` had been defined twice in the same module — exactly the
+drift the derivation prevents — and the duplicate is gone.
+
+This compounds the tier finding above. The four rows written on 2026-09-20 came
+from cohorts of 26, 34, 37 and 70, and the 37 were the NCAAB unders that were
+unders *because* the totals counter said so.
+
+### One season label, and where it still bends
+
+Three sites built the label three ways — `f"{y}-{str(y+1)[-2:]}"` in the
+backtesting loader, `f"{y}-{y+1}"` on the ESPN path, `f"{y}"` on the odds path
+— so the same season was recorded differently depending on which collector
+created the row. NBA carried four labels for two seasons. `config.season_label`
+now derives one from the season boundaries already in `config.yaml`, and 598
+rows were relabelled: nba 2025-26 (1264), ncaab 2025-26 (86), ncaaf 2026-27
+(333), nfl 2026-27 (48), mlb 2026 (129), boxing 2026 (139), mma 2026 (151) + 2027 (2).
+
+**The `f"{y}-{y+1}"` defect is genuinely fixed** — a January 2027 NFL game now
+reads `2026-27` rather than `2027-2028`, and the move from once-per-batch to
+once-per-game is right for the same reason `week_of` reads the event: a
+scoreboard response keyed to one date can carry a game from another.
+
+**What the derivation cannot express is a date before the configured start.**
+Run against the real `config.yaml`:
+
+```
+  nfl    2026-08-15  -> 2025-26     PRESEASON (start 09-05)
+  nba    2026-10-05  -> 2025-26     PRESEASON (start 10-22)
+  ncaaf  2026-08-20  -> 2025-26     week 0, four days early (start 08-24)
+  nfl    2027-01-15  -> 2026-27     correct, the bug this fixed
+  nba    2026-06-25  -> 2025-26     correct, Finals past the 06-20 end
+```
+
+The *tail* end comes out right by construction — a June NBA game is before the
+October start, so it lands in the season that started the previous October. The
+*head* end does not: anything between January 1 and the start date is
+attributed to the season before it, and preseason sits exactly there.
+`test_a_game_just_before_the_start_belongs_to_the_previous_season` asserts this
+deliberately, so it is a decision, not an oversight — but it is a decision made
+against NFL 09-04, one day out, where it looks obviously right.
+
+The underlying reason is that the `seasons` block was written to answer "is this
+sport active today", a coarse gate for the scheduler and the UI, and is now also
+the authority on season *identity*. A start date a few days off costs nothing
+for the first question and silently misattributes a game for the second.
+
+**Not reachable through the scheduler**, which gates on `is_sport_in_season` and
+so never fetches a preseason date. **Reachable through
+`backfill_date_range`**, which takes explicit dates and does not gate — the
+NCAAF backfill started on 08-24, the configured start exactly, which is the only
+reason it produced no mislabelled rows.
+
+**The fix the repo's own precedent points at**: ESPN's event carries
+`season.year`, authoritative for its own game, sitting in the dict
+`espn.season_type_of` already opens to read `season.type`. That is the same
+argument `6177d1a` made one commit earlier for `week.number` — store what ESPN
+already tells us — with `config.season_label` kept as the fallback for
+odds-path rows that have no ESPN event. Not done.
+
+### `Game.week` is populated
+
+`Game.week` existed on the model and was NULL for all 1,893 rows while every
+ESPN event already parsed carries `week.number`. Read from the event, not the
+scoreboard block. No sport allowlist — ESPN omits the block for sports without
+weeks, so the payload answers which sports have one, and `week_of` returns
+`None` rather than 0 because "no such concept" and "week zero" are different
+claims and NCAAF really does play a week zero. Backfilled: nfl 48 games, 0
+NULL, weeks 1-3 at exactly 16 each; ncaaf 333 games, 2 NULL. The two NULLs
+carry neither an `espn_id` nor an `odds_api_id`.
+
+### Still open, from these three
+
+- **The preseason label**, above. No rows are wrong today; the next backfill
+  that reaches a few days before a configured start will make some.
+- **The 598-row relabel has no script in the repo.** `backend/scripts/` holds a
+  backfill for espn_ids, game flags, prop fields, team stats and UFC Elo, but
+  nothing for the season label. Restoring a backup, or standing up a second
+  environment, leaves no way to reproduce it.
