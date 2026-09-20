@@ -29,9 +29,12 @@ odds_budget:
   reserve: 2000
 
 digest:
-  enabled: false          # must be explicitly turned on; dry-run until then
+  enabled: true
   send_hour_et: 11
   sports: ["ncaaf", "nfl", "nba", "mlb"]
   max_per_sport: 5
-  from: "picks@example.com"
-  recipients: []
+  from: "picks@example.com"   # placeholder -- must be a sender the transport accepts
+  recipients:
+    - "mlwilliams1236@gmail.com"
+    - "atlasinvestories2093@gmail.com"
+    - "davidccastillo@gmail.com"
