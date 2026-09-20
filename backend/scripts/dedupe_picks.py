@@ -92,8 +92,15 @@ def duplicate_groups(session, sport: str | None = None,
 
 
 def run(db_path: str, *, apply: bool = False, sport: str | None = None,
-        on_date: date | None = None) -> dict:
+        on_date: date | None = None, include_graded: bool = False) -> dict:
     """Report, and with ``apply`` remove, redundant pick copies.
+
+    ``include_graded`` also drops copies that carry a `pick_results` row,
+    together with those rows. Opt-in, because it rewrites recorded results:
+    the book becomes what it would have been had the generator always been
+    idempotent, keeping the first pick of each market and discarding the
+    later re-prices. ``units_removed`` reports the payout that leaves with
+    them, so the ROI change is visible rather than inferred afterwards.
 
     Raises ``FileNotFoundError`` if ``db_path`` does not exist: otherwise the
     engine would create an empty database at a typo'd path and report a
@@ -111,8 +118,27 @@ def run(db_path: str, *, apply: bool = False, sport: str | None = None,
     try:
         groups = duplicate_groups(session, sport=sport, on_date=on_date)
         doomed = [i for g in groups for i in g.drop]
-        refused = [i for g in groups for i in g.graded]
+        graded = [i for g in groups for i in g.graded]
+        refused: list[int] = []
+        if include_graded:
+            doomed += graded
+        else:
+            refused = graded
+
+        units = 0.0
+        if doomed:
+            units = sum(
+                r.payout or 0.0
+                for r in session.query(PickResult).filter(
+                    PickResult.pick_id.in_(doomed))
+            )
         if apply and doomed:
+            # Results first: pick_results.pick_id references picks.id, so
+            # deleting the picks while their grades remain trips the foreign
+            # key -- and leaving the grades behind would strand a recorded
+            # result with no wager attached to it.
+            session.query(PickResult).filter(
+                PickResult.pick_id.in_(doomed)).delete(synchronize_session=False)
             session.query(PickModel).filter(
                 PickModel.id.in_(doomed)).delete(synchronize_session=False)
             session.commit()
@@ -121,6 +147,7 @@ def run(db_path: str, *, apply: bool = False, sport: str | None = None,
             "would_delete" if not apply else "deleted": len(doomed),
             "refused_graded": len(refused),
             "refused_ids": refused,
+            "units_removed": round(units, 2),
         }
     finally:
         session.close()
@@ -131,6 +158,9 @@ def format_summary(s: dict, apply: bool) -> str:
     lines.append(f"  duplicate groups : {s['groups']}")
     lines.append(f"  {'deleted' if apply else 'would delete'}      : "
                  f"{s.get('deleted', s.get('would_delete', 0))}")
+    if s.get("units_removed"):
+        lines.append(f"  units removed    : {s['units_removed']:+.2f}  "
+                     "(payout leaving with the dropped copies)")
     if s["refused_graded"]:
         lines.append("")
         lines.append(f"  REFUSED: {s['refused_graded']} duplicate row(s) are graded "
@@ -152,11 +182,15 @@ def main(argv: list[str] | None = None) -> int:
                     help="Limit to games on this date (YYYY-MM-DD).")
     ap.add_argument("--apply", action="store_true",
                     help="Actually delete. Without this it is a dry run.")
+    ap.add_argument("--include-graded", action="store_true",
+                    help="Also drop graded copies and their results. This "
+                         "rewrites recorded results.")
     args = ap.parse_args(argv)
 
     on_date = date.fromisoformat(args.on_date) if args.on_date else None
     print(format_summary(
-        run(args.db, apply=args.apply, sport=args.sport, on_date=on_date),
+        run(args.db, apply=args.apply, sport=args.sport, on_date=on_date,
+            include_graded=args.include_graded),
         args.apply))
     return 0
 

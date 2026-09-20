@@ -1697,3 +1697,50 @@ sports and dates and can be removed whenever wanted:
 Removing the graded ones needs a decision first: keep the first pick and drop
 its later re-prices (consistent with the generator), or treat each re-price
 as a separate wager (which is what the table currently asserts).
+
+## The book, re-measured after deduplication — 2026-09-19
+
+Decision taken: keep the first pick of each market, drop the later
+re-prices, graded or not. That makes the book what it would have been had
+the generator always been idempotent.
+
+    python -m backend.scripts.dedupe_picks --db <abs path> --include-graded --apply
+
+401 rows deleted (316 graded, 85 ungraded) with their `pick_results`.
+`integrity_check: ok`, `foreign_key_check` clean, 0 orphaned results, 0
+duplicate groups remaining.
+
+| | before | after |
+|---|---|---|
+| picks | 841 | 440 |
+| pick_results | 519 | **203** |
+| units | −46.55 | **−14.55** |
+
+### The corrected book
+
+| sport | type | n | win% | units | roi |
+|---|---|---|---|---|---|
+| nba | moneyline | 19 | 36.8% | +7.00 | **+0.368** |
+| nba | over_under | 15 | 53.3% | +0.27 | +0.018 |
+| nba | prop | 50 | 54.0% | −3.10 | −0.062 |
+| nba | spread | 12 | 50.0% | −0.55 | −0.046 |
+| ncaab | moneyline | 35 | 25.7% | −14.91 | **−0.426** |
+| ncaab | over_under | 37 | 54.1% | +1.18 | +0.032 |
+| ncaab | spread | 35 | 45.7% | −4.45 | −0.127 |
+| **TOTAL** | | **203** | **45.8%** | **−14.55** | **−0.072** |
+
+### What survives from the earlier moneyline analysis, and what does not
+
+**Survives, and is the whole story:** ncaab moneyline is −0.426 ROI on 35
+picks while nba moneyline is +0.368 on 19. The direction and the split by
+sport are unchanged, which is what plan 016 was built on. The pooled
+home-advantage intercept remains the best explanation.
+
+**Does not survive:** every magnitude. The earlier figures — "142 graded
+moneyline picks", "−73.33 units", the edge-bucket table showing 0-for-36 —
+were counted over duplicated rows. There are **54 graded moneyline picks in
+total**, not 142. Any bucketed breakdown of them needs redoing from scratch;
+with n=35 for ncaab the buckets will be too thin to carry much.
+
+**State the effective sample honestly from here.** 203 graded picks across
+roughly 100 games, many sharing teams, is not 203 independent observations.

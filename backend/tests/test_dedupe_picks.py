@@ -137,3 +137,89 @@ def test_groups_are_reported_with_their_ids(tmp_path):
 def test_run_refuses_a_db_path_that_does_not_exist(tmp_path):
     with pytest.raises(FileNotFoundError):
         run(str(tmp_path / "nope.db"))
+
+
+# --------------------------------------------------------------------------
+# Dropping graded re-prices.
+#
+# A duplicate is a later decision against a moved line, not a re-record of
+# one -- ncaab 1260's moneyline was AWAY +367 on the first run and HOME +150
+# on the six after. Keeping the first pick and dropping the rest makes the
+# book what it would have been had the generator always been idempotent.
+#
+# Their pick_results rows must go with them, or the deletes trip the foreign
+# key and the results are orphaned from any wager.
+# --------------------------------------------------------------------------
+
+def _results(db):
+    s = get_session(get_engine(db))
+    try:
+        return sorted(r.pick_id for r in s.query(PickResult))
+    finally:
+        s.close()
+
+
+def test_graded_duplicates_are_removed_when_asked(tmp_path):
+    db = _db(tmp_path, [_pick(1), _pick(2), _pick(3)],
+             [PickResult(pick_id=1, result="win", payout=0.91),
+              PickResult(pick_id=2, result="win", payout=0.91),
+              PickResult(pick_id=3, result="win", payout=0.91)])
+    summary = run(db, apply=True, include_graded=True)
+
+    assert _ids(db) == [1]
+    assert summary["deleted"] == 2
+    assert summary["refused_graded"] == 0
+
+
+def test_their_results_go_with_them(tmp_path):
+    """Otherwise the delete trips the FK, or leaves a result with no wager."""
+    db = _db(tmp_path, [_pick(1), _pick(2)],
+             [PickResult(pick_id=1, result="win", payout=0.91),
+              PickResult(pick_id=2, result="win", payout=0.91)])
+    run(db, apply=True, include_graded=True)
+
+    assert _results(db) == [1], "orphaned or undeleted result rows"
+
+
+def test_the_survivors_own_result_is_untouched(tmp_path):
+    """Only the copies are dropped; the first pick keeps its grade."""
+    db = _db(tmp_path, [_pick(1), _pick(2)],
+             [PickResult(pick_id=1, result="win", payout=0.91),
+              PickResult(pick_id=2, result="loss", payout=-1.0)])
+    run(db, apply=True, include_graded=True)
+
+    s = get_session(get_engine(db))
+    try:
+        kept = s.query(PickResult).one()
+        assert kept.pick_id == 1 and kept.result == "win"
+    finally:
+        s.close()
+
+
+def test_the_units_removed_are_reported(tmp_path):
+    """The ROI change must be visible, not inferred afterwards."""
+    db = _db(tmp_path, [_pick(1), _pick(2), _pick(3)],
+             [PickResult(pick_id=1, result="win", payout=0.91),
+              PickResult(pick_id=2, result="win", payout=0.91),
+              PickResult(pick_id=3, result="loss", payout=-1.0)])
+    summary = run(db, apply=True, include_graded=True)
+
+    assert summary["units_removed"] == pytest.approx(-0.09)
+
+
+def test_graded_rows_are_still_refused_by_default(tmp_path):
+    """Opt-in only. The default must stay the cautious one."""
+    db = _db(tmp_path, [_pick(1), _pick(2)],
+             [PickResult(pick_id=2, result="win", payout=0.91)])
+    run(db, apply=True)
+    assert _ids(db) == [1, 2]
+
+
+def test_a_dry_run_with_graded_still_writes_nothing(tmp_path):
+    db = _db(tmp_path, [_pick(1), _pick(2)],
+             [PickResult(pick_id=2, result="win", payout=0.91)])
+    summary = run(db, include_graded=True)
+
+    assert _ids(db) == [1, 2]
+    assert _results(db) == [2]
+    assert summary["would_delete"] == 1
