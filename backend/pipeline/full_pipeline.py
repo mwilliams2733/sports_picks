@@ -18,7 +18,8 @@ ALL_SPORTS = ["nba", "nfl", "ncaab", "ncaaf", "boxing", "mma", "mlb"]
 
 async def fetch_and_store_games(session: Session, sports: list[str],
                                 target_date: date, *,
-                                reconcile: bool = True) -> int:
+                                reconcile: bool = True,
+                                errors: list | None = None) -> int:
     """Fetch one date's games from ESPN and store them in the DB.
 
     ``reconcile=False`` is finalize-only: scores and status are upserted, but
@@ -26,6 +27,13 @@ async def fetch_and_store_games(session: Session, sports: list[str],
     team-pair match failure would mark a real game ``canceled`` instead of
     ``final`` -- turning a matching bug into data loss on exactly the rows a
     lookback exists to rescue.
+
+    A per-sport fetch failure is logged and the remaining sports still run,
+    because one bad sport must not cost a whole day. That leaves the return
+    value unable to distinguish a failed fetch from an empty one -- both are
+    zero. Pass ``errors`` to receive ``(sport, exception)`` for each failure;
+    the backfill needs it, since a silently skipped date becomes a permanent
+    hole in the history rather than a retry.
     """
     espn = ESPNCollector()
     total = 0
@@ -40,6 +48,8 @@ async def fetch_and_store_games(session: Session, sports: list[str],
                 logger.info(f"Stored {stored} {sport} games for {target_date}")
             except Exception as e:
                 logger.warning("ESPN fetch failed for %s: %s: %s", sport, type(e).__name__, e)
+                if errors is not None:
+                    errors.append((sport, e))
     finally:
         await espn.close()
     return total

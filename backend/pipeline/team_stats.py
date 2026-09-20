@@ -513,7 +513,8 @@ def backfill_team_stats(session: Session, sport: str, *, dry_run: bool = False,
 
 
 def backfill_elo_history(session: Session, sport: str, *,
-                         dry_run: bool = False) -> dict[str, object]:
+                         dry_run: bool = False,
+                         rebuild: bool = False) -> dict[str, object]:
     """Replay ``sport`` chronologically writing the **pre-game** Elo rating.
 
     The row stored against game G is the rating each team carried *into* G, so
@@ -528,8 +529,19 @@ def backfill_elo_history(session: Session, sport: str, *,
     ratings are *returned* as ``final_ratings`` so a caller whose job is that
     table can persist them deliberately.
 
+    ``rebuild`` discards ``sport``'s existing history first and replays the
+    whole chain. The default skip-what-exists behaviour is right for an
+    incremental catch-up and wrong once games are inserted *earlier* than
+    rows already written: those rows hold a rating computed from a history
+    that did not yet include the new games, and no amount of appending fixes
+    them. After the 2026-09-20 backfill, team DEL read 1500.0 on 09-03,
+    1529.2 on 09-12 and 1500.0 again on 09-19 -- the last still carrying the
+    seed. Scoped to one sport, so rebuilding ncaaf cannot disturb nba.
+
     Raises ``ValueError`` for combat sports, whose history is owned by the
-    grader and uses post-game semantics.  Does not commit.
+    grader and uses post-game semantics.  The refusal is checked before
+    ``rebuild`` acts, so the flag cannot become a way around it.  Does not
+    commit.
     """
     if sport in COMBAT_SPORTS:
         raise ValueError(
@@ -539,6 +551,11 @@ def backfill_elo_history(session: Session, sport: str, *,
         )
 
     from backend.analysis.sport_constants import get_home_advantage_elo
+
+    if rebuild and not dry_run:
+        session.query(EloHistory).filter(
+            EloHistory.sport == sport).delete(synchronize_session=False)
+        session.flush()
 
     games = _final_games(session, sport)
     already = {
