@@ -3,6 +3,7 @@ from fastapi import APIRouter, Request
 from backend.database import get_session
 from backend.models import PickModel, Game, PickResult, Team
 from backend.analysis.odds_utils import compute_pick_clv
+from backend.time_utils import et_today
 
 router = APIRouter()
 
@@ -24,7 +25,7 @@ def get_today_picks(request: Request, sport: str | None = None, min_confidence: 
             day = date.fromisoformat(target_date)
         else:
             # Show today's picks; if none, show tomorrow's
-            day = date.today()
+            day = et_today()
             today_count = session.query(PickModel).join(Game).filter(Game.date == day).count()
             if today_count == 0:
                 day = day + timedelta(days=1)

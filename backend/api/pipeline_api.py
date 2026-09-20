@@ -14,6 +14,7 @@ from backend.collectors.budget import get_credit_summary, DEFAULT_BUDGET
 from backend.collectors.odds_api import redact_api_key
 from backend.exceptions import BudgetExhaustedError
 from backend.models import StrategyModel
+from backend.time_utils import et_today
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -35,7 +36,7 @@ async def trigger_pipeline(
     session = get_session(request.app.state.engine)
     try:
         config = load_config("config.yaml")
-        today = date.today()
+        today = et_today()
         budget = config.get("odds_budget", DEFAULT_BUDGET)
 
         if sport:

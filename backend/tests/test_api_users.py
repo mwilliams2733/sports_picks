@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from backend.api.main import create_app
 from backend.database import get_session
 from backend.models import Base, Team, Game, Parlay, PaperPick
+from backend.time_utils import et_today
 
 
 def _seed_games(client, specs):
@@ -27,7 +28,7 @@ def _seed_games(client, specs):
         game = Game(
             sport="nba",
             season="2025-26",
-            date=date.today(),
+            date=et_today(),
             home_team_id=home.id,
             away_team_id=away.id,
             status=spec.get("status", "scheduled"),

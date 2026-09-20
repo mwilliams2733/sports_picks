@@ -9,6 +9,7 @@ from backend.analysis.odds_utils import calculate_payout
 import json
 import asyncio
 import logging
+from backend.time_utils import et_today
 
 logger = logging.getLogger(__name__)
 
@@ -654,7 +655,7 @@ def get_user_stats(request: Request, user_id: int):
             .all()
         )
 
-        today = date.today()
+        today = et_today()
         week_start = today - timedelta(days=today.weekday())  # Monday
         month_start = today.replace(day=1)
 

@@ -4,6 +4,7 @@ from sqlalchemy.orm import aliased
 from backend.database import get_session
 from backend.models import PlayerProp, Game, Team, PlayerStat, TeamStat
 from backend.analysis.prop_analyzer import PropAnalyzer
+from backend.time_utils import et_today
 
 router = APIRouter()
 
@@ -37,7 +38,7 @@ MARKET_LABELS = {
 def get_today_props(request: Request, sport: str | None = None, market: str | None = None):
     session = get_session(request.app.state.engine)
     try:
-        day = date.today()
+        day = et_today()
         # If no props today, check tomorrow
         count = session.query(PlayerProp).join(Game).filter(Game.date == day).count()
         if count == 0:

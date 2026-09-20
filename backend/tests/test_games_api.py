@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from backend.api.main import create_app
 from backend.database import get_session
 from backend.models import Base, Team, Game, Odds
+from backend.time_utils import et_today
 
 
 def _seed(app, rows: list):
@@ -44,7 +45,7 @@ def _utc(y, m, d, h=12):
 def test_today_excludes_scheduled_game_with_no_odds():
     """A scheduled game with no Odds rows is not bookable — must not appear."""
     app = create_app(":memory:")
-    today = date.today()
+    today = et_today()
     _seed(app, [
         Team(id=1, name="Denver Nuggets", abbreviation="DEN", sport="nba"),
         Team(id=2, name="Minnesota Timberwolves", abbreviation="MIN", sport="nba"),
@@ -60,7 +61,7 @@ def test_today_excludes_scheduled_game_with_no_odds():
 def test_today_includes_scheduled_game_with_odds():
     """A scheduled game with at least one Odds row is bettable — must appear."""
     app = create_app(":memory:")
-    today = date.today()
+    today = et_today()
     future = datetime.now(timezone.utc) + timedelta(hours=3)
     _seed(app, [
         Team(id=1, name="Boston Celtics", abbreviation="BOS", sport="nba"),
@@ -82,7 +83,7 @@ def test_today_includes_in_progress_game_even_without_odds():
     """A live game stays visible even if odds rows are gone — user can still
     react to score updates and check the game's pick."""
     app = create_app(":memory:")
-    today = date.today()
+    today = et_today()
     _seed(app, [
         Team(id=1, name="Knicks", abbreviation="NYK", sport="nba"),
         Team(id=2, name="Heat", abbreviation="MIA", sport="nba"),
@@ -98,7 +99,7 @@ def test_today_includes_in_progress_game_even_without_odds():
 def test_today_excludes_final_game():
     """A finalized game is not bettable — must not appear in Today's Picks."""
     app = create_app(":memory:")
-    today = date.today()
+    today = et_today()
     _seed(app, [
         Team(id=1, name="Bulls", abbreviation="CHI", sport="nba"),
         Team(id=2, name="Bucks", abbreviation="MIL", sport="nba"),
@@ -120,7 +121,7 @@ def test_today_excludes_scheduled_game_with_long_passed_start_time():
     the pipeline failed to update it — likely a postponement or cancellation.
     Treat as stale and hide."""
     app = create_app(":memory:")
-    today = date.today()
+    today = et_today()
     very_past = datetime.now(timezone.utc) - timedelta(hours=8)
     _seed(app, [
         Team(id=1, name="Hawks", abbreviation="ATL", sport="nba"),
@@ -143,7 +144,7 @@ def test_today_response_includes_last_meeting_and_l10_records():
     series data: last_meeting (most recent prior game between the same teams)
     and last-10 record per team."""
     app = create_app(":memory:")
-    today = date.today()
+    today = et_today()
     future = datetime.now(timezone.utc) + timedelta(hours=2)
     rows = [
         Team(id=1, name="Suns", abbreviation="PHX", sport="nba"),
@@ -202,7 +203,7 @@ def test_today_response_includes_last_meeting_and_l10_records():
 def test_today_last_meeting_is_null_when_no_prior_history():
     """Two teams meeting for the first time → last_meeting is null, not error."""
     app = create_app(":memory:")
-    today = date.today()
+    today = et_today()
     future = datetime.now(timezone.utc) + timedelta(hours=2)
     _seed(app, [
         Team(id=1, name="Team A", abbreviation="TA", sport="nba"),

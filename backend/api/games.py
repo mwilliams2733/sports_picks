@@ -4,6 +4,7 @@ from sqlalchemy import or_, and_, select
 from sqlalchemy.orm import aliased
 from backend.database import get_session
 from backend.models import Game, Odds, Team
+from backend.time_utils import et_today
 
 router = APIRouter()
 
@@ -26,7 +27,7 @@ def get_today_games(request: Request, sport: str | None = None):
     """
     session = get_session(request.app.state.engine)
     try:
-        day = date.today()
+        day = et_today()
         now = datetime.now(timezone.utc)
         grace_cutoff = now - _SCHEDULED_GRACE
 

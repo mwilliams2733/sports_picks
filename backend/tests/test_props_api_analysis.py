@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from backend.api.main import create_app
 from backend.models import Base, Game, Team, PlayerProp, PlayerStat
 from backend.database import get_session
+from backend.time_utils import et_today
 
 def test_props_today_includes_analysis():
     app = create_app(":memory:")
@@ -12,7 +13,7 @@ def test_props_today_includes_analysis():
     away = Team(name="Brooklyn", abbreviation="BKN", sport="nba")
     session.add_all([home, away])
     session.commit()
-    today = date.today()
+    today = et_today()
     game = Game(sport="nba", season="2025-26", date=today,
                 home_team_id=home.id, away_team_id=away.id, status="scheduled")
     session.add(game)

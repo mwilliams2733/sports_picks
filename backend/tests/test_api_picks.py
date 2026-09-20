@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 from fastapi.testclient import TestClient
 from backend.api.main import create_app
 from backend.models import Base, Team, Game, PickModel, PickResult, StrategyModel
+from backend.time_utils import et_today
 
 def _seed_db(client):
     engine = client.app.state.engine
@@ -10,7 +11,7 @@ def _seed_db(client):
     session = get_session(engine)
     t1 = Team(id=1, name="Boston Celtics", abbreviation="BOS", sport="nba")
     t2 = Team(id=2, name="LA Lakers", abbreviation="LAL", sport="nba")
-    g = Game(id=1, sport="nba", season="2025-26", date=date.today(),
+    g = Game(id=1, sport="nba", season="2025-26", date=et_today(),
              home_team_id=1, away_team_id=2, status="scheduled")
     s = StrategyModel(id=1, name="ensemble", config_json="{}", is_active=True)
     p = PickModel(id=1, game_id=1, strategy_id=1, pick_type="moneyline",
