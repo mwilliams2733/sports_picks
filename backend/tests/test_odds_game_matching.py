@@ -189,3 +189,107 @@ def test_a_date_only_candidate_is_still_used_when_it_is_the_only_one(session):
     g = _find_game_by_teams(session, "mlb", "P", "Q",
                             when=_when(datetime.datetime(2026, 9, 20, 0, 10)))
     assert g is not None and g.id == 32
+
+
+# --------------------------------------------------------------------------
+# An expected drop is not a warning.
+#
+# The unmatched-event warning exists because odds used to be dropped in
+# silence. But once futures markets are deliberately skipped, their prices
+# legitimately have no fixture, and they fired the warning on every run --
+# ten lines per scout for boxing and mma alone. A warning that always fires
+# stops being read, which would undo the reason it was added.
+#
+# Downgrading all of them would hide a real drop. The two cases are
+# separated instead.
+# --------------------------------------------------------------------------
+
+def _speculative_event(home, away, when="2026-12-31T22:57:00Z"):
+    return {"home_team": home, "away_team": away, "commence_time": when,
+            "bookmakers": [{"key": "bk", "moneyline_home": -120,
+                            "moneyline_away": 100, "spread_home": None,
+                            "spread_away": None, "over_under": None}]}
+
+
+def test_a_deliberately_skipped_event_logs_at_info(session, caplog):
+    """Its prices have no fixture because we chose not to create one."""
+    events = [_speculative_event("Joshua", "Fury"),
+              _speculative_event("Joshua", "Dubois")]
+    with caplog.at_level(logging.DEBUG):
+        _store_odds(session, "boxing", events, skipped=frozenset(
+            {("2026-12-31", "Joshua"), ("2026-12-31", "Fury"),
+             ("2026-12-31", "Dubois")}))
+
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert "Joshua" in caplog.text, "it still says something"
+
+
+def test_an_unexpected_drop_is_still_a_warning(session, caplog):
+    """The case the warning was added for must keep shouting."""
+    events = [{
+        "home_team": "Cleveland Guardians", "away_team": "Athletics",
+        "commence_time": "2026-09-25T22:10:00Z",
+        "bookmakers": [{"key": "bk", "moneyline_home": -120,
+                        "moneyline_away": 100, "spread_home": -1.5,
+                        "spread_away": 1.5, "over_under": 8.5}],
+    }]
+    with caplog.at_level(logging.WARNING):
+        _store_odds(session, "mlb", events)
+
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert "Cleveland Guardians" in caplog.text
+
+
+def test_skipping_is_keyed_on_the_event_not_the_sport(session, caplog):
+    """A skipped name must not mute an unrelated event on the same run."""
+    events = [
+        _speculative_event("Joshua", "Fury"),
+        {"home_team": "Cleveland Guardians", "away_team": "Athletics",
+         "commence_time": "2026-09-25T22:10:00Z",
+         "bookmakers": [{"key": "bk", "moneyline_home": -120,
+                         "moneyline_away": 100, "spread_home": -1.5,
+                         "spread_away": 1.5, "over_under": 8.5}]},
+    ]
+    with caplog.at_level(logging.WARNING):
+        _store_odds(session, "boxing", events, skipped=frozenset(
+            {("2026-12-31", "Joshua"), ("2026-12-31", "Fury")}))
+
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 1
+    assert "Cleveland Guardians" in warnings[0].getMessage()
+
+
+@pytest.mark.asyncio
+async def test_the_skipped_set_reaches_store_odds(session, monkeypatch):
+    """The wiring, not just the helper.
+
+    _store_odds only knows a drop was expected because fetch_and_store_odds
+    passes it the same set it skipped. A mutation removing that argument
+    left every direct-call test green, which is how a wiring gap hides.
+    """
+    import logging as _logging
+
+    import backend.pipeline.full_pipeline as fp
+
+    events = [_speculative_event("Joshua", "Fury"),
+              _speculative_event("Joshua", "Dubois")]
+
+    class _Collector:
+        requests_remaining = 100
+        def __init__(self, key): pass
+        async def fetch_odds(self, sport): return events
+        async def close(self): return None
+
+    monkeypatch.setattr(fp, "OddsAPICollector", _Collector)
+    monkeypatch.setattr(fp, "record_api_call", lambda *a, **k: None)
+
+    seen = {}
+    real = fp._store_odds
+    monkeypatch.setattr(fp, "_store_odds",
+                        lambda s, sport, data, skipped=None:
+                        seen.setdefault("skipped", skipped) or 0)
+
+    await fp.fetch_and_store_odds(session, ["boxing"], "key")
+
+    assert seen["skipped"], "fetch_and_store_odds did not pass the skipped set"
+    assert ("2026-12-31", "Joshua") in seen["skipped"]

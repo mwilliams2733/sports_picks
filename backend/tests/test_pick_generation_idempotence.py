@@ -90,7 +90,13 @@ def test_the_original_entry_price_is_kept(session):
     session.commit()
     generate_and_store_picks(session, 1, TODAY)
 
-    assert {p.id: p.odds_at_pick for p in _picks(session)} == before
+    # Every pick that already existed keeps the price it was taken at. A
+    # market that had no pick before may acquire one now -- the move can
+    # open an edge where there was none -- so this is a subset check, not
+    # an equality one. Re-pricing an existing pick is the thing being
+    # guarded against.
+    after = {p.id: p.odds_at_pick for p in _picks(session)}
+    assert {k: after[k] for k in before} == before
 
 
 def test_a_sport_filter_leaves_other_sports_alone(session):

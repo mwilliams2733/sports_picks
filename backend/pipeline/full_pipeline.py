@@ -85,7 +85,7 @@ async def fetch_and_store_odds(session: Session, sports: list[str], api_key: str
                             or (day, event.get("away_team")) in unreal):
                         continue
                     _ensure_game_from_odds(session, sport, event)
-                stored = _store_odds(session, sport, odds_data)
+                stored = _store_odds(session, sport, odds_data, skipped=unreal)
                 total += stored
                 logger.info(f"Stored odds for {stored} {sport} events (remaining: {collector.requests_remaining})")
             except BudgetExhaustedError:
@@ -396,7 +396,8 @@ def _event_start(event: dict) -> datetime | None:
         return None
 
 
-def _store_odds(session: Session, sport: str, odds_data: list[dict]) -> int:
+def _store_odds(session: Session, sport: str, odds_data: list[dict],
+                skipped: frozenset[tuple[str, str]] | None = None) -> int:
     """Store odds on the game each event was priced for.
 
     The return value counts bookmaker rows written, not events -- the log
@@ -410,12 +411,23 @@ def _store_odds(session: Session, sport: str, odds_data: list[dict]) -> int:
         )
         if not game:
             # A bare `continue` here is how a whole slate could lose its
-            # prices without anything noticing.
-            logger.warning(
+            # prices without anything noticing. But once futures markets are
+            # deliberately skipped, THEIR prices legitimately have no fixture
+            # and fired this every run -- ten lines a scout for boxing and
+            # mma. A warning that always fires stops being read, which would
+            # undo the reason it exists, so an expected drop is info and only
+            # an unexplained one is a warning.
+            day = (event.get("commence_time") or "")[:10]
+            expected = bool(skipped) and (
+                (day, event.get("home_team")) in skipped
+                or (day, event.get("away_team")) in skipped)
+            logger.log(
+                logging.INFO if expected else logging.WARNING,
                 "No %s game matches odds event %r vs %r at %s; its prices are "
-                "dropped rather than attached to another fixture",
+                "dropped rather than attached to another fixture%s",
                 sport, event.get("home_team"), event.get("away_team"),
                 event.get("commence_time"),
+                " (skipped as speculative)" if expected else "",
             )
             continue
 
