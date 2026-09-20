@@ -2382,3 +2382,31 @@ after them, so that rebuild is not optional; it is part of the repair.
 - That sweep also hit `httpx.ReadTimeout` after ~200 rapid requests.
   `espn_http.get_with_retry` retries on status codes only, not on timeouts.
   Worth widening.
+
+## The ESPN retry now covers transport failures — 2026-09-19
+
+`get_with_retry` looked only at status codes, so a read timeout propagated on
+its first occurrence. That is inconsistent on its face: the same throttling
+that returns a 403 also stalls a read, and treating one as retryable and the
+other as fatal cost a whole audit sweep to `httpx.ReadTimeout` after about
+200 rapid requests.
+
+It now retries `httpx.TransportError` — timeouts, refused connections, reads
+that die mid-body. Deliberately **not** `Exception`: anything else is a bug
+in this code and retrying it only delays the traceback four-fold.
+
+Three properties the tests pin, each confirmed by mutation:
+
+- **A persistent transport failure is raised, not swallowed.** There is no
+  response to return, and returning `None` would break every caller's
+  `raise_for_status`.
+- **Status and transport retries share one attempt budget.** A request
+  alternating between a timeout and a 403 would otherwise never stop.
+- **A non-transport exception is not retried at all.**
+
+Verified by re-running the sweep that died: 195 dates, **completed in 30s**,
+0 events absent — which also confirms every recovered game is now present.
+
+**The fix was not exercised against a real timeout on that run**: no retry
+warnings appeared, so the network was simply healthy. It is proven by the
+tests, not by reproducing the production failure.
