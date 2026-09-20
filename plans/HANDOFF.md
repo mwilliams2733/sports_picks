@@ -1744,3 +1744,67 @@ with n=35 for ncaab the buckets will be too thin to carry much.
 
 **State the effective sample honestly from here.** 203 graded picks across
 roughly 100 games, many sharing teams, is not 203 independent observations.
+
+## Edge buckets, redone on the deduplicated table — 2026-09-19
+
+`backend/analysis/edge_buckets.py`, so these figures can be re-derived. The
+first version of this analysis was run by hand, reported "142 graded
+moneyline picks" and "0-for-36", and turned out to have been computed over
+duplicate rows.
+
+    python -m backend.analysis.edge_buckets --db <abs path>
+    python -m backend.analysis.edge_buckets --db <abs path> --sport ncaab
+    python -m backend.analysis.edge_buckets --db <abs path> --min-price 150 --max-price 600
+
+### All moneyline, n = 54
+
+| edge | n | win% | avg price | units | roi | away | neutral |
+|---|---|---|---|---|---|---|---|
+| 0-20% | 32 | 43.8% | +128 | +4.14 | **+0.129** | 21 | 17 |
+| 20-35% | 12 | 16.7% | +375 | −2.05 | −0.171 | 11 | 9 |
+| 35%+ | 10 | **0.0%** | +879 | −10.00 | **−1.000** | 10 | 9 |
+
+Aggregated: edge <20% is **+0.129 ROI on 32 picks**; edge ≥20% is **−0.548 on
+22**. The inversion the earlier analysis claimed is real and survives the
+correction. Its magnitudes do not: 54 graded moneyline picks exist in total,
+not 142.
+
+### The mechanism, stated exactly
+
+Every ncaab moneyline pick with a claimed edge of 20% or more — **18 of
+them — was an AWAY pick at a NEUTRAL venue, and all 18 lost.**
+
+They are NCAA tournament Round 1 and 2 games on 2026-03-19, -20 and -21,
+where "away" is a bracket seed designation, not a road team. So the model
+claimed 21-42% edge on lower seeds and went 0-for-18, with the claimed edge
+rising alongside the price: +235 at 21% edge through +1250 at 42%.
+
+That is not a generic "the edge estimate is inverted". It is the missing
+host term, seen from the other side: the model priced these games with a
+pooled ~0.56 home advantage that did not exist, underrating the
+bracket-home (higher-seeded) side and manufacturing edge on the lower seed
+in exact proportion to how big an underdog it was.
+
+### How strong is this actually
+
+Price-implied breakeven across those 18 is 16.3%, so P(0 wins) under
+independence is **0.041**. But they span **three dates**, all neutral-site
+tournament basketball. Eighteen picks from three days is not eighteen
+independent trials; taking the day as the unit leaves three. Suggestive,
+not established.
+
+Holding price roughly constant (+150..+600) leaves too little to separate
+edge from price: 0-20% is −0.091 on n=10 against 20-35% at −0.171 on n=12,
+which is noise, and the 35%+ bucket has n=1.
+
+**Do not tune `min_edge` on this.** The right correction is the one already
+made — the sport one-hot and the neutral-site gate.
+
+### What this says about the neutral slot's 0.693
+
+Previously flagged as a residual concern. On this evidence it is doing the
+right job for the population it was fitted on: bracket games, where the
+designated home side really does win about 70%. Applied to those 18 games it
+would have favoured the higher seed and declined the bet. It remains wrong
+for a neutral game with no seeding — the 6 nba ones — which is a narrower
+problem than first described.
