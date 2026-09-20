@@ -3,7 +3,7 @@ import logging
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
-from backend.models import Game, PickModel, StrategyModel, Odds, TeamStat, EloRating, EloHistory, Team
+from backend.models import Game, PickModel, PickResult, StrategyModel, Odds, TeamStat, EloRating, EloHistory, Team
 from backend.data_types import GameData, TeamStats, OddsSnapshot, FighterStats
 from backend.analysis.variants.ensemble import EnsembleStrategy
 from backend.analysis.variants.recent_form import RecentFormStrategy
@@ -83,13 +83,20 @@ def generate_and_store_picks(session: Session, strategy_id: int,
             logger.info("Skipped %d game(s) already underway", len(games) - len(kept))
         games = kept
 
+    game_ids = [g.id for g in games] or [-1]
     already = {
-        (row.game_id, row.pick_type)
-        for row in session.query(PickModel.game_id, PickModel.pick_type)
+        (row.game_id, row.pick_type): row
+        for row in session.query(PickModel)
         .filter(PickModel.strategy_id == strategy_id,
-                PickModel.game_id.in_([g.id for g in games] or [-1]))
+                PickModel.game_id.in_(game_ids))
+    }
+    # A graded pick is a recorded wager, not advice, and is never rewritten.
+    graded_pick_ids = {
+        pid for (pid,) in session.query(PickResult.pick_id)
+        .filter(PickResult.pick_id.in_([p.id for p in already.values()] or [-1]))
     }
     count = 0
+    refreshed = 0
     thresholds_by_sport: dict[str, dict] = {}
     for game in games:
         try:
@@ -110,9 +117,13 @@ def generate_and_store_picks(session: Session, strategy_id: int,
             picks = strategy.predict(game_data)
             for pick in picks:
                 if pick.confidence >= 1:
-                    if (game.id, pick.pick_type) in already:
+                    existing = already.get((game.id, pick.pick_type))
+                    if existing is not None:
+                        if _refreshable(existing, game, graded_pick_ids):
+                            _refresh_pick(existing, pick)
+                            refreshed += 1
                         continue
-                    already.add((game.id, pick.pick_type))
+                    already[(game.id, pick.pick_type)] = None
                     db_pick = PickModel(game_id=game.id, strategy_id=strategy_id,
                         pick_type=pick.pick_type, pick_value=pick.pick_value,
                         confidence=pick.confidence, edge_pct=pick.edge_pct,
@@ -126,6 +137,10 @@ def generate_and_store_picks(session: Session, strategy_id: int,
             logger.exception("Pick generation failed for game %s", game.id)
             continue
     session.commit()
+    if refreshed:
+        # Reported separately: a refreshed pick is not a new opportunity, it
+        # is the same market re-priced because its inputs changed.
+        logger.info("Refreshed %d pick(s) whose game had not started", refreshed)
     return count
 
 def _check_schedule_fatigue(session: Session, team_id: int, game_date: date, sport: str) -> tuple[bool, float]:
@@ -198,6 +213,59 @@ def _check_lookahead_spot(session: Session, team_id: int, opponent_team_id: int,
 
     return False
 
+
+def _refreshable(existing: PickModel, game: Game, graded_pick_ids: set) -> bool:
+    """Whether a stored pick may be replaced by a freshly computed one.
+
+    Idempotence exists to protect ``odds_at_pick`` -- the price a bet was
+    taken at -- from being restated by a later run. That is right for a pick
+    that is history and wrong for one that is still only advice, and the two
+    are distinguishable: a game that has not started carries no wager and no
+    price anyone could have taken.
+
+    It froze bad picks. On 2026-09-20 a run at 01:27 ET wrote 17 NFL picks
+    with flat Elo, every one at P(home)=0.7496; the 08:00 ET scout recomputed
+    them correctly with the repaired ratings and discarded every result,
+    because each market was already picked. They survived until deleted by
+    hand, and one of them had the wrong team.
+
+    Refused in two cases, both of which would rewrite something real:
+
+    * the pick is graded -- that is a recorded result, not a prediction;
+    * the game has started -- the stored price is the last takeable one, and
+      a backtest replaying long-finished games would otherwise rewrite its
+      own history on every run.
+
+    A game with no ``start_time`` is treated as not started, matching the
+    convention ``skip_started`` already uses: unknown is not past.
+    """
+    if existing.id in graded_pick_ids:
+        return False
+    if game.start_time is None:
+        return True
+    start = game.start_time
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    return start > datetime.now(timezone.utc)
+
+
+def _refresh_pick(existing: PickModel, pick) -> None:
+    """Overwrite a stored pick in place with a freshly computed one.
+
+    In place rather than delete-and-insert so the row id survives anything
+    referencing it, and so no duplicate can be created by a partial failure.
+
+    ``created_at`` moves to now because it answers "when was this advice
+    formed", and the answer has changed. ``odds_at_pick`` moves too: the game
+    has not started, so the earlier price was never takeable in any sense
+    that ROI measures.
+    """
+    existing.pick_value = pick.pick_value
+    existing.confidence = pick.confidence
+    existing.edge_pct = pick.edge_pct
+    existing.odds_at_pick = pick.odds_at_pick
+    existing.model_prob = getattr(pick, "model_probability", None)
+    existing.created_at = datetime.now(timezone.utc)
 
 def _build_game_data(session: Session, game,
                      pitcher_scores: dict[int, dict[str, float]] | None = None) -> GameData:

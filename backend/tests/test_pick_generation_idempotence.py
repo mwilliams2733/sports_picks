@@ -76,27 +76,42 @@ def test_the_second_run_reports_only_what_it_added(session):
     assert generate_and_store_picks(session, 1, TODAY) == 0
 
 
-def test_the_original_entry_price_is_kept(session):
-    """odds_at_pick is the price the bet was taken at, not the latest quote.
+def test_a_pick_on_an_unstarted_game_follows_the_market(session):
+    """An unstarted game's pick is advice, so it tracks the current price.
 
-    Overwriting it on every re-run would silently restate history, and ROI
-    is measured against it.
+    This deliberately replaced an earlier rule that `odds_at_pick` was
+    frozen on first write. That rule protected ROI from being restated, but
+    it also froze picks made on broken inputs: on 2026-09-20 a run wrote 17
+    NFL picks with flat Elo, and the next scout recomputed them correctly
+    and discarded every result because the markets were already picked. One
+    had the wrong team.
+
+    The price is only history once a bet could have been placed on it. Until
+    the game starts nothing is takeable, so the honest stored price is the
+    current one. `test_pick_refresh.py` holds the other half: a graded pick,
+    and one whose game has started, are never rewritten -- and those are the
+    cases ROI is actually measured against.
     """
     generate_and_store_picks(session, 1, TODAY)
     before = {p.id: p.odds_at_pick for p in _picks(session)}
+    assert before, "fixture produced no picks"
 
     for o in session.query(Odds).all():      # the market moves
         o.moneyline_home, o.moneyline_away = -400, 320
     session.commit()
     generate_and_store_picks(session, 1, TODAY)
 
-    # Every pick that already existed keeps the price it was taken at. A
-    # market that had no pick before may acquire one now -- the move can
-    # open an edge where there was none -- so this is a subset check, not
-    # an equality one. Re-pricing an existing pick is the thing being
-    # guarded against.
     after = {p.id: p.odds_at_pick for p in _picks(session)}
-    assert {k: after[k] for k in before} == before
+    assert set(after) >= set(before), "a refresh must not drop a pick row"
+    assert any(after[k] != before[k] for k in before), (
+        "an unstarted game's pick should have followed the market")
+    # Only moneylines carry the quote that moved; spreads and totals are
+    # priced at -110 and would not change here.
+    moneylines = {p.id: p.odds_at_pick for p in _picks(session)
+                  if p.pick_type == "moneyline"}
+    assert moneylines, "fixture produced no moneyline picks"
+    assert all(a in (-400, 320) for a in moneylines.values()), (
+        f"every refreshed moneyline should be the current quote: {moneylines}")
 
 
 def test_a_sport_filter_leaves_other_sports_alone(session):
