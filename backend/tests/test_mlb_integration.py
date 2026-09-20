@@ -52,8 +52,12 @@ def test_mlb_strategy_generates_pick_when_pitcher_advantage_creates_edge():
     # should push home win probability well above the +105 implied prob (~48.8%).
     pitcher_scores = {10: {"home": 0.85, "away": 0.30}}
 
+    # Fixed historical date, so start_time is in the past. skip_started exists
+    # for exactly this: the subject is the strategy's output, not whether the
+    # game is still bettable.
     n = generate_and_store_picks(session, strategy_id=1, target_date=_date(2026, 4, 29),
-                                  pitcher_scores=pitcher_scores)
+                                  pitcher_scores=pitcher_scores,
+                                  skip_started=False)
     assert n >= 1, "Strong home pitcher + plus money should produce at least one pick"
 
     picks = session.query(PickModel).filter(PickModel.game_id == 10).all()
@@ -87,7 +91,11 @@ def test_mlb_strategy_skips_when_no_edge():
     session.commit()
 
     pitcher_scores = {11: {"home": 0.50, "away": 0.50}}  # equal
+    # Fixed historical date, so start_time is in the past. skip_started exists
+    # for exactly this: the subject is the strategy's output, not whether the
+    # game is still bettable.
     n = generate_and_store_picks(session, strategy_id=1, target_date=_date(2026, 4, 29),
-                                  pitcher_scores=pitcher_scores)
+                                  pitcher_scores=pitcher_scores,
+                                  skip_started=False)
     assert n == 0
     session.close()

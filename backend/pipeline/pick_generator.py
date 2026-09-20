@@ -26,14 +26,67 @@ STRATEGY_MAP = {
 
 def generate_and_store_picks(session: Session, strategy_id: int,
                               target_date: date | None = None,
-                              pitcher_scores: dict[int, dict[str, float]] | None = None) -> int:
+                              pitcher_scores: dict[int, dict[str, float]] | None = None,
+                              sports: tuple[str, ...] | None = None,
+                              skip_started: bool = True) -> int:
+    """Store this strategy's picks for ``target_date``. Returns how many were added.
+
+    Idempotent per (game, strategy, pick_type): a market already picked is
+    left exactly as it is. Every window run re-picks every scheduled game, so
+    without this a day with three runs carried three copies of each pick --
+    354 picks on 2026-09-19, 221 of them redundant. Ungraded that is noise;
+    graded it is the same wager counted three times in ROI.
+
+    Left alone rather than updated, because ``odds_at_pick`` is the price the
+    bet was taken at. Refreshing it to the latest quote would restate history
+    that ROI is measured against. To genuinely redo a pick -- one made on a
+    neutral pitcher score, or before its game had a price -- delete the row
+    and run again.
+
+    ``sports`` limits which of the day's games are considered. Without it a
+    caller asking for one sport re-picks every other sport as a side effect.
+
+    ``skip_started`` drops games whose start_time has passed, because a pick
+    has to be placeable. Games keep ``status='scheduled'`` until ESPN reports
+    otherwise, which lags by hours, while the odds feed switches to in-play
+    prices the moment a game starts. Without this, a run at 23:57 produced a
+    +3300 moneyline on a game that began at 20:10 -- a price nobody could
+    take, on a result already half-decided, which would then be graded as a
+    real wager. A game with no start_time is kept: unknown is not past.
+    Backtests pass False, since they deliberately pick games long over.
+    """
     target_date = target_date or date.today()
     strat_row = session.get(StrategyModel, strategy_id)
     if not strat_row: return 0
     config = json.loads(strat_row.config_json)
     strategy_cls = STRATEGY_MAP.get(strat_row.name)
     if not strategy_cls: return 0
-    games = session.query(Game).filter(Game.date == target_date, Game.status == "scheduled").all()
+    game_q = session.query(Game).filter(Game.date == target_date,
+                                        Game.status == "scheduled")
+    if sports:
+        game_q = game_q.filter(Game.sport.in_(list(sports)))
+    games = game_q.all()
+    if skip_started:
+        now = datetime.now(tz=timezone.utc)
+        kept = []
+        for g in games:
+            start = g.start_time
+            if start is not None:
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=timezone.utc)
+                if start <= now:
+                    continue
+            kept.append(g)
+        if len(kept) != len(games):
+            logger.info("Skipped %d game(s) already underway", len(games) - len(kept))
+        games = kept
+
+    already = {
+        (row.game_id, row.pick_type)
+        for row in session.query(PickModel.game_id, PickModel.pick_type)
+        .filter(PickModel.strategy_id == strategy_id,
+                PickModel.game_id.in_([g.id for g in games] or [-1]))
+    }
     count = 0
     thresholds_by_sport: dict[str, dict] = {}
     for game in games:
@@ -55,6 +108,9 @@ def generate_and_store_picks(session: Session, strategy_id: int,
             picks = strategy.predict(game_data)
             for pick in picks:
                 if pick.confidence >= 1:
+                    if (game.id, pick.pick_type) in already:
+                        continue
+                    already.add((game.id, pick.pick_type))
                     db_pick = PickModel(game_id=game.id, strategy_id=strategy_id,
                         pick_type=pick.pick_type, pick_value=pick.pick_value,
                         confidence=pick.confidence, edge_pct=pick.edge_pct,

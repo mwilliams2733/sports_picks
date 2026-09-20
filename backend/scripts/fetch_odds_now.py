@@ -115,9 +115,12 @@ def run(db_path: str, *, sports=None, with_picks: bool = True,
                         logger.warning(
                             "MLB pitcher fetch failed (%s); proceeding with "
                             "neutral pitcher scores", exc)
+                # Scoped to the requested sports: without this, --sport mlb
+                # would re-pick every other sport as a side effect.
                 summary["picks"] = generate_and_store_picks(
                     session, strategy.id, today,
-                    pitcher_scores=pitcher_scores) or 0
+                    pitcher_scores=pitcher_scores,
+                    sports=tuple(target)) or 0
 
         if with_props:
             prop_strategy = session.query(StrategyModel).filter(

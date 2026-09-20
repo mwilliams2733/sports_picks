@@ -155,3 +155,9 @@ async def test_skipped_games_are_counted_and_reported(monkeypatch, caplog):
 
     assert out == {}
     assert "unidentifiable" in caplog.text
+
+
+def test_pick_generation_is_scoped_to_the_requested_sports(db, mod):
+    """--sport mlb must not re-pick ncaaf as a side effect."""
+    mod.run(db, sports=("mlb",))
+    assert mod.generate_and_store_picks.call_args.kwargs["sports"] == ("mlb",)

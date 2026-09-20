@@ -53,8 +53,11 @@ def test_mma_pipeline_generates_pick_for_clear_favorite():
         ])
         session.commit()
 
+        # Fixed historical date; skip_started is about bettability, which is
+        # not what this test is measuring.
         n = generate_and_store_picks(
             session, strategy_id=1, target_date=_date(2026, 4, 29),
+            skip_started=False,
         )
         assert n >= 1
 
@@ -97,6 +100,7 @@ def test_mma_pipeline_skips_when_no_odds_available():
 
         generate_and_store_picks(
             session, strategy_id=1, target_date=_date(2026, 4, 29),
+            skip_started=False,
         )
         picks = session.query(PickModel).filter(PickModel.game_id == 42).all()
         assert picks == []

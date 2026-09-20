@@ -1579,3 +1579,66 @@ rule: the two resolve to NICH and NICC respectively.
 
 `_store_odds`'s return value counts bookmaker rows, not events. The log line
 calling them "events" has always been wrong; the docstring now says so.
+
+## Regenerating today's mlb picks — 2026-09-19
+
+Asked to redo them with the pitcher scores. Three things came out of it, and
+the headline is not the one expected.
+
+### The active strategy does not use pitcher scores
+
+`strategies` has `ensemble` active for games. `EnsembleStrategy` contains no
+reference to `pitcher_skill_score`, and its `FACTOR_CODES` omits
+`pitcher_edge`, so `Strategy._factors` filters the factor out. Only
+`SportSpecificStrategy` consumes it.
+
+So the pitcher fix is correct and the data now flows, but **under the active
+strategy it changes nothing about MLB output**. None of the regenerated picks
+cite a pitcher factor, and that absence is honest — `strategy.py:124` says a
+factor the model did not use must never appear in a rationale.
+
+Making MLB actually use pitcher skill is a strategy question, not a collector
+one: either switch the MLB path to `SportSpecificStrategy` or add the term to
+the ensemble. Not done here.
+
+### Picks were being made on games already underway
+
+`generate_and_store_picks` filtered `status == 'scheduled'`, which lags by
+hours because ESPN updates it late, while the odds feed switches to in-play
+prices the moment a game starts. Generating at 23:57 UTC produced a **+3300
+moneyline on a game that began at 20:10** — a price nobody could take, on a
+result already half-decided, which would then have been graded as a real
+wager. 20 of 34 picks that run were on underway games; all 20 deleted.
+
+`skip_started=True` is now the default, with an opt-out for backtests, which
+deliberately pick games long over.
+
+### The generator was not idempotent
+
+It always inserted. Every window run re-picked every scheduled game, so the
+day carried one copy per run: **354 picks, 221 of them redundant**. Ungraded
+that is noise; graded it is the same wager counted three times in ROI. Picks
+are now skipped per `(game, strategy, pick_type)`.
+
+Left alone rather than updated, because `odds_at_pick` is the price the bet
+was taken at and ROI is measured against it. To genuinely redo a pick, delete
+the row and run again — which is what this exercise did.
+
+A sport filter was added at the same time: `fetch_odds_now --sport mlb` was
+re-picking every other sport as a side effect.
+
+### Result
+
+14 mlb picks for 2026-09-19, all on games not yet started, prices between
++125 and +324 on moneylines and −110 on spreads and totals. Down from 34,
+of which 20 were unplaceable.
+
+**The 221 duplicate ncaaf picks from earlier today are still in the table.**
+They are ungraded. Deleting the redundant copies (keeping the earliest of
+each group) is a separate cleanup and has not been done.
+
+### Worth a look
+
+Every regenerated `over_under` pick carries `edge_pct = 50.0` exactly. A 50%
+edge on a total priced at −110 is not plausible; it looks like the totals
+path is not computing an edge at all. Not investigated.
