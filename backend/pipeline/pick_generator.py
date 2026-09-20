@@ -3,7 +3,7 @@ import logging
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
-from backend.models import Game, PickModel, StrategyModel, Odds, TeamStat, EloRating, EloHistory
+from backend.models import Game, PickModel, StrategyModel, Odds, TeamStat, EloRating, EloHistory, Team
 from backend.data_types import GameData, TeamStats, OddsSnapshot, FighterStats
 from backend.analysis.variants.ensemble import EnsembleStrategy
 from backend.analysis.variants.recent_form import RecentFormStrategy
@@ -405,12 +405,61 @@ def _team_elo_or_none(session: Session, team_id: int, sport: str,
                  .order_by(Game.date.desc(), Game.id.desc())
                  .first())
         if prior is not None:
-            return prior.rating
+            # `prior.rating` is the rating that team carried INTO its last
+            # game, not the one it came out with, so returning it directly
+            # serves a rating one game stale. In NFL week 2 every team's only
+            # prior row is its week 1 game, which holds the 1500.0 seed: all
+            # 32 teams tie, every signal ties, and every pick collapses to
+            # tier 1. Advance one step instead, through the same
+            # `apply_result` the replay uses so the two cannot disagree.
+            return _rating_after(session, sport, prior, team_id)
 
     row = (session.query(EloRating)
            .filter(EloRating.team_id == team_id, EloRating.sport == sport)
            .first())
     return row.rating if row else None
+
+
+def _rating_after(session: Session, sport: str, prior: "EloHistory",
+                  team_id: int) -> float:
+    """The rating ``team_id`` carried OUT of the game ``prior`` belongs to.
+
+    Reconstructs one Elo step from the two stored pre-game ratings and the
+    game's score. This is not lookahead: the game being advanced past is
+    already final and strictly earlier than the one being priced.
+
+    Degrades to the stored pre-game rating whenever the step cannot be taken
+    honestly -- a missing opponent row, a game without scores, a draw. Those
+    are the cases where the rating genuinely did not move or cannot be known,
+    and inventing a movement for them would be worse than being one game
+    stale.
+    """
+    from backend.analysis.elo import EloSystem, apply_result
+    from backend.analysis.sport_constants import get_home_advantage_elo
+    from backend.pipeline.team_stats import ELO_K_FACTOR
+
+    game = session.get(Game, prior.game_id)
+    if game is None or game.home_score is None or game.away_score is None:
+        return prior.rating
+
+    rows = {r.team_id: r.rating for r in session.query(EloHistory)
+            .filter(EloHistory.game_id == game.id).all()}
+    home = session.get(Team, game.home_team_id)
+    away = session.get(Team, game.away_team_id)
+    if (home is None or away is None
+            or game.home_team_id not in rows or game.away_team_id not in rows):
+        return prior.rating
+
+    elo = EloSystem(k_factor=ELO_K_FACTOR,
+                    home_advantage=get_home_advantage_elo(sport))
+    elo.ratings[home.abbreviation] = rows[game.home_team_id]
+    elo.ratings[away.abbreviation] = rows[game.away_team_id]
+    if not apply_result(elo, home.abbreviation, away.abbreviation,
+                        game.home_score, game.away_score):
+        return prior.rating          # a draw moves nothing
+
+    us = home if team_id == game.home_team_id else away
+    return elo.get_rating(us.abbreviation)
 
 
 def _get_team_stats(session: Session, team_id: int, sport: str,

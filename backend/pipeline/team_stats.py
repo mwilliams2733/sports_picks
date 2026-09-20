@@ -52,7 +52,7 @@ from typing import Iterable, Sequence
 
 from sqlalchemy.orm import Session
 
-from backend.analysis.elo import EloSystem
+from backend.analysis.elo import EloSystem, apply_result
 from backend.models import EloHistory, Game, Team, TeamStat
 
 logger = logging.getLogger(__name__)
@@ -590,12 +590,8 @@ def backfill_elo_history(session: Session, sport: str, *,
             written += 2
 
         # Now -- and only now -- fold in this game's result, for the NEXT game.
-        margin = game.home_score - game.away_score
-        if margin == 0:
-            continue
-        winner = home_team.abbreviation if margin > 0 else away_team.abbreviation
-        elo.update(home_team.abbreviation, away_team.abbreviation, winner,
-                   margin=abs(margin))
+        apply_result(elo, home_team.abbreviation, away_team.abbreviation,
+                     game.home_score, game.away_score)
 
     return {"sport": sport, "games_total": len(games),
             "rows_written": written, "games_skipped": skipped,

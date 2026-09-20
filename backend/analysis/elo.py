@@ -67,3 +67,21 @@ class EloSystem:
         k = self.k_factor * mov
         self.ratings[home] = ra + k * (sa - ea)
         self.ratings[away] = rb + k * (sb - eb)
+
+def apply_result(elo: EloSystem, home: str, away: str,
+                 home_score: float, away_score: float) -> bool:
+    """Fold one finished game into ``elo``. Returns whether it changed anything.
+
+    The single place a game result becomes an Elo movement. Both the
+    chronological replay in `backend.pipeline.team_stats.backfill_elo_history`
+    and the one-step advance in `backend.pipeline.pick_generator._team_elo`
+    call it, because those two must agree exactly: the replay decides what the
+    model is trained on and the advance decides what it is served. A draw is
+    skipped rather than scored as a half-win, which is what the replay has
+    always done.
+    """
+    margin = home_score - away_score
+    if margin == 0:
+        return False
+    elo.update(home, away, home if margin > 0 else away, margin=abs(margin))
+    return True
