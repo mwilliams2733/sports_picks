@@ -2611,3 +2611,39 @@ the windowless path and `_run_window`), and `fetch_odds_now`.
 
 Six test modules seeded fixtures with `date.today()` and were switched too —
 they would have started failing nightly otherwise, for three hours at a time.
+
+## A max_edge ceiling — 2026-09-20
+
+`min_edge` had no counterpart, so the model preferred the **largest** claimed
+edge — the exact selection the measured inversion punishes.
+
+| market | edge <20% | edge ≥20% |
+|---|---|---|
+| moneyline | +0.129 ROI (n=32) | **−0.548** (n=22) |
+| spread | +0.162 ROI (n=23) | **−0.364** (n=24) |
+
+Spread is the cleaner evidence, every price being −110: 33.3% wins against a
+52.4% breakeven, paired t = −2.25. Both markets change sign at the same
+place, so `DEFAULT_MAX_EDGE = 20.0` is where the data breaks rather than a
+tidy number. Override per strategy with `config["max_edge"]`.
+
+### Two caveats, both real
+
+The sample is ~100 graded picks and leans on three days of neutral-site
+tournament basketball.
+
+And much of that inversion traced to a missing host term that the sport
+one-hot and the neutral-site gate have since fixed — so this partly guards a
+bug already repaired. It is kept because the *other* source is unfixed: an
+edge computed for a sport the model has almost no data for. **nfl has one
+training game** and produced a 49.0% moneyline edge on 2026-09-20.
+
+### Applied to today's board
+
+15 of 48 picks sat at or above the ceiling, none graded, all removed against
+a verified backup. The board is now 33 picks — nfl 17, mlb 16 — with a top
+claimed edge of **19.5%**.
+
+Gone were the least plausible: a 49.0% nfl moneyline, and `WSH +1.5` at
+44.2% on a baseball runline where a 44-point probability edge would be
+extraordinary.

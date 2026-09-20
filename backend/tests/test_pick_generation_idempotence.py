@@ -46,7 +46,10 @@ def session(tmp_path):
         Odds(game_id=2, bookmaker="bk", moneyline_home=-150, moneyline_away=130,
              spread_home=-3.5, spread_away=3.5, over_under=52.5),
     ])
-    s.add(StrategyModel(id=1, name="ensemble", config_json="{}",
+    s.add(StrategyModel(id=1, name="ensemble",
+                        # See test_max_edge_ceiling.py; these
+                        # fixtures use large synthetic edges.
+                        config_json='{"max_edge": 100.0}',
                         is_active=True, strategy_type="game"))
     s.commit()
     return s

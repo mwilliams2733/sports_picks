@@ -15,6 +15,28 @@ from backend.data_types import GameData, TeamStats, Pick
 
 logger = logging.getLogger(__name__)
 
+#: Claimed edges at or above this are refused. Measured on the
+#: deduplicated book, both markets change sign at the same place:
+#:
+#:   moneyline   edge <20%  +0.129 ROI (n=32)   >=20%  -0.548 (n=22)
+#:   spread      edge <20%  +0.162 ROI (n=23)   >=20%  -0.364 (n=24)
+#:
+#: Spread is the cleaner evidence, every price being -110: 33.3% wins
+#: against a 52.4% breakeven, paired t = -2.25. The model had no upper
+#: bound, so it preferred the largest claimed edge -- exactly the
+#: selection that loses.
+#:
+#: Two caveats worth keeping in view. The sample is ~100 graded picks and
+#: leans on three days of neutral-site tournament basketball. And much of
+#: that inversion traced to a missing host term that the sport one-hot and
+#: neutral-site gate have since fixed, so this partly guards a bug already
+#: repaired. It is kept because the remaining source is unfixed: an edge
+#: computed for a sport the model has almost no data for. nfl has ONE
+#: training game and produced a 49% moneyline edge on 2026-09-20.
+#:
+#: Override per strategy with config["max_edge"].
+DEFAULT_MAX_EDGE = 20.0
+
 #: Whether the totals model uses opponent-adjusted scoring rates, which
 #: shift each prior game by how much that opponent usually concedes or
 #: scores relative to the league.
@@ -90,6 +112,18 @@ class EnsembleStrategy(Strategy):
         if not game.odds: return []
         picks = []
         min_edge = self.config.get("min_edge", 5.0)
+        max_edge = self.config.get("max_edge", DEFAULT_MAX_EDGE)
+
+        def _takeable(edge: float, market: str) -> bool:
+            """Whether a claimed edge is both big enough and small enough."""
+            if edge < min_edge:
+                return False
+            if edge >= max_edge:
+                logger.info(
+                    "%s %s edge %.1f%% at or above max_edge %.1f%%; refused",
+                    game.sport, market, edge, max_edge)
+                return False
+            return True
         kelly_fraction = self.config.get("kelly_fraction", 0.25)
         home_prob = self._calibrated_probability(game)
         away_prob = 1.0 - home_prob
@@ -103,7 +137,7 @@ class EnsembleStrategy(Strategy):
             implied_home, implied_away = remove_vig(raw_home, raw_away)
             home_edge = (home_prob - implied_home) * 100
             away_edge = (away_prob - implied_away) * 100
-            if home_edge >= min_edge:
+            if _takeable(home_edge, "moneyline"):
                 models = self._count_agreeing_models(game, "home")
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="HOME ML",
                     confidence=calculate_confidence(home_edge, models, self.thresholds), edge_pct=round(home_edge, 1),
@@ -111,7 +145,7 @@ class EnsembleStrategy(Strategy):
                     odds_at_pick=avg_odds["moneyline_home"],
                     suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction),
                     factors=self._build_factors(game, "home")))
-            elif away_edge >= min_edge:
+            elif _takeable(away_edge, "moneyline"):
                 models = self._count_agreeing_models(game, "away")
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
                     confidence=calculate_confidence(away_edge, models, self.thresholds), edge_pct=round(away_edge, 1),
@@ -131,7 +165,7 @@ class EnsembleStrategy(Strategy):
             spread_fair = 0.5  # spread markets are ~50/50 after vig by design
             home_spread_edge = (home_cover_prob - spread_fair) * 100
             away_spread_edge = (away_cover_prob - spread_fair) * 100
-            if home_spread_edge >= min_edge:
+            if _takeable(home_spread_edge, "spread"):
                 models = self._count_agreeing_models(game, "home")
                 pick_value = f"HOME {spread_home:+g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="spread",
@@ -142,7 +176,7 @@ class EnsembleStrategy(Strategy):
                     implied_probability=spread_fair,
                     odds_at_pick=-110,
                     suggested_unit_size=fractional_kelly(home_cover_prob, -110, kelly_fraction)))
-            elif away_spread_edge >= min_edge:
+            elif _takeable(away_spread_edge, "spread"):
                 models = self._count_agreeing_models(game, "away")
                 spread_away = avg_odds["spread_away"]
                 pick_value = f"AWAY +{spread_away:g}" if spread_away >= 0 else f"AWAY {spread_away:g}"
@@ -199,7 +233,7 @@ class EnsembleStrategy(Strategy):
             ou_fair = 0.5  # O/U markets are ~50/50 after vig by design
             over_edge = (over_prob - ou_fair) * 100
             under_edge = (under_prob - ou_fair) * 100
-            if over_edge >= min_edge:
+            if _takeable(over_edge, "over_under"):
                 models = self._count_total_agreeing_models(game, True)
                 pick_value = f"Over {ou_line:g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="over_under",
@@ -210,7 +244,7 @@ class EnsembleStrategy(Strategy):
                     implied_probability=ou_fair,
                     odds_at_pick=-110,
                     suggested_unit_size=fractional_kelly(over_prob, -110, kelly_fraction)))
-            elif under_edge >= min_edge:
+            elif _takeable(under_edge, "over_under"):
                 models = self._count_total_agreeing_models(game, False)
                 pick_value = f"Under {ou_line:g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="over_under",

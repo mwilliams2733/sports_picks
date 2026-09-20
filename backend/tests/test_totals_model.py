@@ -33,7 +33,10 @@ def _game(sport, line, home, away):
                            spread_away=1.5, over_under=line)])
 
 
-S = EnsembleStrategy("ensemble", {}, {})
+# max_edge is lifted here: these fixtures use deliberately large
+# synthetic edges to exercise pick mechanics, and the ceiling is
+# owned by test_max_edge_ceiling.py.
+S = EnsembleStrategy("ensemble", {"max_edge": 100.0}, {})
 
 
 def test_two_average_teams_predict_their_shared_scoring_rate():

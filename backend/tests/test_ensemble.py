@@ -5,6 +5,10 @@ from backend.backtesting.backtester import Backtester
 from backend.data_types import GameData, TeamStats, OddsSnapshot, Pick
 import pytest
 
+# max_edge is lifted here: these fixtures use deliberately large
+# synthetic edges to exercise pick mechanics, and the ceiling is
+# owned by test_max_edge_ceiling.py.
+
 
 @pytest.fixture(autouse=True)
 def _totals_enabled(monkeypatch):
@@ -38,7 +42,7 @@ def test_ensemble_returns_picks_when_edge_exists():
         away_stats=_stats(point_diff=-3.0, elo_rating=1400, offensive_rating=105.0, defensive_rating=112.0),
         odds=[OddsSnapshot(bookmaker="dk", moneyline_home=-120, moneyline_away=100,
             spread_home=-3.5, spread_away=3.5, over_under=215.0)])
-    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0, "k_factor": 20, "lookback": 10})
+    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0, "max_edge": 100.0, "k_factor": 20, "lookback": 10})
     picks = strategy.predict(game)
     assert isinstance(picks, list)
     for pick in picks:
@@ -47,7 +51,7 @@ def test_ensemble_returns_picks_when_edge_exists():
 def test_ensemble_no_picks_without_odds():
     game = GameData(game_id=1, sport="nba", date=date(2026, 3, 13),
         home_team_id=1, away_team_id=2, home_stats=_stats(), away_stats=_stats(), odds=[])
-    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0, "k_factor": 20, "lookback": 10})
+    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0, "max_edge": 100.0, "k_factor": 20, "lookback": 10})
     picks = strategy.predict(game)
     assert picks == []
 
@@ -62,7 +66,7 @@ def test_spread_pick_generated_when_model_disagrees():
         away_stats=_stats(point_diff=-5.0, elo_rating=1400, offensive_rating=105.0, defensive_rating=110.0),
         odds=[OddsSnapshot(bookmaker="dk", moneyline_home=-200, moneyline_away=170,
             spread_home=-3.5, spread_away=3.5, over_under=215.0)])
-    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0})
+    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0, "max_edge": 100.0})
     picks = strategy.predict(game)
     spread_picks = [p for p in picks if p.pick_type == "spread"]
     assert len(spread_picks) == 1
@@ -81,7 +85,7 @@ def test_spread_pick_away_side():
         away_stats=_stats(point_diff=10.0, elo_rating=1600, offensive_rating=110.0, defensive_rating=105.0),
         odds=[OddsSnapshot(bookmaker="dk", moneyline_home=-200, moneyline_away=170,
             spread_home=-3.5, spread_away=3.5, over_under=215.0)])
-    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0})
+    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0, "max_edge": 100.0})
     picks = strategy.predict(game)
     spread_picks = [p for p in picks if p.pick_type == "spread"]
     assert len(spread_picks) == 1
@@ -100,7 +104,7 @@ def test_over_under_pick_generated():
         away_stats=_stats(offensive_rating=110.0, defensive_rating=100.0, pace=100.0),
         odds=[OddsSnapshot(bookmaker="dk", moneyline_home=-110, moneyline_away=-110,
             spread_home=-1.0, spread_away=1.0, over_under=225.0)])
-    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0})
+    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0, "max_edge": 100.0})
     picks = strategy.predict(game)
     ou_picks = [p for p in picks if p.pick_type == "over_under"]
     assert len(ou_picks) == 1
@@ -118,7 +122,7 @@ def test_over_pick_generated():
         away_stats=_stats(offensive_rating=110.0, defensive_rating=100.0, pace=100.0),
         odds=[OddsSnapshot(bookmaker="dk", moneyline_home=-110, moneyline_away=-110,
             spread_home=-1.0, spread_away=1.0, over_under=100.0)])
-    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0})
+    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0, "max_edge": 100.0})
     picks = strategy.predict(game)
     ou_picks = [p for p in picks if p.pick_type == "over_under"]
     assert len(ou_picks) == 1
@@ -136,7 +140,7 @@ def test_all_three_pick_types_together():
         away_stats=_stats(point_diff=-8.0, elo_rating=1300, offensive_rating=105.0, defensive_rating=115.0, pace=100.0),
         odds=[OddsSnapshot(bookmaker="dk", moneyline_home=-120, moneyline_away=100,
             spread_home=-3.5, spread_away=3.5, over_under=125.0)])
-    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0})
+    strategy = EnsembleStrategy("ensemble", {"min_edge": 5.0, "max_edge": 100.0})
     picks = strategy.predict(game)
     pick_types = {p.pick_type for p in picks}
     assert "moneyline" in pick_types
@@ -154,7 +158,7 @@ def test_average_odds_includes_spread_and_ou():
             OddsSnapshot(bookmaker="fd", moneyline_home=-120, moneyline_away=100,
                 spread_home=-4.5, spread_away=4.5, over_under=217.0),
         ])
-    strategy = EnsembleStrategy("ensemble", {})
+    strategy = EnsembleStrategy("ensemble", {"max_edge": 100.0})
     avg = strategy._average_odds(game)
     assert avg["spread_home"] == -4.0
     assert avg["spread_away"] == 4.0
