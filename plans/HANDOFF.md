@@ -2041,3 +2041,65 @@ nba's 1.6, on 19 games. If that survives a real sample it is a far larger
 venue effect than nba's, and ncaaf has no splits yet — 19 games cannot give
 any team `MIN_VENUE_GAMES` at a venue. Worth re-running `totals_report` once
 a season of ncaaf has accumulated.
+
+## Opponent-strength adjustment: measured, and switched ON — 2026-09-19
+
+`points_for_adj` / `points_against_adj` shift each prior game by how much
+that opponent usually concedes or scores, relative to the league, over the
+same point-in-time pool.
+
+### Why this one was worth building and the venue splits were not
+
+Over a full nba season, opponent defence faced varies by only **0.27 points
+sd** across teams — a balanced schedule leaves nothing to correct. But the
+model reads a **10-game window**, and there it varies by **1.45** (offence
+faced, 0.97), because ten games of eighty-two are nowhere near balanced. A
+total sums four such terms, so the correction has sd ≈ 2.89 points against a
+model MAE of 15.6.
+
+It also costs no sample: it re-weights the same games rather than halving
+them, which is what sank the venue splits.
+
+### Measured, paired on identical games
+
+| sport | n | adj MAE | raw MAE | paired t | 95% CI |
+|---|---|---|---|---|---|
+| nba | 1229 | 15.50 | 15.61 | **−2.61** | −0.206 .. −0.029 |
+| mlb | 79 | 2.95 | 3.22 | −1.12 | −0.739 .. +0.201 |
+| ncaab | 22 | 11.45 | 12.75 | −0.58 | −5.690 .. +3.092 |
+
+`USE_OPPONENT_ADJUSTMENT = True`. nba's interval clears zero (p ≈ 0.009) and
+all three point the same way. The effect is small — 0.75% of MAE — which is
+close to what the schedule-variation argument predicted. Compare the venue
+splits at t = −0.20, which stay off.
+
+`TOTAL_POINTS_STD` is re-measured for the model **as configured**, with the
+adjustment on: nba 19.5, ncaab 13.4, mlb 3.7. Re-measure whenever a switch in
+`ensemble.py` changes.
+
+### It still does not beat the line
+
+| sport | n | adj MAE | line MAE |
+|---|---|---|---|
+| nba | 42 | 14.24 | 11.50 |
+| ncaab | 16 | 10.18 | 6.99 |
+| mlb | 11 | 3.84 | 3.92 |
+
+`TOTALS_VALIDATED_SPORTS` stays empty and no totals picks are generated. The
+adjustment moved nba from 14.41 to 14.24 against a line at 11.50; a 0.17
+gain does not close a 2.74 gap.
+
+### A data-quality finding this turned up
+
+Three **All-Star exhibition games** sit in `games` as nba finals — 2026-02-15,
+with squad teams "Team Stars", "World" and "Team Stripes", and totals of 72,
+82 and 93 against a real nba average of 230.9.
+
+They are not in the totals validation set, but they **are** in
+`CalibratedModel.train_from_db`, which selects every final game with no sport
+filter. They also dragged my own league-average baseline down by 6.5 points
+and produced an impossible all-positive schedule-strength deviation, which is
+how they were noticed.
+
+Three games of 1248 is a small contamination, and the squads are separate
+`Team` rows so no real team's stats are touched. Not fixed here.

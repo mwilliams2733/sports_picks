@@ -34,6 +34,10 @@ class TeamStats:
     points_against_home: float | None = None
     points_for_away: float | None = None
     points_against_away: float | None = None
+    #: The same rates with each prior game shifted by how much that opponent
+    #: usually concedes or scores, relative to the league.
+    points_for_adj: float | None = None
+    points_against_adj: float | None = None
 
 @dataclass
 class OddsSnapshot:

@@ -140,10 +140,15 @@ def test_compute_refuses_to_emit_unmeasurable_features():
     # outside it -- and always include the unconditional ones. The rest are
     # earned: points_for needs a prior game, the venue splits need
     # MIN_VENUE_GAMES at that venue, and this fixture has one game.
+    # Emitted keys are a subset of the declared vocabulary -- never anything
+    # outside it -- and always include the unconditional ones. Which
+    # conditional stats a game earns depends on how much history precedes
+    # it, so that is not asserted by count here.
     assert set(stats) <= set(ts.COMPUTED_STAT_TYPES)
     assert set(ts.ALWAYS_COMPUTED_STAT_TYPES) <= set(stats)
-    assert not set(ts.CONDITIONAL_STAT_TYPES) & set(stats) - {"points_for",
-                                                              "points_against"}
+    # The venue splits need MIN_VENUE_GAMES, which one prior game is not.
+    assert "points_for_home" not in stats
+    assert "points_for_away" not in stats
 
 
 # --------------------------------------------------------------------------
@@ -164,9 +169,13 @@ def test_store_team_stats_writes_rows_for_both_teams(seeded):
     n = ts.store_team_stats_for_game(session, g2, [g1])
     session.commit()
 
-    # Both teams, every unconditional stat, plus the blended scoring rates
-    # that one prior game earns. The venue splits need MIN_VENUE_GAMES.
-    assert n == 2 * (len(ts.ALWAYS_COMPUTED_STAT_TYPES) + 2)
+    # Persistence must write exactly what computation produced, for both
+    # teams. Deriving the expectation rather than hardcoding a count keeps
+    # this test meaningful as conditional stats are added.
+    expected = sum(
+        len(ts.compute_team_stats([g1], team_id=t, before_date=g2.date))
+        for t in (a.id, b.id))
+    assert n == expected
     rows = session.query(TeamStat).filter(TeamStat.game_id == g2.id).all()
     assert {r.team_id for r in rows} == {a.id, b.id}
     home_pd = next(r.value for r in rows

@@ -16,21 +16,23 @@ POINT_DIFF_STD = {
 #: over/under CDF needs -- not the spread of final totals in general.
 #:
 #: nba, ncaab and mlb are measured out-of-sample by
-#: ``backend.analysis.totals_report`` on 2026-09-19 and each is LARGER than
-#: the value assumed before it was measured (nba 15.0 -> 19.6, ncaab
-#: 12.0 -> 16.0). A too-small value makes the model overconfident and
-#: inflates every edge it claims.
+#: ``backend.analysis.totals_report`` on 2026-09-19, for the model as it is
+#: actually configured -- with the opponent adjustment on, which tightens
+#: the residuals slightly. Each is still LARGER than the value assumed
+#: before anything was measured (nba 15.0 -> 19.5, ncaab 12.0 -> 13.4), and
+#: a too-small value makes the model overconfident and inflates every edge
+#: it claims. Re-measure whenever a switch in ensemble.py changes.
 #:
 #: The rest are unmeasured guesses; ncaab's rests on only 22 games. Re-run
 #: the report and update them as history accumulates.
 TOTAL_POINTS_STD = {
-    "nba": 19.6,     # measured, n=1229
+    "nba": 19.5,     # measured on the adjusted model, n=1229
     "nfl": 13.0,     # unmeasured
-    "ncaab": 16.0,   # measured, n=22 -- thin
+    "ncaab": 13.4,   # measured, n=22 -- thin
     "ncaaf": 16.0,   # unmeasured
     "boxing": 15.0,  # unmeasured
     "mma": 15.0,     # unmeasured
-    "mlb": 4.2,      # measured, n=79
+    "mlb": 3.7,      # measured, n=79
 }
 
 # Home court/field advantage in ELO points

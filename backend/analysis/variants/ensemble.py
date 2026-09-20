@@ -14,6 +14,30 @@ from backend.data_types import GameData, TeamStats, Pick
 
 logger = logging.getLogger(__name__)
 
+#: Whether the totals model uses opponent-adjusted scoring rates, which
+#: shift each prior game by how much that opponent usually concedes or
+#: scores relative to the league.
+#:
+#: Unlike the venue splits this costs no sample size -- it re-weights the
+#: same games rather than halving them. The quantity it corrects is real:
+#: over the 10-game window the model reads, opponent defence faced varies by
+#: 1.45 points sd (against only 0.27 over a full nba season, because ten
+#: games of eighty-two are nowhere near a balanced schedule).
+#:
+#: Measured on the deduplicated table, paired against the raw rates on
+#: identical games:
+#:
+#:   sport   n      adj MAE   raw MAE   paired t   95% CI
+#:   nba     1229   15.50     15.61     -2.61      -0.206 .. -0.029
+#:   mlb       79    2.95      3.22     -1.12      -0.739 .. +0.201
+#:   ncaab     22   11.45     12.75     -0.58      -5.690 .. +3.092
+#:
+#: On, because nba -- the only sport with a real sample -- improves with the
+#: interval clear of zero, and all three point the same way. The effect is
+#: small, 0.75% of MAE, which is about what the schedule variation predicted.
+#: Compare the venue splits at t = -0.20, which were left off.
+USE_OPPONENT_ADJUSTMENT = True
+
 #: Whether the totals model uses each team's venue-specific scoring rate
 #: (home side's home history, away side's road history) instead of one
 #: blended rate. Off, because measurement says it costs more than it buys.
@@ -375,6 +399,12 @@ class EnsembleStrategy(Strategy):
                 home_typical = hs.points_for_home + hs.points_against_home
             if aws.points_for_away is not None and aws.points_against_away is not None:
                 away_typical = aws.points_for_away + aws.points_against_away
+        if home_typical is None and USE_OPPONENT_ADJUSTMENT:
+            if hs.points_for_adj is not None and hs.points_against_adj is not None:
+                home_typical = hs.points_for_adj + hs.points_against_adj
+        if away_typical is None and USE_OPPONENT_ADJUSTMENT:
+            if aws.points_for_adj is not None and aws.points_against_adj is not None:
+                away_typical = aws.points_for_adj + aws.points_against_adj
         if home_typical is None:
             home_typical = hs.points_for + hs.points_against
         if away_typical is None:

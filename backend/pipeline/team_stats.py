@@ -84,6 +84,8 @@ COMPUTED_STAT_TYPES = (
     "points_against_home",
     "points_for_away",
     "points_against_away",
+    "points_for_adj",
+    "points_against_adj",
     "rest_days",
     "home_wins",
     "home_losses",
@@ -100,6 +102,8 @@ COMPUTED_STAT_TYPES = (
 #: The distinction matters because "absent" is a real answer here -- an
 #: invented 0.0 points-for would have the totals model predict a 0-0 game --
 #: so consumers must check rather than assume every type is present.
+#: Types beyond the always-computed set. Kept explicit so a test can assert
+#: emitted keys are a subset of the vocabulary without hardcoding counts.
 ALWAYS_COMPUTED_STAT_TYPES = (
     "point_diff",
     "rest_days",
@@ -162,6 +166,86 @@ def _team_games(prior_games: Iterable, team_id: int) -> list:
     out = [g for g in prior_games if _points_for_against(g, team_id) is not None]
     out.sort(key=lambda g: (g.date, g.id))
     return out
+
+
+def opponent_rates(games: Sequence) -> tuple[dict, dict, float, float]:
+    """``(points_for_by_team, points_against_by_team, league_pf, league_pa)``.
+
+    Computed over whatever pool is handed in, which the callers restrict to
+    games strictly before the target date -- so the rates a game is adjusted
+    against never include that game or any later one.
+
+    The league averages are per game-side and are therefore equal: every
+    point scored is a point conceded. Both are returned because the two are
+    used against different quantities and reading the wrong one would be an
+    easy, silent mistake.
+    """
+    pf: dict[int, list[float]] = {}
+    pa: dict[int, list[float]] = {}
+    for g in games:
+        got = _points_for_against(g, g.home_team_id)
+        if got is None:
+            continue
+        hs, aws = got
+        pf.setdefault(g.home_team_id, []).append(hs)
+        pa.setdefault(g.home_team_id, []).append(aws)
+        pf.setdefault(g.away_team_id, []).append(aws)
+        pa.setdefault(g.away_team_id, []).append(hs)
+    mean_pf = {t: sum(v) / len(v) for t, v in pf.items()}
+    mean_pa = {t: sum(v) / len(v) for t, v in pa.items()}
+    allpts = [x for v in pf.values() for x in v]
+    league = sum(allpts) / len(allpts) if allpts else 0.0
+    return mean_pf, mean_pa, league, league
+
+
+def _adjusted(prior_games: Sequence, team_id: int, lookback: int,
+              rates, index: int) -> float | None:
+    """Mean of one scoring rate with each game shifted by opponent quality.
+
+    ``index`` 0 adjusts points scored by how much the opponent usually
+    concedes; 1 adjusts points conceded by how much the opponent usually
+    scores. An opponent with no rate yet -- a team's first appearance --
+    contributes unadjusted rather than inventing a correction for it.
+    """
+    mean_pf, mean_pa, league_pf, league_pa = rates
+    played = _team_games(prior_games, team_id)[-lookback:]
+    values = []
+    for g in played:
+        got = _points_for_against(g, team_id)
+        if got is None:
+            continue
+        opp = (g.away_team_id if g.home_team_id == team_id else g.home_team_id)
+        # `is not None`, not truthiness: a baseline of 0.0 is a real rate.
+        # mlb scores are single digits and a thin pool can genuinely average
+        # zero runs conceded, which truthiness would silently treat as
+        # "unrated" and leave unadjusted.
+        if index == 0:
+            baseline = mean_pa.get(opp)
+            shift = (baseline - league_pa) if baseline is not None else 0.0
+            values.append(got[0] - shift)
+        else:
+            baseline = mean_pf.get(opp)
+            shift = (baseline - league_pf) if baseline is not None else 0.0
+            values.append(got[1] - shift)
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def adjusted_points_for(prior_games: Sequence, team_id: int,
+                        lookback: int = DEFAULT_LOOKBACK,
+                        rates=None) -> float | None:
+    """Points scored, discounted for having faced weak defences."""
+    return _adjusted(prior_games, team_id, lookback,
+                     rates or opponent_rates(prior_games), 0)
+
+
+def adjusted_points_against(prior_games: Sequence, team_id: int,
+                            lookback: int = DEFAULT_LOOKBACK,
+                            rates=None) -> float | None:
+    """Points conceded, discounted for having faced weak offences."""
+    return _adjusted(prior_games, team_id, lookback,
+                     rates or opponent_rates(prior_games), 1)
 
 
 def _at_venue(games: Sequence, team_id: int, venue: str | None) -> list:
@@ -306,6 +390,14 @@ def compute_team_stats(games: Iterable, team_id: int, before_date: date,
         stats["points_for"] = float(points_for)
     if points_against is not None:
         stats["points_against"] = float(points_against)
+    rates = opponent_rates(prior)
+    adj_for = adjusted_points_for(prior, team_id, lookback=lookback, rates=rates)
+    adj_against = adjusted_points_against(prior, team_id, lookback=lookback,
+                                          rates=rates)
+    if adj_for is not None:
+        stats["points_for_adj"] = float(adj_for)
+    if adj_against is not None:
+        stats["points_against_adj"] = float(adj_against)
     for venue in ("home", "away"):
         pf = rolling_points_for(prior, team_id, lookback=lookback, venue=venue)
         pa = rolling_points_against(prior, team_id, lookback=lookback, venue=venue)

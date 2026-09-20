@@ -3,7 +3,9 @@ from datetime import date
 
 import pytest
 
-from backend.pipeline.team_stats import ALWAYS_COMPUTED_STAT_TYPES
+import datetime
+
+from backend.pipeline.team_stats import compute_team_stats
 
 from backend.database import get_engine, get_session
 from backend.models import Base, Team, Game, TeamStat, EloHistory
@@ -58,18 +60,30 @@ def test_real_run_populates_every_game(db_file):
     assert n_games == 3
     assert n_elo == 6  # two teams per game
 
-    # Conditional stats are earned, not guaranteed: points_for needs one
-    # prior game and the venue splits need MIN_VENUE_GAMES at that venue,
-    # which a three-game fixture never reaches. So every team-game carries
-    # the unconditional types, and only the later games add the blended
-    # scoring rates.
-    always = len(ALWAYS_COMPUTED_STAT_TYPES)
-    unconditional = 3 * 2 * always            # 3 games x 2 teams
-    # points_for and points_against, for both teams of games 2 and 3. Game 1
-    # has no prior history for either side. No venue split is ever earned:
-    # MIN_VENUE_GAMES is more than this fixture has.
-    earned = 2 * 2 * 2
-    assert n_stats == unconditional + earned
+    # Conditional stats are earned, not guaranteed, so the count is derived
+    # from what compute_team_stats actually produces for each game rather
+    # than hardcoded -- otherwise every new conditional stat breaks this
+    # test for a reason that has nothing to do with the backfill.
+    import sqlite3
+    con = sqlite3.connect(db_file)
+    games = con.execute(
+        "SELECT id, date, home_team_id, away_team_id, home_score, away_score, "
+        "sport, status FROM games ORDER BY date, id").fetchall()
+    con.close()
+
+    class _Row:
+        def __init__(self, r):
+            (self.id, d, self.home_team_id, self.away_team_id,
+             self.home_score, self.away_score, self.sport, self.status) = r
+            self.date = datetime.date.fromisoformat(d)
+            self.neutral_site = False
+
+    rows = [_Row(r) for r in games]
+    expected = 0
+    for i, g in enumerate(rows):
+        for team in (g.home_team_id, g.away_team_id):
+            expected += len(compute_team_stats(rows[:i], team, g.date))
+    assert n_stats == expected
 
 
 def test_the_first_game_has_no_scoring_averages(db_file):

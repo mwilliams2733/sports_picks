@@ -43,6 +43,15 @@ class SportResult:
     n_split: int = 0
     split_mae: float | None = None
     blended_mae_same_games: float | None = None
+    n_adj: int = 0
+    adj_mae: float | None = None
+    raw_mae_same_games: float | None = None
+
+    @property
+    def adjustment_helps(self) -> bool | None:
+        if self.adj_mae is None or self.raw_mae_same_games is None:
+            return None
+        return self.adj_mae < self.raw_mae_same_games
 
     @property
     def splits_help(self) -> bool | None:
@@ -59,6 +68,7 @@ class SportResult:
 
 SCORING_STATS = (
     "points_for", "points_against",
+    "points_for_adj", "points_against_adj",
     "points_for_home", "points_against_home",
     "points_for_away", "points_against_away",
 )
@@ -87,6 +97,15 @@ def split_total(home: dict, away: dict) -> float | None:
             + (away["points_for_away"] + away["points_against_away"])) / 2
 
 
+def adjusted_total(home: dict, away: dict) -> float | None:
+    """The opponent-adjusted prediction, or None when either side lacks it."""
+    keys = ("points_for_adj", "points_against_adj")
+    if not all(k in home for k in keys) or not all(k in away for k in keys):
+        return None
+    return ((home["points_for_adj"] + home["points_against_adj"])
+            + (away["points_for_adj"] + away["points_against_adj"])) / 2
+
+
 def predicted_total(home: dict, away: dict) -> float | None:
     """The matchup average, or None when either side lacks a history."""
     if len(home) < 2 or len(away) < 2:
@@ -101,7 +120,7 @@ def evaluate(session) -> list[SportResult]:
     for o in session.query(Odds).filter(Odds.over_under.isnot(None)):
         lines[o.game_id].append(o.over_under)
 
-    rows: dict[str, list[tuple[float, float, float | None, float | None]]] = defaultdict(list)
+    rows: dict[str, list[tuple]] = defaultdict(list)
     for g in session.query(Game).filter(Game.status == "final",
                                         Game.home_score.isnot(None),
                                         Game.away_score.isnot(None)):
@@ -110,17 +129,19 @@ def evaluate(session) -> list[SportResult]:
         if pred is None:
             continue
         line = statistics.mean(lines[g.id]) if g.id in lines else None
-        split = None if g.neutral_site else split_total(
-            stats.get((g.id, g.home_team_id), {}),
-            stats.get((g.id, g.away_team_id), {}))
+        h = stats.get((g.id, g.home_team_id), {})
+        a = stats.get((g.id, g.away_team_id), {})
+        split = None if g.neutral_site else split_total(h, a)
+        adj = adjusted_total(h, a)
         rows[g.sport].append(
-            (pred, float(g.home_score + g.away_score), line, split))
+            (pred, float(g.home_score + g.away_score), line, split, adj))
 
     results = []
     for sport, data in rows.items():
-        residuals = [actual - pred for pred, actual, _, _ in data]
-        withline = [(p, a, ln) for p, a, ln, _ in data if ln is not None]
-        withsplit = [(p, a, sp) for p, a, _, sp in data if sp is not None]
+        residuals = [actual - pred for pred, actual, _, _, _ in data]
+        withline = [(p, a, ln) for p, a, ln, _, _ in data if ln is not None]
+        withsplit = [(p, a, sp) for p, a, _, sp, _ in data if sp is not None]
+        withadj = [(p, a, ad) for p, a, _, _, ad in data if ad is not None]
         r = SportResult(
             sport=sport,
             n=len(data),
@@ -128,10 +149,15 @@ def evaluate(session) -> list[SportResult]:
             residual_sd=statistics.pstdev(residuals) if len(residuals) > 1 else 0.0,
             bias=statistics.mean(residuals),
             legacy_mae=statistics.mean(
-                abs(a - LEGACY_CONSTANT_TOTAL) for _, a, _, _ in data),
+                abs(a - LEGACY_CONSTANT_TOTAL) for _, a, _, _, _ in data),
             n_with_line=len(withline),
             n_split=len(withsplit),
+            n_adj=len(withadj),
         )
+        if withadj:
+            r.adj_mae = statistics.mean(abs(a - ad) for _, a, ad in withadj)
+            r.raw_mae_same_games = statistics.mean(
+                abs(a - p) for p, a, _ in withadj)
         if withsplit:
             r.split_mae = statistics.mean(abs(a - sp) for _, a, sp in withsplit)
             r.blended_mae_same_games = statistics.mean(
@@ -165,6 +191,17 @@ def format_report(results: list[SportResult]) -> str:
         verdict = "YES" if r.beats_line else "no"
         lines.append(f"  {r.sport:<7} {r.n_with_line:>6} {r.mae_vs_line:>9.2f} "
                      f"{r.line_mae:>9.2f} {verdict:>11}")
+    lines.append("")
+    lines.append("  Opponent-adjusted vs raw rates, on the same games:")
+    lines.append(f"  {'sport':<7} {'n':>6} {'adj MAE':>9} {'raw':>9} {'adj helps':>11}")
+    lines.append("  " + "-" * 50)
+    for r in results:
+        if r.adj_mae is None:
+            lines.append(f"  {r.sport:<7} {r.n_adj:>6}  no adjusted rates")
+            continue
+        lines.append(f"  {r.sport:<7} {r.n_adj:>6} {r.adj_mae:>9.2f} "
+                     f"{r.raw_mae_same_games:>9.2f} "
+                     f"{('YES' if r.adjustment_helps else 'no'):>11}")
     lines.append("")
     lines.append("  Venue splits vs one blended rate, on the same games:")
     lines.append(f"  {'sport':<7} {'n':>6} {'split MAE':>10} {'blended':>9} "
