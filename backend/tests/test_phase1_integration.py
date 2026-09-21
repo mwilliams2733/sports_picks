@@ -54,10 +54,14 @@ def test_confidence_with_default_thresholds():
 
 
 def test_kelly_respects_bounds():
+    from backend.analysis.kelly import NO_BET
+
     result = fractional_kelly(0.9, -150, 0.25)
     assert 0.5 <= result <= 3.0
+    # Was `== 0.5`. A -EV wager is declined outright now; the floor applies
+    # to positive Kelly only and may not flip the sign of the answer.
     result = fractional_kelly(0.1, -150, 0.25)
-    assert result == 0.5
+    assert result == NO_BET
 
 
 def test_adaptive_kelly_fraction():

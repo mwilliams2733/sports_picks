@@ -3,9 +3,16 @@
 DRAWDOWN_THRESHOLD = 0.15  # 15% drawdown triggers protection
 CORRELATION_DISCOUNT = 0.20  # 20% reduction per correlated pick
 
+#: Decline the wager. A real stake of nothing, not a missing value -- callers
+#: must not coalesce it away (see ``backtesting/backtester.py``).
+NO_BET = 0.0
+#: Smallest stake worth placing, and the largest the sizer will suggest.
+MIN_UNIT = 0.5
+MAX_UNIT = 3.0
+
 
 def fractional_kelly(model_prob: float, odds: int, fraction: float = 0.25) -> float:
-    """Calculate fractional Kelly criterion bet size.
+    """Suggested unit size, or :data:`NO_BET` when the wager is -EV.
 
     Kelly formula: f* = (bp - q) / b
     where:
@@ -13,7 +20,21 @@ def fractional_kelly(model_prob: float, odds: int, fraction: float = 0.25) -> fl
         p = probability of winning
         q = 1 - p = probability of losing
 
-    Returns suggested unit size clamped to [0.5, 3.0].
+    Returns ``NO_BET`` when f* <= 0, otherwise a size in
+    ``[MIN_UNIT, MAX_UNIT]``.
+
+    **The floor may not change the sign of the recommendation.** Rounding a
+    small positive stake up to ``MIN_UNIT`` is a policy about bet
+    granularity. Returning ``MIN_UNIT`` for a NEGATIVE Kelly asserts the
+    opposite of what the criterion computed, which is what this used to do:
+    f* <= 0 means the model's probability is at or below the price's implied
+    probability, and the old code staked it at 0.5 units anyway.
+
+    That was reachable in practice, not just in theory. A pick is only
+    generated on positive edge, but `ensemble` passes a hardcoded -110 to
+    this function for every spread and total regardless of the real price.
+    -110 implies 52.38%, so any spread whose cover probability sat below that
+    arrived here -EV and was staked at the minimum.
     """
     if odds < 0:
         b = 100 / abs(odds)
@@ -25,10 +46,10 @@ def fractional_kelly(model_prob: float, odds: int, fraction: float = 0.25) -> fl
     full_kelly = (b * p - q) / b
 
     if full_kelly <= 0:
-        return 0.5
+        return NO_BET
 
     sized = full_kelly * fraction
-    return max(0.5, min(3.0, round(sized, 2)))
+    return max(MIN_UNIT, min(MAX_UNIT, round(sized, 2)))
 
 
 def adaptive_fraction(calibration_deviation: float) -> float:

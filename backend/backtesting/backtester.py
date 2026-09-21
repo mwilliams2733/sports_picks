@@ -10,13 +10,28 @@ class Backtester:
         wins = 0
         losses = 0
         pushes = 0
+        no_bet = 0
         total_profit = 0.0
         total_units_risked = 0.0
         pick_details = []
         for game, home_score, away_score in games_with_results:
             picks = self.strategy.predict(game)
             for pick in picks:
-                unit_size = getattr(pick, 'suggested_unit_size', 1.0) or 1.0
+                # `or 1.0` here treated a 0.0 stake as a missing value and
+                # substituted a FULL unit, so a wager Kelly had declined was
+                # backtested at the largest size the old floor could produce.
+                # A zero stake is a real value; only an absent attribute is a
+                # gap.
+                unit_size = getattr(pick, 'suggested_unit_size', None)
+                if unit_size is None:
+                    unit_size = 1.0
+                if unit_size <= 0:
+                    # A bet that was not placed cannot win or lose. Counting
+                    # it would move the win rate -- the headline number --
+                    # while contributing nothing to profit. Counted instead,
+                    # so a declined pick is visible rather than silent.
+                    no_bet += 1
+                    continue
                 grade_outcome = grade_pick(
                     pick.pick_type, pick.pick_value, home_score, away_score, pick.odds_at_pick
                 )
@@ -45,6 +60,7 @@ class Backtester:
         total = wins + losses
         return {
             "wins": wins, "losses": losses, "pushes": pushes, "total": total,
+            "no_bet": no_bet,
             "win_rate": round((wins / total * 100) if total > 0 else 0, 2),
             "roi": round((total_profit / total_units_risked * 100) if total_units_risked > 0 else 0, 2),
             "total_profit": round(total_profit, 4),

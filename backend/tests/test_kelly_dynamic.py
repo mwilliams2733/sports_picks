@@ -8,13 +8,20 @@ from backend.analysis.kelly import (
 
 
 def test_fractional_kelly_basic():
-    result = fractional_kelly(0.60, -150, 0.25)
+    # 0.60 at -150 is break-even, not an edge: -150 implies exactly 60%.
+    # 0.70 is a real edge and sizes normally.
+    result = fractional_kelly(0.70, -150, 0.25)
     assert 0.5 <= result <= 3.0
 
 
 def test_fractional_kelly_no_edge():
+    # Was `== 0.5`. A negative Kelly fraction means the wager is -EV at that
+    # price, and staking it at the minimum asserted the opposite of what the
+    # criterion computed. See test_kelly_no_bet.py.
+    from backend.analysis.kelly import NO_BET
+
     result = fractional_kelly(0.40, -150, 0.25)
-    assert result == 0.5
+    assert result == NO_BET
 
 
 def test_adaptive_fraction_well_calibrated():
