@@ -112,7 +112,10 @@ def test_a_pick_on_an_unstarted_game_follows_the_market(session):
     assert before, "fixture produced no picks"
 
     for o in session.query(Odds).all():      # the market moves
-        o.moneyline_home, o.moneyline_away = -400, 320
+        # Both sides stay inside DEFAULT_MAX_ODDS: a moved price beyond
+        # the longshot ceiling is refused rather than refreshed, which
+        # would make this test about the ceiling instead of the refresh.
+        o.moneyline_home, o.moneyline_away = -400, 190
     session.commit()
     generate_and_store_picks(session, 1, TODAY)
 
@@ -125,7 +128,7 @@ def test_a_pick_on_an_unstarted_game_follows_the_market(session):
     # at -110 and would not change here.
     changed = {k for k in before if after[k] != before[k]}
     assert changed, "nothing followed the market"
-    assert all(after[k] in (-400, 320) for k in changed), (
+    assert all(after[k] in (-400, 190) for k in changed), (
         f"a refreshed price should be the current quote: "
         f"{ {k: after[k] for k in changed} }")
 
@@ -146,7 +149,10 @@ def test_a_pick_the_model_would_no_longer_make_is_left_standing(session):
     before = {p.id: (p.pick_value, p.odds_at_pick) for p in _picks(session)}
 
     for o in session.query(Odds).all():
-        o.moneyline_home, o.moneyline_away = -400, 320
+        # Both sides stay inside DEFAULT_MAX_ODDS: a moved price beyond
+        # the longshot ceiling is refused rather than refreshed, which
+        # would make this test about the ceiling instead of the refresh.
+        o.moneyline_home, o.moneyline_away = -400, 190
     session.commit()
     generate_and_store_picks(session, 1, TODAY)
 

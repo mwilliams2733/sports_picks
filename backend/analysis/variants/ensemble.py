@@ -36,6 +36,35 @@ logger = logging.getLogger(__name__)
 #: training game and produced a 49% moneyline edge on 2026-09-20.
 #:
 #: Override per strategy with config["max_edge"].
+#: Longest moneyline price the model is allowed to back.
+#:
+#: The model overestimates underdogs badly, and it is the single largest
+#: loss source in the book. On live picks carrying a stored `model_prob`, at
+#: prices of +200 or longer:
+#:
+#:     model said 33.7%  market implied 12.3%  actually won 12.5%  (n=24)
+#:
+#: The market was calibrated to within 0.2 points; the model claimed nearly
+#: three times the true probability. Because edge is `model - implied`, the
+#: bigger the overestimate the more attractive the bet looked -- so the
+#: worst-priced picks were also the ones that qualified most easily.
+#:
+#: What it cost: moneyline at >= +200 was 83 picks, 10.8% won, -23.62u,
+#: against a whole-book loss of -10.10u. Removing only those turns the book
+#: positive, and they are why the moneyline market ran at 31.5% while every
+#: other market sat near or above 50%.
+#:
+#: **+200, not the best-performing cut.** Backtested, `skip >= +150` scored
+#: better (+5.47% ROI against +2.51%). +200 is used anyway because it is the
+#: boundary the miscalibration was independently diagnosed at, while +150 is
+#: the best of six thresholds tried against 61 games -- and the best of six
+#: at p = 0.205 is what luck looks like. A threshold read off a results
+#: table is fitted to that table.
+#:
+#: This guards a MODEL property, not a market one, so it applies to every
+#: strategy by default. Override with config["max_odds"]; None disables it.
+DEFAULT_MAX_ODDS = 200
+
 DEFAULT_MAX_EDGE = 20.0
 
 #: How many games of evidence a rolling margin needs before it is taken at
@@ -168,15 +197,29 @@ class EnsembleStrategy(Strategy):
         picks = []
         min_edge = self.config.get("min_edge", 5.0)
         max_edge = self.config.get("max_edge", DEFAULT_MAX_EDGE)
+        # Absent key -> the default ceiling; an explicit None disables it.
+        max_odds = (self.config["max_odds"] if "max_odds" in self.config
+                    else DEFAULT_MAX_ODDS)
 
-        def _takeable(edge: float, market: str) -> bool:
-            """Whether a claimed edge is both big enough and small enough."""
+        def _takeable(edge: float, market: str, odds: int | None = None) -> bool:
+            """Whether a claimed edge is big enough, small enough, and on a
+            price the model is trusted at."""
             if edge < min_edge:
                 return False
             if edge >= max_edge:
                 logger.info(
                     "%s %s edge %.1f%% at or above max_edge %.1f%%; refused",
                     game.sport, market, edge, max_edge)
+                return False
+            if (max_odds is not None and odds is not None and odds >= max_odds):
+                # Logged, not dropped quietly: a pick that vanishes without a
+                # record is indistinguishable from a strategy that found
+                # nothing.
+                logger.info(
+                    "%s %s price %+d at or beyond max_odds %+d; refused "
+                    "(model overestimates longshots: 33.7%% claimed against "
+                    "12.5%% actual at >= +200)",
+                    game.sport, market, odds, max_odds)
                 return False
             return True
         kelly_fraction = self.config.get("kelly_fraction", 0.25)
@@ -192,7 +235,7 @@ class EnsembleStrategy(Strategy):
             implied_home, implied_away = remove_vig(raw_home, raw_away)
             home_edge = (home_prob - implied_home) * 100
             away_edge = (away_prob - implied_away) * 100
-            if _takeable(home_edge, "moneyline"):
+            if _takeable(home_edge, "moneyline", avg_odds["moneyline_home"]):
                 models, available = self._count_agreeing_models(game, "home")
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="HOME ML",
                     confidence=calculate_confidence(home_edge, models, self.thresholds, available), edge_pct=round(home_edge, 1),
@@ -200,7 +243,7 @@ class EnsembleStrategy(Strategy):
                     odds_at_pick=avg_odds["moneyline_home"],
                     suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction),
                     factors=self._build_factors(game, "home")))
-            elif _takeable(away_edge, "moneyline"):
+            elif _takeable(away_edge, "moneyline", avg_odds["moneyline_away"]):
                 models, available = self._count_agreeing_models(game, "away")
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
                     confidence=calculate_confidence(away_edge, models, self.thresholds, available), edge_pct=round(away_edge, 1),
