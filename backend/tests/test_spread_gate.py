@@ -84,13 +84,22 @@ def test_the_gate_is_per_sport(monkeypatch):
     assert _spreads("nfl") == []
 
 
-def test_the_gate_does_not_suppress_other_markets():
+def test_the_gate_does_not_suppress_other_markets(monkeypatch):
     """Only spreads are gated. Moneylines must be unaffected.
 
     min_edge is dropped to 1.0 because this fixture's moneyline edge is
     about 4% -- enough to prove the branch still runs, not enough to clear
     the production floor.
+
+    The probability is pinned rather than modelled. The 4% was measured with
+    a trained model behind it, and `_legacy_calibrated_probability` trains
+    from the relative path `sports_picks.db` -- the real database on the
+    machine this was written on, gitignored and absent in CI, where the
+    untrained fallback produced no moneyline pick at all. 0.683 against this
+    fixture's de-vigged 64.3% is the 4% the docstring already claimed.
     """
+    monkeypatch.setattr(EnsembleStrategy, "_calibrated_probability",
+                        lambda self, game: 0.683)
     picks = EnsembleStrategy("ensemble", {"min_edge": 1.0, "max_edge": 100.0}
                              ).predict(_game("nba"))
     assert any(p.pick_type == "moneyline" for p in picks)

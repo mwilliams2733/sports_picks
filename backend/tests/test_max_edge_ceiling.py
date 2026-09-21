@@ -46,6 +46,28 @@ def _edges(picks):
     return sorted(p.edge_pct for p in picks)
 
 
+@pytest.fixture(autouse=True)
+def _model_reads_the_elo_gap(monkeypatch):
+    """Stand in for the trained model, so these tests measure the ceiling.
+
+    Every fixture here separates the two sides by Elo and then asks what the
+    ceiling does with the edge that produces. That only worked while a
+    trained model was answering: `_legacy_calibrated_probability` trains from
+    the relative path `sports_picks.db`, which is the real database on the
+    machine this file was written on and absent everywhere else. `*.db` is
+    gitignored, so CI has never had one -- these tests failed in CI from the
+    commit that added them, on the untrained fallback's flat probabilities.
+
+    The ordinary Elo expectation is used, because the Elo gap is what the
+    fixtures were already written to vary.
+    """
+    def home_prob(self, game):
+        gap = game.home_stats.elo_rating - game.away_stats.elo_rating
+        return max(0.01, min(0.99, 1.0 / (1.0 + 10 ** (-gap / 400.0))))
+
+    monkeypatch.setattr(EnsembleStrategy, "_calibrated_probability", home_prob)
+
+
 def test_an_enormous_claimed_edge_is_refused():
     """A huge mismatch priced as a coin flip: the model claims a big edge."""
     s = EnsembleStrategy("ensemble", {"min_edge": 5.0})

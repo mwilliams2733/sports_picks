@@ -14,3 +14,23 @@ def db_session(db_engine):
     session = get_session(db_engine)
     yield session
     session.close()
+
+
+@pytest.fixture(autouse=True)
+def _untrained_calibrated_model():
+    """Stop the calibrated model leaking between tests.
+
+    `EnsembleStrategy._calibrated` is a CLASS attribute, trained lazily on
+    first use from whatever database `DB_PATH` names -- by default the
+    relative `sports_picks.db`, which on a developer's machine is the real
+    one sitting in the repo root. Whichever test touched the strategy first
+    therefore decided what every later test was predicting with, and a suite
+    run from the repo root read production data.
+
+    Reset around every test so the fixture a test sets up is the only thing
+    it is measuring.
+    """
+    from backend.analysis.variants.ensemble import EnsembleStrategy
+    EnsembleStrategy._calibrated = None
+    yield
+    EnsembleStrategy._calibrated = None
