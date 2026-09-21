@@ -88,6 +88,36 @@ class EloHistory(Base):
     rating = Column(Float, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+class TeamBoxScore(Base):
+    """One team's totals FROM a finished game -- a post-game fact.
+
+    Deliberately not `TeamStat`, which holds **pre-game features** computed
+    strictly before the game they hang off. A box score is a measurement OF
+    that game, and mixing the two is how a lookahead gets written by
+    someone reading `TeamStat(game_id=G)` and assuming it predates G. Same
+    separation `player_stats.stat_type='game_log'` already uses.
+
+    `possessions` is NULL unless every term of
+    ``FGA - OREB + TOV + 0.44*FTA`` was present; `minutes` is NULL when the
+    player block did not supply it. Neither is defaulted -- pace is per-48,
+    so an assumed regulation length would misstate every overtime game.
+    """
+    __tablename__ = "team_box_scores"
+    id = Column(Integer, primary_key=True)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    sport = Column(String, nullable=False)
+    points = Column(Integer, nullable=True)
+    fga = Column(Integer, nullable=True)
+    oreb = Column(Integer, nullable=True)
+    turnovers = Column(Integer, nullable=True)
+    fta = Column(Integer, nullable=True)
+    possessions = Column(Float, nullable=True)
+    minutes = Column(Float, nullable=True)
+    fetched_at = Column(DateTime, nullable=False,
+                        default=lambda: datetime.now(tz=timezone.utc))
+
+
 class Odds(Base):
     __tablename__ = "odds"
     id = Column(Integer, primary_key=True)

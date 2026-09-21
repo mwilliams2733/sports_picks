@@ -310,6 +310,21 @@ def migrate_odds_spread_total_prices(engine):
                     f"ALTER TABLE odds ADD COLUMN {column} INTEGER"))
 
 
+def migrate_team_box_scores(engine):
+    """Create team_box_scores if missing.
+
+    Holds the possessions `team_stats.py` documents as unavailable, which
+    is why `offensive_rating`, `defensive_rating` and `pace` have always
+    been constant. Post-game facts, kept out of the point-in-time
+    `team_stats` table on purpose.
+    """
+    from sqlalchemy import inspect as sa_inspect
+    inspector = sa_inspect(engine)
+    if "team_box_scores" not in inspector.get_table_names():
+        from backend.models import TeamBoxScore
+        TeamBoxScore.__table__.create(engine)
+
+
 MIGRATIONS = (
     migrate_api_usage,
     migrate_game_start_time,
@@ -327,6 +342,7 @@ MIGRATIONS = (
     migrate_game_odds_api_id,
     migrate_pick_suggested_unit_size,
     migrate_odds_spread_total_prices,
+    migrate_team_box_scores,
 )
 
 

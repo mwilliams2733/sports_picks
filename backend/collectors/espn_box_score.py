@@ -322,3 +322,203 @@ def collect_box_scores_for_final_games(session, sport: str | None = None) -> int
             )
 
     return written
+
+
+#: ESPN team-stat name -> the possession term it supplies. Names, not labels:
+#: the labels are display strings ("Offensive Rebounds") while the names are
+#: stable keys, the same reason `parse_box_score` reads `keys` over `labels`.
+_TEAM_POSSESSION_TERMS = {
+    "fieldGoalsMade-fieldGoalsAttempted": "fga",
+    "offensiveRebounds": "oreb",
+    "freeThrowsMade-freeThrowsAttempted": "fta",
+}
+
+#: Turnovers, most complete first. ESPN reports `turnovers` charged to
+#: players and `totalTurnovers` including team turnovers; a possession ends
+#: on either, so the total is the right term and the player count is only a
+#: fallback for a payload that omits it.
+_TURNOVER_NAMES = ("totalTurnovers", "turnovers")
+
+#: Free-throw trips per attempt, Dean Oliver's coefficient. Two-shot fouls
+#: dominate, so 0.44 approximates the share of attempts that end a
+#: possession better than 0.5 does.
+FT_POSSESSION_WEIGHT = 0.44
+
+
+def _attempted(raw) -> int | None:
+    """The attempted half of a "made-attempted" pair, or a bare count."""
+    try:
+        text = str(raw)
+        return int(text.split("-")[1] if "-" in text else text)
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _team_minutes(summary: dict, team_abbr: str | None) -> float | None:
+    """Team minutes for one side, summed from the player block.
+
+    Pace is possessions per 48 minutes, so an overtime game is not
+    comparable to a regulation one: NBA regulation totals 240 team-minutes
+    and each overtime adds 25. Assuming regulation would silently overstate
+    the pace of every OT game, so a game whose minutes cannot be read
+    returns ``None`` and simply has no pace.
+    """
+    total = None
+    for block in summary.get("boxscore", {}).get("players", []):
+        if (block.get("team") or {}).get("abbreviation") != team_abbr:
+            continue
+        for row in parse_box_score({"boxscore": {"players": [block]}}):
+            minutes = row.get("minutes")
+            if minutes is not None:
+                total = (total or 0.0) + minutes
+    return total
+
+
+def parse_team_box(summary: dict) -> list[dict]:
+    """Per-team box-score totals and possessions from an ESPN summary.
+
+    Possessions follow Dean Oliver:
+
+        POSS = FGA - OREB + TOV + FT_POSSESSION_WEIGHT * FTA
+
+    ``possessions`` is ``None`` unless every term is present. Three of four
+    terms is not a possession count, and substituting zero for a missing one
+    understates it on exactly the games where the payload is thin -- silently,
+    and in the same direction every time.
+
+    Football and other sports carry none of these fields, so they come back
+    with ``possessions=None`` rather than a partial number: pace is a
+    basketball construct and a value here would invite one for a sport that
+    has no such statistic.
+    """
+    rows: list[dict] = []
+    for block in summary.get("boxscore", {}).get("teams", []):
+        abbr = (block.get("team") or {}).get("abbreviation")
+        row: dict = {"team_abbr": abbr, "fga": None, "oreb": None,
+                     "fta": None, "turnovers": None, "possessions": None}
+        stats = {s.get("name"): s.get("displayValue")
+                 for s in block.get("statistics", [])}
+
+        for name, field in _TEAM_POSSESSION_TERMS.items():
+            if name in stats:
+                row[field] = _attempted(stats[name])
+        for name in _TURNOVER_NAMES:
+            if name in stats:
+                value = _attempted(stats[name])
+                if value is not None:
+                    row["turnovers"] = value
+                    break
+
+        terms = (row["fga"], row["oreb"], row["turnovers"], row["fta"])
+        if all(t is not None for t in terms):
+            row["possessions"] = round(
+                row["fga"] - row["oreb"] + row["turnovers"]
+                + FT_POSSESSION_WEIGHT * row["fta"], 2)
+
+        row["minutes"] = _team_minutes(summary, abbr)
+        rows.append(row)
+    return rows
+
+
+#: Sports where possessions are defined and pace means something. Football
+#: and combat sports have no such construct, and `parse_team_box` returns
+#: `possessions=None` for them anyway -- this keeps the collector from
+#: spending requests to learn that.
+POSSESSION_SPORTS = ("nba", "ncaab")
+
+
+def store_team_box(session, game, summary: dict) -> int:
+    """Persist both teams' totals for one game. Returns rows written.
+
+    Idempotent per (game, team): a game already stored is updated in place
+    rather than duplicated, so a re-run after a partial failure converges.
+    """
+    from backend.models import Team, TeamBoxScore
+
+    rows = parse_team_box(summary)
+    if not rows:
+        return 0
+
+    home = session.get(Team, game.home_team_id)
+    away = session.get(Team, game.away_team_id)
+    by_abbr = {}
+    if home:
+        by_abbr[home.abbreviation] = (home.id, game.home_score)
+    if away:
+        by_abbr[away.abbreviation] = (away.id, game.away_score)
+
+    written = 0
+    for row in rows:
+        match = by_abbr.get(row.get("team_abbr"))
+        if match is None:
+            # A block we cannot tie to either side of OUR game. Skipping is
+            # the only honest option: attributing a box score to the wrong
+            # team would corrupt every rating derived from it.
+            logger.info("team box: %r not a side of game %s", row.get("team_abbr"), game.id)
+            continue
+        team_id, points = match
+        existing = (session.query(TeamBoxScore)
+                    .filter(TeamBoxScore.game_id == game.id,
+                            TeamBoxScore.team_id == team_id).first())
+        target = existing or TeamBoxScore(game_id=game.id, team_id=team_id,
+                                          sport=game.sport)
+        target.points = points
+        target.fga = row["fga"]
+        target.oreb = row["oreb"]
+        target.turnovers = row["turnovers"]
+        target.fta = row["fta"]
+        target.possessions = row["possessions"]
+        target.minutes = row["minutes"]
+        if existing is None:
+            session.add(target)
+        written += 1
+    return written
+
+
+def collect_team_box_scores(session, sport: str, *, limit: int | None = None,
+                            client: httpx.Client | None = None) -> dict:
+    """Fetch and store team box scores for final games that lack them.
+
+    Resumable by construction, like
+    :func:`collect_box_scores_for_final_games`: each game is asked
+    individually whether it already has rows, so an interrupted run resumes
+    from where the data actually is and nothing tracks progress.
+
+    One request per game. Every basketball final in production carries an
+    `espn_id`, so there is no scoreboard search.
+    """
+    from backend.models import Game, TeamBoxScore
+
+    if sport not in POSSESSION_SPORTS:
+        return {"sport": sport, "games": 0, "rows": 0, "skipped": 0,
+                "refused_sport": True}
+
+    games = (session.query(Game)
+             .filter(Game.sport == sport, Game.status == "final",
+                     Game.home_score.isnot(None), Game.espn_id.isnot(None))
+             .order_by(Game.date).all())
+
+    summary = {"sport": sport, "games": 0, "rows": 0, "skipped": 0,
+               "refused_sport": False}
+    owns_client = client is None
+    client = client or httpx.Client(timeout=_TIMEOUT)
+    try:
+        for game in games:
+            if limit is not None and summary["games"] >= limit:
+                break
+            if (session.query(TeamBoxScore.id)
+                    .filter(TeamBoxScore.game_id == game.id).first()):
+                summary["skipped"] += 1
+                continue
+            payload = fetch_summary(game.sport, game.espn_id, client=client)
+            if not payload:
+                continue
+            written = store_team_box(session, game, payload)
+            if written:
+                session.commit()
+                summary["games"] += 1
+                summary["rows"] += written
+    finally:
+        if owns_client:
+            client.close()
+    return summary

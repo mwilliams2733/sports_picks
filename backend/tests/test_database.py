@@ -20,6 +20,10 @@ def test_create_all_tables(db_engine):
         "activity_feed", "api_usage", "backtest_picks", "backtest_runs",
         "calibration_history", "elo_history", "elo_ratings", "games", "model_metrics",
         "odds", "paper_picks", "parlays", "pick_results", "picks", "player_props",
-        "player_stats", "strategies", "team_stats", "teams", "user_profiles"
+        # team_box_scores is post-game team totals (possessions). Kept apart
+        # from team_stats, which is pre-game features, so a box score cannot
+        # be mistaken for something computed before the game it describes.
+        "player_stats", "strategies", "team_box_scores", "team_stats",
+        "teams", "user_profiles"
     ]
     assert sorted(tables) == sorted(expected)
