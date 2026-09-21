@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
@@ -12,9 +13,31 @@ from backend.analysis.variants.sport_specific import SportSpecificStrategy
 from backend.analysis.variants.prop_value import PropValueStrategy
 from backend.analysis.variants.combat_sports import CombatSportsStrategy
 from backend.analysis.confidence import get_thresholds
+from backend.analysis.kelly import (UNITS_PER_BANKROLL, fractional_kelly,
+                                    sizing_fraction)
+from backend.analysis.recalibrator import EXPECTED_WIN_RATES
 from backend.time_utils import et_today
 
 logger = logging.getLogger(__name__)
+
+#: Days of settled results the calibration deviation is measured over.
+CALIBRATION_WINDOW_DAYS = 30
+
+#: Decided picks required before the deviation is trusted.
+#:
+#: ``adaptive_fraction`` discriminates bands 0.03 and 0.05 wide, so the
+#: sample has to resolve the NARROWER one or the choice between fractions is
+#: noise. n = (z * 0.5 / band)^2 at a one-sided 90% test, the same form
+#: `recalibrator.MIN_PICKS_PER_TIER` uses. Derived from the band rather than
+#: written as a literal, so it follows if the bands ever move.
+#:
+#: This lands near 457 against 157 decided picks in the last 30 days on
+#: 2026-09-21, so the guard currently holds and the configured fraction
+#: stands. That is the honest outcome, not a broken wire.
+_Z_ONE_SIDED_90 = 1.2816
+_NARROWEST_ADAPTIVE_BAND = 0.03
+MIN_CALIBRATION_SAMPLE = math.ceil(
+    (_Z_ONE_SIDED_90 * 0.5 / _NARROWEST_ADAPTIVE_BAND) ** 2)
 
 STRATEGY_MAP = {
     "ensemble": EnsembleStrategy,
@@ -24,6 +47,62 @@ STRATEGY_MAP = {
     "prop_value": PropValueStrategy,
     "combat_sports": CombatSportsStrategy,
 }
+
+def _bankroll_state(session: Session) -> tuple[float, float]:
+    """``(current, peak)`` bankroll in units, from every settled pick.
+
+    A full bankroll is :data:`UNITS_PER_BANKROLL` units by definition, since
+    one unit is 1% of it. Settled results move the balance from there.
+
+    Deriving a starting balance is the point. Feeding raw cumulative P&L to
+    :func:`apply_drawdown_protection` gives ``(peak - current) / peak``
+    against a peak *profit*: on this book, +20.70u peak and -12.22u current
+    reported a 183% drawdown, which is not a fraction of anything.
+
+    A loss costs one unit because payout is recorded per unit staked; the
+    historical stake was not persisted, so it cannot be weighted.
+    """
+    balance = float(UNITS_PER_BANKROLL)
+    peak = balance
+    rows = (session.query(PickResult.result, PickResult.payout)
+            .order_by(PickResult.id.asc()).all())
+    for result, payout in rows:
+        if result == "win":
+            balance += payout or 0.0
+        elif result == "loss":
+            balance -= 1.0
+        peak = max(peak, balance)
+    return balance, peak
+
+
+def _calibration_deviation(session: Session, today: date,
+                           days: int = CALIBRATION_WINDOW_DAYS) -> float | None:
+    """How far the model's realised win rate sits from what it promised.
+
+    Returns ``None`` -- not 0.0 -- below :data:`MIN_CALIBRATION_SAMPLE`,
+    because a sample that cannot resolve ``adaptive_fraction``'s narrowest
+    band gives a number that only looks like a measurement. ``None`` leaves
+    the configured fraction in place.
+
+    Expected rates come from ``recalibrator.EXPECTED_WIN_RATES`` rather than
+    a second copy, so the promise the recalibrator grades against and the
+    promise sizing reads are the same one.
+    """
+    cutoff = today - timedelta(days=days)
+    rows = (session.query(PickModel.confidence, PickResult.result)
+            .join(PickResult, PickResult.pick_id == PickModel.id)
+            .join(Game, Game.id == PickModel.game_id)
+            .filter(Game.date >= cutoff,
+                    PickResult.result.in_(("win", "loss")))
+            .all())
+    if len(rows) < MIN_CALIBRATION_SAMPLE:
+        return None
+
+    wins = sum(1 for _, result in rows if result == "win")
+    actual = wins / len(rows)
+    expected = sum(EXPECTED_WIN_RATES.get(tier, 0.5) for tier, _ in rows) / len(rows)
+    return abs(actual - expected)
+
 
 def generate_and_store_picks(session: Session, strategy_id: int,
                               target_date: date | None = None,
@@ -95,6 +174,24 @@ def generate_and_store_picks(session: Session, strategy_id: int,
         pid for (pid,) in session.query(PickResult.pick_id)
         .filter(PickResult.pick_id.in_([p.id for p in already.values()] or [-1]))
     }
+    # Sizing context, computed once per run: both terms describe the book as
+    # a whole, not any one game. Logged unconditionally -- "no adjustment
+    # applied" is the normal outcome here, and a silent path is
+    # indistinguishable from an unwired one, which is what these three
+    # adjusters were until now.
+    base_fraction = config.get("kelly_fraction", 0.25)
+    deviation = _calibration_deviation(session, target_date)
+    balance, peak = _bankroll_state(session)
+    logger.info(
+        "Kelly sizing: base=%.2f calibration=%s bankroll=%.2fu peak=%.2fu "
+        "drawdown=%.1f%%",
+        base_fraction,
+        f"{deviation:.3f}" if deviation is not None
+        else f"not measured (<{MIN_CALIBRATION_SAMPLE} decided picks)",
+        balance, peak,
+        ((peak - balance) / peak * 100) if peak > 0 else 0.0,
+    )
+
     count = 0
     refreshed = 0
     thresholds_by_sport: dict[str, dict] = {}
@@ -115,6 +212,22 @@ def generate_and_store_picks(session: Session, strategy_id: int,
                 game_data.home_fighter = _build_fighter_stats(session, game.home_team_id, game.sport, game.date)
                 game_data.away_fighter = _build_fighter_stats(session, game.away_team_id, game.sport, game.date)
             picks = strategy.predict(game_data)
+            # Correlation is the only per-game term: several picks on one
+            # game are several bets on one outcome. Counted over the picks
+            # that will actually be stored, not everything predicted.
+            keepers = [p for p in picks if p.confidence >= 1]
+            game_fraction = sizing_fraction(
+                base_fraction, calibration_deviation=deviation,
+                current_balance=balance, peak_balance=peak,
+                same_game_picks=len(keepers))
+            for pick in keepers:
+                # Re-sized here rather than inside the strategy: the
+                # adjustments need the session and the game's full pick list,
+                # neither of which `predict` has. `Pick` carries the
+                # probability and price, so this reuses `fractional_kelly`
+                # rather than reimplementing the sizing.
+                pick.suggested_unit_size = fractional_kelly(
+                    pick.model_probability, pick.odds_at_pick, game_fraction)
             for pick in picks:
                 if pick.confidence >= 1:
                     existing = already.get((game.id, pick.pick_type))
@@ -129,6 +242,7 @@ def generate_and_store_picks(session: Session, strategy_id: int,
                         confidence=pick.confidence, edge_pct=pick.edge_pct,
                         odds_at_pick=pick.odds_at_pick,
                         model_prob=pick.model_probability,
+                        suggested_unit_size=pick.suggested_unit_size,
                         rationale_json=json.dumps([asdict(f) for f in pick.factors]),
                         created_at=datetime.now(tz=timezone.utc))
                     session.add(db_pick)
@@ -265,6 +379,9 @@ def _refresh_pick(existing: PickModel, pick) -> None:
     existing.edge_pct = pick.edge_pct
     existing.odds_at_pick = pick.odds_at_pick
     existing.model_prob = getattr(pick, "model_probability", None)
+    # Re-priced advice carries a re-sized stake. Leaving the old one would
+    # pair a fresh price with a stake computed against the previous one.
+    existing.suggested_unit_size = getattr(pick, "suggested_unit_size", None)
     existing.created_at = datetime.now(timezone.utc)
 
 def _build_game_data(session: Session, game,

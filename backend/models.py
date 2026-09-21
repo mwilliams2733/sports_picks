@@ -141,6 +141,10 @@ class PickModel(Base):
     edge_pct = Column(Float, nullable=False)
     odds_at_pick = Column(Integer, nullable=True)
     model_prob = Column(Float, nullable=True)
+    #: Kelly stake in units, where one unit is 1% of bankroll. NULL for every
+    #: pick made before this was persisted -- a backfilled default would be a
+    #: number nobody computed. 0.0 means the sizer declined the bet.
+    suggested_unit_size = Column(Float, nullable=True)
     rationale_json = Column(Text, nullable=True)
     # Only for pick_type="prop". prop_market holds the market KEY
     # ("player_threes"), not the display label ("3-Pointers"): MARKET_STAT_MAP

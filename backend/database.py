@@ -262,6 +262,29 @@ def migrate_game_odds_api_id(engine):
                     "ON games (odds_api_id)"))
 
 
+def migrate_pick_suggested_unit_size(engine):
+    """Add suggested_unit_size column to picks if missing.
+
+    Strategies have always computed this (``Pick.suggested_unit_size``), but
+    ``generate_and_store_picks`` never persisted it and no API route served
+    it, so Kelly sizing reached the backtester and nothing else. Wiring the
+    Kelly adjusters into a value that is then discarded would be more dead
+    wiring; this adds the place to store it.
+
+    Same shape as :func:`migrate_pick_model_prob`, for the same reason.
+    Nullable: every pick predating this has no recorded stake, and a
+    backfilled default would be a number nobody computed.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "picks" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("picks")]
+        if "suggested_unit_size" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE picks ADD COLUMN suggested_unit_size FLOAT"))
+
+
 MIGRATIONS = (
     migrate_api_usage,
     migrate_game_start_time,
@@ -277,6 +300,7 @@ MIGRATIONS = (
     migrate_game_neutral_site,
     migrate_game_season_type,
     migrate_game_odds_api_id,
+    migrate_pick_suggested_unit_size,
 )
 
 

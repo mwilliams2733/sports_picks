@@ -100,3 +100,44 @@ def apply_correlation_discount(base_fraction: float, same_game_picks: int) -> fl
     if same_game_picks <= 1:
         return base_fraction
     return base_fraction * (1 - CORRELATION_DISCOUNT)
+
+
+def sizing_fraction(base_fraction: float, *,
+                    calibration_deviation: float | None = None,
+                    current_balance: float | None = None,
+                    peak_balance: float | None = None,
+                    same_game_picks: int = 1) -> float:
+    """The Kelly fraction to size with, after every adjustment that applies.
+
+    The single place :func:`adaptive_fraction`,
+    :func:`apply_drawdown_protection` and :func:`apply_correlation_discount`
+    compose. They had zero production call sites before this existed, and a
+    caller assembling them by hand can apply two of three and silently skip
+    the last.
+
+    Order is fixed and load-bearing:
+
+    1. ``adaptive_fraction`` **replaces** the base. It returns an absolute
+       fraction, not a multiplier, so running it after a discount would
+       throw the discount away.
+    2. Drawdown halves what survives -- a statement about the bankroll
+       rather than about this bet.
+    3. Correlation discounts last, the only per-game term.
+
+    **An absent input is skipped, never defaulted.** ``None`` calibration
+    means "not measured", which is not "perfectly calibrated"; reading it as
+    a deviation of 0.0 would raise every stake to the most aggressive
+    fraction on no evidence. Same reasoning as
+    :func:`analysis.confidence.calculate_confidence`, where an absent signal
+    is absent evidence rather than a vote.
+    """
+    fraction = base_fraction
+
+    if calibration_deviation is not None:
+        fraction = adaptive_fraction(abs(calibration_deviation))
+
+    if current_balance is not None and peak_balance is not None:
+        fraction = apply_drawdown_protection(fraction, current_balance,
+                                             peak_balance)
+
+    return apply_correlation_discount(fraction, same_game_picks)

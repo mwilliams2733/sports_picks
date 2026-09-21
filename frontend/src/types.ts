@@ -8,6 +8,10 @@ export interface PickData {
   confidence: number;
   edge_pct: number;
   odds_at_pick: number;
+  /** Kelly stake in units, where one unit is 1% of bankroll.
+   *  0 means the sizer declined the bet; null for picks made before it was
+   *  persisted. */
+  suggested_unit_size?: number | null;
   result?: string | null;
   payout?: number | null;
   clv_pct?: number | null;
