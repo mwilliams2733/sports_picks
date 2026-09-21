@@ -66,13 +66,16 @@ def test_a_real_edge_still_sizes_and_respects_the_ceiling():
     assert MIN_UNIT <= result <= MAX_UNIT
 
 
-def test_the_ceiling_binds_only_above_full_kelly():
-    """f* = p - q/b cannot exceed 1.0 for a single wager, so at the default
-    quarter Kelly the 3.0 cap is unreachable -- the most a 0.25 fraction can
-    suggest is about 0.25 units, which the floor then lifts to MIN_UNIT.
-    The cap is real but only binds for a fraction above 3."""
-    assert fractional_kelly(0.99, 200, 0.25) == MIN_UNIT
-    assert fractional_kelly(0.99, 200, 10.0) == MAX_UNIT
+def test_an_enormous_edge_is_capped_not_unbounded():
+    """Quarter Kelly on a near-certainty is ~25% of bankroll, which is 25
+    units. The cap is what stops the sizer recommending a quarter of the
+    bankroll on one game.
+
+    This test previously asserted the OPPOSITE -- that 0.25 could never
+    reach the cap -- because the bankroll fraction was clamped directly to
+    a unit range and the two scales never met. See
+    `test_kelly_unit_scale.py`."""
+    assert fractional_kelly(0.99, 200, 0.25) == MAX_UNIT
 
 
 def test_a_small_positive_edge_still_rounds_up_to_the_minimum():

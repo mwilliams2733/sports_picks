@@ -240,7 +240,7 @@ const SECTIONS: FAQSection[] = [
       {
         question: 'What is Kelly Criterion bet sizing?',
         answer:
-          'Every pick includes a suggested unit size based on the Kelly Criterion formula: f* = (bp - q) / b, where b is the decimal odds minus 1, p is the model\'s win probability, and q is 1 - p. The system uses fractional Kelly (default 25%) to reduce variance. The suggested unit size ranges from 0.5 (minimum, low confidence) to 3.0 (maximum, very high edge). A standard bet is 1.0 units. This tells you how much to bet relative to your bankroll \u2014 higher edge and better odds mean larger suggested bets.',
+          'Every pick includes a suggested unit size based on the Kelly Criterion formula: f* = (bp - q) / b, where b is the decimal odds minus 1, p is the model\'s win probability, and q is 1 - p. The system uses fractional Kelly (default 25%) to reduce variance. One unit is 1% of your bankroll, so 1.0 units on a $1,000 bankroll is a $10 bet. The suggested size ranges from 0.5 units (a real but small edge) to 3.0 units, which is the cap and is reached around an 8-point edge at -110. A suggested size of 0 means the model declines the bet \u2014 at that price the wager is negative expected value, and no stake is the correct answer.',
       },
       {
         question: 'What is schedule fatigue detection?',

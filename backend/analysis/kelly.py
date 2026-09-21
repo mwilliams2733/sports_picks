@@ -9,6 +9,15 @@ NO_BET = 0.0
 #: Smallest stake worth placing, and the largest the sizer will suggest.
 MIN_UNIT = 0.5
 MAX_UNIT = 3.0
+#: Units per whole bankroll: one unit is 1% of bankroll, the convention the
+#: FAQ already assumes when it calls 1.0 units a standard bet.
+#:
+#: Kelly returns a fraction OF BANKROLL. Clamping that fraction directly to
+#: a UNIT range compared two different scales, and because ``f* = p - q/b``
+#: cannot exceed 1.0 for a single wager, ``f* * 0.25`` could never reach
+#: ``MIN_UNIT``. Every positive-Kelly pick floored to 0.5 and the 3.0
+#: ceiling had never been produced -- the function was constant.
+UNITS_PER_BANKROLL = 100
 
 
 def fractional_kelly(model_prob: float, odds: int, fraction: float = 0.25) -> float:
@@ -21,7 +30,10 @@ def fractional_kelly(model_prob: float, odds: int, fraction: float = 0.25) -> fl
         q = 1 - p = probability of losing
 
     Returns ``NO_BET`` when f* <= 0, otherwise a size in
-    ``[MIN_UNIT, MAX_UNIT]``.
+    ``[MIN_UNIT, MAX_UNIT]``, where one unit is 1% of bankroll
+    (:data:`UNITS_PER_BANKROLL`). Kelly yields a bankroll FRACTION, so the
+    conversion to units is what makes the clamp range meaningful; without
+    it the two scales never met and this returned 0.5 for every input.
 
     **The floor may not change the sign of the recommendation.** Rounding a
     small positive stake up to ``MIN_UNIT`` is a policy about bet
@@ -48,8 +60,9 @@ def fractional_kelly(model_prob: float, odds: int, fraction: float = 0.25) -> fl
     if full_kelly <= 0:
         return NO_BET
 
-    sized = full_kelly * fraction
-    return max(MIN_UNIT, min(MAX_UNIT, round(sized, 2)))
+    bankroll_fraction = full_kelly * fraction
+    units = bankroll_fraction * UNITS_PER_BANKROLL
+    return max(MIN_UNIT, min(MAX_UNIT, round(units, 2)))
 
 
 def adaptive_fraction(calibration_deviation: float) -> float:
