@@ -95,6 +95,70 @@ def voidable(session, sport: str, today: date,
             .order_by(Game.date.asc()).all())
 
 
+def stranded_picks(session, sports: tuple[str, ...] | None = None
+                   ) -> list[tuple[Game, list[PickModel]]]:
+    """Canceled games still carrying ungraded picks.
+
+    :func:`voidable` only looks at ``scheduled`` rows, because it answers
+    "too old for any source to settle". A game that is ALREADY canceled is
+    past that question and matches nothing, so its picks stay pending
+    forever while the book reports them as open positions.
+
+    Games carrying a score are excluded here rather than refused, because
+    a score means there is a result to grade; :func:`settle_stranded`
+    reports them so the count is visible.
+    """
+    q = session.query(Game).filter(Game.status == CANCELED)
+    if sports:
+        q = q.filter(Game.sport.in_(list(sports)))
+
+    graded_ids = {r.pick_id for r in session.query(PickResult.pick_id)}
+    out = []
+    for game in q.order_by(Game.date.asc(), Game.id.asc()).all():
+        if game.home_score is not None or game.away_score is not None:
+            continue
+        pending = [p for p in session.query(PickModel)
+                   .filter(PickModel.game_id == game.id).all()
+                   if p.id not in graded_ids]
+        if pending:
+            out.append((game, pending))
+    return out
+
+
+def settle_stranded(session, *, sports: tuple[str, ...] | None = None,
+                    apply: bool = False) -> dict:
+    """Book the picks left pending on already-canceled games as pushes.
+
+    **Run `restore_miscanceled_games` first.** Of the 21 stranded picks on
+    2026-09-20, 18 were on games that had actually been played and were
+    wrongly canceled by `_reconcile_against_espn`. Settling before
+    restoring would book a push for games with real winners.
+    """
+    summary = {"voided": 0, "picks_settled": 0, "refused_scored": 0,
+               "game_ids": []}
+
+    scored_q = session.query(Game).filter(Game.status == CANCELED)
+    if sports:
+        scored_q = scored_q.filter(Game.sport.in_(list(sports)))
+    for game in scored_q.all():
+        if game.home_score is None and game.away_score is None:
+            continue
+        if any(True for _ in session.query(PickModel.id)
+               .filter(PickModel.game_id == game.id)):
+            summary["refused_scored"] += 1
+
+    for game, picks in stranded_picks(session, sports):
+        summary["voided"] += 1
+        summary["picks_settled"] += len(picks)
+        summary["game_ids"].append(game.id)
+        if apply:
+            settle_as_void(session, game, picks)
+
+    if apply and summary["voided"]:
+        session.commit()
+    return summary
+
+
 def run_on_session(session, *, sport: str = "boxing", today: date | None = None,
                    apply: bool = False) -> dict:
     """Report, and with ``apply``, void unanswerable bouts. Returns a summary.
@@ -189,9 +253,28 @@ def main(argv=None) -> int:
         description="Void bouts no source can settle. Dry run by default.")
     ap.add_argument("--db", required=True, help="Path to the database. Back it up first.")
     ap.add_argument("--sport", default="boxing")
+    ap.add_argument("--stranded", action="store_true",
+                    help="Settle picks left pending on ALREADY-canceled games "
+                         "instead. Run restore_miscanceled_games first: a "
+                         "wrongly-canceled game has a real winner to grade.")
     ap.add_argument("--apply", action="store_true",
                     help="Actually write. Without this it is a dry run.")
     args = ap.parse_args(argv)
+    if args.stranded:
+        engine = get_engine(args.db)
+        run_migrations(engine)
+        session = get_session(engine)
+        try:
+            s = settle_stranded(session, apply=args.apply)
+        finally:
+            session.close()
+        print("Settled stranded picks" if args.apply else "DRY RUN -- nothing written")
+        print(f"  canceled games with pending picks : {s['voided']}")
+        print(f"  picks settled                     : {s['picks_settled']} "
+              f"(as {VOID_RESULT}, payout {VOID_PAYOUT})")
+        print(f"  refused (canceled WITH a score)   : {s['refused_scored']}")
+        print(f"  game ids                          : {s['game_ids'][:25]}")
+        return 0
     print(format_summary(
         run(args.db, sport=args.sport, apply=args.apply), args.apply))
     return 0
