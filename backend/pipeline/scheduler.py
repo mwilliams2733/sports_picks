@@ -16,7 +16,9 @@ from backend.scripts.finalize_mma import finalize_stuck_bouts
 from backend.scripts.finalize_combat import COMBAT_SPORTS, finalize_from_scores
 from backend.pipeline.prop_pipeline import run_prop_pipeline
 from backend.pipeline.grader import grade_pick, grade_prop_pick, payout_for, capture_closing_odds, grade_completed_games
-from backend.collectors.espn_box_score import collect_box_scores_for_final_games
+from backend.collectors.espn_box_score import (POSSESSION_SPORTS,
+                                               collect_box_scores_for_final_games,
+                                               collect_team_box_scores)
 from backend.collectors.budget import get_credit_summary, DEFAULT_BUDGET
 from backend.models import (
     Base, Game, PickModel, PickResult, StrategyModel,
@@ -197,6 +199,19 @@ def morning_scout(config, engine, scheduler, is_retry=False):
             collect_box_scores_for_final_games(session)
         except Exception:
             logger.exception("Box score collection failed; grading with what is present")
+        # Team possessions, which offensive_rating / defensive_rating / pace
+        # are computed from. Separate from the player box scores above
+        # because it is resumable on its own key; a game collected for
+        # player lines before this existed still needs its team totals.
+        # Logged unconditionally: "nothing to collect" is the normal
+        # outcome and a silent path is indistinguishable from an unwired one.
+        for possession_sport in POSSESSION_SPORTS:
+            try:
+                box = collect_team_box_scores(session, possession_sport)
+                logger.info("%s team box scores: %d games, %d rows, %d already had them",
+                            possession_sport, box["games"], box["rows"], box["skipped"])
+            except Exception:
+                logger.exception("%s team box score collection failed", possession_sport)
         # Before grading, not after: grade_completed_games applies combat
         # Elo and grades a bout's picks in the same pass, so a bout
         # finalized after it would sit a full day waiting for tomorrow's

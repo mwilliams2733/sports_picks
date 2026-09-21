@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from typing import Iterable, Sequence
+from typing import Iterable, NamedTuple, Sequence
 
 from sqlalchemy.orm import Session
 
@@ -93,6 +93,9 @@ COMPUTED_STAT_TYPES = (
     "away_losses",
     "last_n_wins",
     "last_n_losses",
+    "offensive_rating",
+    "defensive_rating",
+    "pace",
 )
 
 #: The subset always emitted, for any team with any history at all. The rest
@@ -368,13 +371,21 @@ def record_splits(prior_games: Sequence, team_id: int,
 
 
 def compute_team_stats(games: Iterable, team_id: int, before_date: date,
-                       lookback: int = DEFAULT_LOOKBACK) -> dict[str, float]:
+                       lookback: int = DEFAULT_LOOKBACK,
+                       box_scores: dict | None = None,
+                       sport: str | None = None) -> dict[str, float]:
     """The full point-in-time stat dict for one team going into ``before_date``.
 
     ``games`` may be any collection -- this function applies the
     strictly-before filter itself, so a caller cannot forget to.  The returned
-    keys are exactly :data:`COMPUTED_STAT_TYPES`; unmeasurable features
-    (ratings, pace) are deliberately absent rather than defaulted.
+    keys are a subset of :data:`COMPUTED_STAT_TYPES`; unmeasurable features
+    are deliberately absent rather than defaulted.
+
+    ``box_scores`` maps ``(game_id, team_id)`` to :class:`Possessions` and is
+    what makes ``offensive_rating``, ``defensive_rating`` and ``pace``
+    computable. Omitted, those three are simply absent -- which is what every
+    caller got before `team_box_scores` existed, and remains the honest
+    answer for a team with no prior box data.
     """
     prior = strictly_before(games, before_date)
     stats: dict[str, float] = {
@@ -407,7 +418,115 @@ def compute_team_stats(games: Iterable, team_id: int, before_date: date,
             stats[f"points_against_{venue}"] = float(pa)
     stats.update({k: float(v) for k, v in
                   record_splits(prior, team_id, last_n=lookback).items()})
+
+    if box_scores:
+        sport = sport or next((g.sport for g in prior
+                               if getattr(g, "sport", None)), None)
+        off = rolling_offensive_rating(prior, team_id, box_scores, lookback)
+        deff = rolling_defensive_rating(prior, team_id, box_scores, lookback)
+        pace = rolling_pace(prior, team_id, box_scores, sport or "", lookback)
+        if off is not None:
+            stats["offensive_rating"] = float(off)
+        if deff is not None:
+            stats["defensive_rating"] = float(deff)
+        if pace is not None:
+            stats["pace"] = float(pace)
     return stats
+
+
+#: Regulation length in minutes, per sport. Pace is possessions per
+#: regulation game, so a 40-minute college game and a 48-minute NBA game are
+#: not comparable without it -- and neither is an overtime game against a
+#: regulation one.
+REGULATION_MINUTES = {"nba": 48, "ncaab": 40}
+
+
+class Possessions(NamedTuple):
+    """One team's possession count and minutes played in one game."""
+    possessions: float | None
+    minutes: float | None
+
+
+def _box_pairs(prior_games: Sequence, team_id: int,
+               box_scores: dict, lookback: int) -> list:
+    """(game, own box, opponent box) for recent games that have box data."""
+    out = []
+    for game in _team_games(prior_games, team_id)[-lookback:]:
+        opponent_id = (game.away_team_id if game.home_team_id == team_id
+                       else game.home_team_id)
+        own = box_scores.get((game.id, team_id))
+        opp = box_scores.get((game.id, opponent_id))
+        if own is not None and opp is not None:
+            out.append((game, own, opp))
+    return out
+
+
+def rolling_offensive_rating(prior_games: Sequence, team_id: int,
+                             box_scores: dict,
+                             lookback: int = DEFAULT_LOOKBACK) -> float | None:
+    """Points scored per 100 possessions used, over recent prior games.
+
+    ``None`` when no prior game carries a possession count. Absent rather
+    than defaulted, the same rule the rest of this module follows: a
+    fabricated 100.0 is indistinguishable from a measured one, which is
+    exactly how this feature stayed invisible while it was constant.
+    """
+    points = poss = 0.0
+    for game, own, _ in _box_pairs(prior_games, team_id, box_scores, lookback):
+        scored = _points_for_against(game, team_id)
+        if scored is None or not own.possessions:
+            continue
+        points += scored[0]
+        poss += own.possessions
+    return 100.0 * points / poss if poss else None
+
+
+def rolling_defensive_rating(prior_games: Sequence, team_id: int,
+                             box_scores: dict,
+                             lookback: int = DEFAULT_LOOKBACK) -> float | None:
+    """Points conceded per 100 OPPONENT possessions, over recent prior games.
+
+    The opponent scored on their own possessions, which differ from ours by
+    offensive rebounds and turnovers in every game. Dividing by our count
+    would misprice exactly the teams that rebound or turn the ball over
+    unusually.
+    """
+    conceded = poss = 0.0
+    for game, _, opp in _box_pairs(prior_games, team_id, box_scores, lookback):
+        scored = _points_for_against(game, team_id)
+        if scored is None or not opp.possessions:
+            continue
+        conceded += scored[1]
+        poss += opp.possessions
+    return 100.0 * conceded / poss if poss else None
+
+
+def rolling_pace(prior_games: Sequence, team_id: int, box_scores: dict,
+                 sport: str, lookback: int = DEFAULT_LOOKBACK) -> float | None:
+    """Possessions per regulation-length game, over recent prior games.
+
+    Normalised by minutes actually played rather than by game count. An
+    overtime game uses more possessions without being played faster, so
+    possessions-per-game would report it as quicker than it was.
+
+    ``None`` for a sport with no regulation length on record -- pace is a
+    basketball construct and inventing one for football would put a number
+    where no statistic exists.
+    """
+    regulation = REGULATION_MINUTES.get(sport)
+    if regulation is None:
+        return None
+    rates = []
+    for _, own, _ in _box_pairs(prior_games, team_id, box_scores, lookback):
+        if not own.possessions or not own.minutes:
+            continue
+        # minutes are TEAM-minutes (five players on court), so the game's
+        # own length is minutes / 5.
+        played = own.minutes / 5.0
+        if played <= 0:
+            continue
+        rates.append(own.possessions / played * regulation)
+    return sum(rates) / len(rates) if rates else None
 
 
 # --------------------------------------------------------------------------
@@ -447,11 +566,33 @@ def store_team_stats_for_game(session: Session, game, prior_games: Iterable) -> 
     does.  Idempotent: re-running for the same game updates rather than
     duplicating.  Returns the number of stat rows written or updated.
     """
+    box_scores = load_box_scores(session, prior_games)
     written = 0
     for team_id in (game.home_team_id, game.away_team_id):
-        stats = compute_team_stats(prior_games, team_id, game.date)
+        stats = compute_team_stats(prior_games, team_id, game.date,
+                                   box_scores=box_scores, sport=game.sport)
         written += _upsert_stats(session, game.id, team_id, stats)
     return written
+
+
+def load_box_scores(session: Session, games: Iterable) -> dict:
+    """``{(game_id, team_id): Possessions}`` for the given games.
+
+    Loaded once per caller rather than per team, because the backfill walks
+    every game of a sport and a per-game query would be two round trips per
+    row. Games with no box score are simply absent, which
+    :func:`compute_team_stats` reads as "not measurable" rather than zero.
+    """
+    from backend.models import TeamBoxScore
+
+    ids = [g.id for g in games]
+    if not ids:
+        return {}
+    rows = (session.query(TeamBoxScore)
+            .filter(TeamBoxScore.game_id.in_(ids)).all())
+    return {(r.game_id, r.team_id): Possessions(possessions=r.possessions,
+                                                minutes=r.minutes)
+            for r in rows}
 
 
 def _game_has_stats(session: Session, game_id: int) -> bool:

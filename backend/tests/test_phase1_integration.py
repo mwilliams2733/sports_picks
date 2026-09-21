@@ -1,7 +1,8 @@
 """Integration test: full Phase 1 prediction pipeline."""
 from backend.analysis.variants.ensemble import EnsembleStrategy
 from backend.analysis.odds_utils import american_to_implied_prob, remove_vig
-from backend.analysis.kelly import fractional_kelly, adaptive_fraction
+from backend.analysis.kelly import (MAX_UNIT, MIN_UNIT, NO_BET,
+                                    adaptive_fraction, fractional_kelly)
 from backend.analysis.confidence import calculate_confidence, DEFAULT_THRESHOLDS
 from backend.analysis.calibrated_model import extract_features, features_to_array, FEATURE_ORDER
 from backend.data_types import GameData, TeamStats, OddsSnapshot
@@ -96,4 +97,10 @@ def test_full_pipeline_produces_picks():
     for pick in picks:
         assert pick.edge_pct > 0
         assert 0 <= pick.confidence <= 5
-        assert 0.5 <= pick.suggested_unit_size <= 3.0
+        # Either a real stake or an explicit decline -- not a floor that
+        # always produces one. `edge_pct` is measured against the DE-VIGGED
+        # fair probability while Kelly sizes against the actual price, so a
+        # 1-point edge (this fixture's `min_edge`) does not survive the vig
+        # and is correctly staked at NO_BET. See test_kelly_no_bet.py.
+        assert (pick.suggested_unit_size == NO_BET
+                or MIN_UNIT <= pick.suggested_unit_size <= MAX_UNIT)

@@ -116,8 +116,13 @@ def format_summary(summary: dict, dry_run: bool) -> str:
         if e.get("note"):
             lines.append(f"{'':8} {e['note']}")
     lines.append("")
-    lines.append("NOT written: offensive_rating, defensive_rating, pace "
-                 "(need possessions; no collector supplies them).")
+    lines.append("offensive_rating, defensive_rating and pace are written "
+                 "for any game whose")
+    lines.append("prior games have team_box_scores rows (nba, ncaab). They "
+                 "are ABSENT, not")
+    lines.append("defaulted, for a team with no prior possession data -- "
+                 "and for every sport")
+    lines.append("where possessions are undefined.")
     return "\n".join(lines)
 
 
