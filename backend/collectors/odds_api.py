@@ -111,8 +111,14 @@ class OddsAPICollector:
         return results
 
     def _parse_bookmaker(self, bk: dict, home_team: str) -> dict | None:
+        # Prices are captured alongside the lines. Reading only `point` for
+        # spreads and totals is why `ensemble` had to hardcode -110 for every
+        # one of those picks: the real price was in the payload and discarded
+        # here, one layer below the strategy that needed it.
         result = {"key": bk["key"], "moneyline_home": None, "moneyline_away": None,
-                  "spread_home": None, "spread_away": None, "over_under": None}
+                  "spread_home": None, "spread_away": None, "over_under": None,
+                  "spread_home_price": None, "spread_away_price": None,
+                  "over_price": None, "under_price": None}
         for market in bk.get("markets", []):
             outcomes = market["outcomes"]
             if market["key"] == "h2h":
@@ -125,12 +131,19 @@ class OddsAPICollector:
                 for o in outcomes:
                     if o["name"] == home_team:
                         result["spread_home"] = o["point"]
+                        result["spread_home_price"] = o.get("price")
                     else:
                         result["spread_away"] = o["point"]
+                        result["spread_away_price"] = o.get("price")
             elif market["key"] == "totals":
                 for o in outcomes:
+                    # The Under carries the same point as the Over but its
+                    # own price, which is the half this used to drop.
                     if o["name"] == "Over":
                         result["over_under"] = o["point"]
+                        result["over_price"] = o.get("price")
+                    elif o["name"] == "Under":
+                        result["under_price"] = o.get("price")
         return result
 
     async def fetch_events(self, sport: str) -> list[dict]:

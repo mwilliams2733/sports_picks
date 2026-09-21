@@ -393,7 +393,11 @@ def _build_game_data(session: Session, game,
     odds_rows = session.query(Odds).filter(Odds.game_id == game.id).all()
     odds = [OddsSnapshot(bookmaker=o.bookmaker, moneyline_home=o.moneyline_home or 0,
         moneyline_away=o.moneyline_away or 0, spread_home=o.spread_home or 0.0,
-        spread_away=o.spread_away or 0.0, over_under=o.over_under or 0.0) for o in odds_rows]
+        spread_away=o.spread_away or 0.0, over_under=o.over_under or 0.0,
+        # Not `or 0`: a missing price is unknown, and 0 is not a valid
+        # American price. None lets the strategy fall back deliberately.
+        spread_home_price=o.spread_home_price, spread_away_price=o.spread_away_price,
+        over_price=o.over_price, under_price=o.under_price) for o in odds_rows]
 
     # Schedule context
     h_fatigued, h_fatigue_score = _check_schedule_fatigue(session, game.home_team_id, game.date, game.sport)

@@ -47,6 +47,13 @@ class OddsSnapshot:
     spread_home: float
     spread_away: float
     over_under: float
+    #: American prices for the spread and total sides. Default ``None``
+    #: because every Odds row written before the collector captured them has
+    #: no price; callers fall back to ``odds_utils.STANDARD_JUICE``.
+    spread_home_price: int | None = None
+    spread_away_price: int | None = None
+    over_price: int | None = None
+    under_price: int | None = None
 
 @dataclass(frozen=True)
 class PickFactor:

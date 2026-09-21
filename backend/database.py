@@ -285,6 +285,31 @@ def migrate_pick_suggested_unit_size(engine):
                     "ALTER TABLE picks ADD COLUMN suggested_unit_size FLOAT"))
 
 
+def migrate_odds_spread_total_prices(engine):
+    """Add the spread/total price columns to odds if missing.
+
+    The collector read only ``point`` for these markets and discarded
+    ``price``, so `ensemble` hardcoded -110 for every spread and total --
+    the price grading pays out against, CLV is measured from and Kelly
+    sizes against. These columns are where the real price now lands.
+
+    Nullable and not backfilled: every existing row was written without the
+    price, and inventing -110 for them would make a guess indistinguishable
+    from a quote.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "odds" not in inspector.get_table_names():
+        return
+    columns = [c["name"] for c in inspector.get_columns("odds")]
+    for column in ("spread_home_price", "spread_away_price",
+                   "over_price", "under_price"):
+        if column not in columns:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    f"ALTER TABLE odds ADD COLUMN {column} INTEGER"))
+
+
 MIGRATIONS = (
     migrate_api_usage,
     migrate_game_start_time,
@@ -301,6 +326,7 @@ MIGRATIONS = (
     migrate_game_season_type,
     migrate_game_odds_api_id,
     migrate_pick_suggested_unit_size,
+    migrate_odds_spread_total_prices,
 )
 
 

@@ -1,5 +1,18 @@
 import re
 
+#: The conventional price on a spread or total when the real one is unknown.
+#:
+#: `ensemble` used to write this as a bare ``-110`` at four call sites, for
+#: `odds_at_pick` (what grading pays out against, and what CLV is measured
+#: from) and for the Kelly stake. It was standing in for a price the
+#: collector discarded: `_parse_bookmaker` read ``point`` for spreads and
+#: totals and dropped ``price``, which the API returns beside it.
+#:
+#: The collector now captures the real price, so this applies only where
+#: none was quoted -- notably every Odds row written before those columns
+#: existed. Named rather than repeated so a fallback is visibly a fallback.
+STANDARD_JUICE = -110
+
 
 class InvalidOddsError(ValueError):
     """Raised when an American odds value is 0 or outside the valid range.

@@ -98,6 +98,14 @@ class Odds(Base):
     spread_home = Column(Float, nullable=True)
     spread_away = Column(Float, nullable=True)
     over_under = Column(Float, nullable=True)
+    #: American prices for the spread and total sides. The line is the point;
+    #: these are what the bet actually pays. NULL on every row written before
+    #: the collector stopped discarding them, which is why `STANDARD_JUICE`
+    #: still exists as a named fallback.
+    spread_home_price = Column(Integer, nullable=True)
+    spread_away_price = Column(Integer, nullable=True)
+    over_price = Column(Integer, nullable=True)
+    under_price = Column(Integer, nullable=True)
     timestamp = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
 
 class StrategyModel(Base):

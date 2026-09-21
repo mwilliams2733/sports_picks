@@ -5,7 +5,8 @@ from scipy.stats import norm
 
 from backend.analysis.strategy import Strategy
 from backend.analysis.confidence import calculate_confidence
-from backend.analysis.odds_utils import american_to_implied_prob, remove_vig
+from backend.analysis.odds_utils import (STANDARD_JUICE,
+                                         american_to_implied_prob, remove_vig)
 from backend.analysis.calibrated_model import CalibratedModel, extract_features, features_to_array, _stat_value
 from backend.analysis.ml_model import LightGBMModel, MIN_ML_GAMES
 from backend.analysis.kelly import fractional_kelly
@@ -220,6 +221,11 @@ class EnsembleStrategy(Strategy):
             home_cover_prob = self._spread_cover_prob(predicted_diff, cover_threshold, std=diff_std)
             away_cover_prob = 1.0 - home_cover_prob
             spread_fair = 0.5  # spread markets are ~50/50 after vig by design
+            # The price each side is actually quoted at. STANDARD_JUICE only
+            # where no book quoted one, which is every Odds row written
+            # before the collector stopped discarding the price.
+            home_spread_price = avg_odds.get("spread_home_price") or STANDARD_JUICE
+            away_spread_price = avg_odds.get("spread_away_price") or STANDARD_JUICE
             home_spread_edge = (home_cover_prob - spread_fair) * 100
             away_spread_edge = (away_cover_prob - spread_fair) * 100
             if _takeable(home_spread_edge, "spread"):
@@ -231,8 +237,8 @@ class EnsembleStrategy(Strategy):
                     edge_pct=round(home_spread_edge, 1),
                     model_probability=round(home_cover_prob, 4),
                     implied_probability=spread_fair,
-                    odds_at_pick=-110,
-                    suggested_unit_size=fractional_kelly(home_cover_prob, -110, kelly_fraction)))
+                    odds_at_pick=home_spread_price,
+                    suggested_unit_size=fractional_kelly(home_cover_prob, home_spread_price, kelly_fraction)))
             elif _takeable(away_spread_edge, "spread"):
                 models, available = self._count_agreeing_models(game, "away")
                 spread_away = avg_odds["spread_away"]
@@ -243,8 +249,8 @@ class EnsembleStrategy(Strategy):
                     edge_pct=round(away_spread_edge, 1),
                     model_probability=round(away_cover_prob, 4),
                     implied_probability=spread_fair,
-                    odds_at_pick=-110,
-                    suggested_unit_size=fractional_kelly(away_cover_prob, -110, kelly_fraction)))
+                    odds_at_pick=away_spread_price,
+                    suggested_unit_size=fractional_kelly(away_cover_prob, away_spread_price, kelly_fraction)))
 
         # Over/Under picks — distribution-based: P(over) via normal CDF.
         #
@@ -288,6 +294,8 @@ class EnsembleStrategy(Strategy):
             over_prob = self._over_probability(predicted_total, ou_line, std=get_total_points_std(game.sport))
             under_prob = 1.0 - over_prob
             ou_fair = 0.5  # O/U markets are ~50/50 after vig by design
+            over_price = avg_odds.get("over_price") or STANDARD_JUICE
+            under_price = avg_odds.get("under_price") or STANDARD_JUICE
             over_edge = (over_prob - ou_fair) * 100
             under_edge = (under_prob - ou_fair) * 100
             if _takeable(over_edge, "over_under"):
@@ -299,8 +307,8 @@ class EnsembleStrategy(Strategy):
                     edge_pct=round(over_edge, 1),
                     model_probability=round(over_prob, 4),
                     implied_probability=ou_fair,
-                    odds_at_pick=-110,
-                    suggested_unit_size=fractional_kelly(over_prob, -110, kelly_fraction)))
+                    odds_at_pick=over_price,
+                    suggested_unit_size=fractional_kelly(over_prob, over_price, kelly_fraction)))
             elif _takeable(under_edge, "over_under"):
                 models, available = self._count_total_agreeing_models(game, False)
                 pick_value = f"Under {ou_line:g}"
@@ -310,8 +318,8 @@ class EnsembleStrategy(Strategy):
                     edge_pct=round(under_edge, 1),
                     model_probability=round(under_prob, 4),
                     implied_probability=ou_fair,
-                    odds_at_pick=-110,
-                    suggested_unit_size=fractional_kelly(under_prob, -110, kelly_fraction)))
+                    odds_at_pick=under_price,
+                    suggested_unit_size=fractional_kelly(under_prob, under_price, kelly_fraction)))
 
         return picks
 

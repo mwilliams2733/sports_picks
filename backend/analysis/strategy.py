@@ -101,6 +101,18 @@ class Strategy(ABC):
         else:
             result["over_under"] = None
 
+        # Spread and total PRICES, consensused the same way moneylines are:
+        # in probability space, because American odds are non-linear around
+        # +/-100 and an arithmetic mean of -110 and +110 is 0, which is not a
+        # price. None when no book quoted one -- every row predating the
+        # collector capturing them -- so the caller can fall back explicitly
+        # rather than receive a number nobody quoted.
+        for field in ("spread_home_price", "spread_away_price",
+                      "over_price", "under_price"):
+            prices = [getattr(o, field, None) for o in game.odds]
+            prices = [p for p in prices if p is not None]
+            result[field] = consensus_moneyline(prices) if prices else None
+
         return result
 
     @staticmethod

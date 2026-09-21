@@ -531,6 +531,9 @@ def _store_odds(session: Session, sport: str, odds_data: list[dict],
                 existing.spread_home = bk["spread_home"]
                 existing.spread_away = bk["spread_away"]
                 existing.over_under = bk["over_under"]
+                for _price in ("spread_home_price", "spread_away_price",
+                               "over_price", "under_price"):
+                    setattr(existing, _price, bk.get(_price))
                 existing.timestamp = datetime.now(tz=timezone.utc)
             else:
                 session.add(Odds(
@@ -538,6 +541,10 @@ def _store_odds(session: Session, sport: str, odds_data: list[dict],
                     moneyline_home=bk["moneyline_home"], moneyline_away=bk["moneyline_away"],
                     spread_home=bk["spread_home"], spread_away=bk["spread_away"],
                     over_under=bk["over_under"],
+                    spread_home_price=bk.get("spread_home_price"),
+                    spread_away_price=bk.get("spread_away_price"),
+                    over_price=bk.get("over_price"),
+                    under_price=bk.get("under_price"),
                 ))
             count += 1
 
