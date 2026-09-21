@@ -36,16 +36,51 @@ SPORT_PATHS = {
 _BASE = "https://site.api.espn.com/apis/site/v2/sports"
 _TIMEOUT = 20.0
 
-#: ESPN box-score label -> PlayerStat field. Only labels that map to a
-#: ``_STAT_FIELDS`` column appear; the rest (FG, FT, OREB, DREB, PF, +/-) are
-#: ignored rather than stored under a guessed name.
+#: ESPN box-score *key* -> PlayerStat field. Keys are preferred over labels
+#: because they are unambiguous across a payload: football splits its box
+#: score into per-category blocks that reuse the same label for different
+#: stats. ``YDS`` appears under passing, rushing, receiving, interceptions,
+#: kickReturns, puntReturns and punting; ``REC`` is receptions under
+#: ``receiving`` but fumbles recovered under ``fumbles``. Only keys that map
+#: to a ``_STAT_FIELDS`` column appear; the rest are ignored rather than
+#: stored under a guessed name.
+_KEY_FIELD = {
+    # basketball
+    "minutes": "minutes", "points": "points", "rebounds": "rebounds",
+    "assists": "assists", "steals": "steals", "blocks": "blocks",
+    "turnovers": "turnovers",
+    # football
+    "passingYards": "pass_yards",
+    "rushingYards": "rush_yards",
+    "receivingYards": "rec_yards",
+    "receptions": "receptions",
+    # ``touchdowns`` means touchdowns SCORED, which is what
+    # ``player_anytime_td`` resolves on. ``passingTouchdowns`` is deliberately
+    # absent: a quarterback who throws three has not scored. Return and
+    # defensive scores are absent too, because ESPN reports a pick-six under
+    # BOTH ``defensiveTouchdowns`` and ``interceptionTouchdowns`` and summing
+    # them would count one play twice.
+    "rushingTouchdowns": "touchdowns",
+    "receivingTouchdowns": "touchdowns",
+}
+#: Keys ESPN reports as "made-attempted"; only the made half is a stat we
+#: store. "2-7" means two threes made, not two-to-seven of anything.
+_KEY_MADE_ATTEMPTED = {
+    "threePointFieldGoalsMade-threePointFieldGoalsAttempted": "threes",
+}
+
+#: Fallbacks for payloads that omit ``keys``. Basketball-only by nature: a
+#: label map cannot express football (see ``_KEY_FIELD``), so a football block
+#: without keys yields no stats rather than wrong ones.
 _LABEL_FIELD = {
     "MIN": "minutes", "PTS": "points", "REB": "rebounds", "AST": "assists",
     "STL": "steals", "BLK": "blocks", "TO": "turnovers",
 }
-#: Labels ESPN reports as "made-attempted"; only the made half is a stat we
-#: store. "2-7" means two threes made, not two-to-seven of anything.
 _MADE_ATTEMPTED = {"3PT": "threes"}
+
+#: Fields fed by more than one block, which must accumulate rather than
+#: overwrite. A back who scores once rushing and once receiving scored twice.
+_ADDITIVE_FIELDS = {"touchdowns"}
 
 
 def resolve_espn_event(sport: str, game_date: date, home_abbr: str,
@@ -93,38 +128,84 @@ def parse_box_score(summary: dict) -> list[dict]:
     rather than by fixed index, so a sport or season that reorders them does
     not silently grade every prop against the wrong column.
     """
-    rows: list[dict] = []
+    merged: dict[tuple, dict] = {}
     for block in summary.get("boxscore", {}).get("players", []):
         # ESPN puts the team on the block, not the athlete. Carry it down
         # rather than inferring from block order, which is undocumented and
         # would mislabel an entire team if it ever changed.
         team_abbr = (block.get("team") or {}).get("abbreviation")
         for stat_block in block.get("statistics", []):
-            labels = stat_block.get("labels", [])
+            names, field_map, made_map = _naming(stat_block)
+            if not names:
+                continue
             for entry in stat_block.get("athletes", []):
                 values = entry.get("stats") or []
-                if entry.get("didNotPlay") or len(values) != len(labels):
+                if entry.get("didNotPlay") or len(values) != len(names):
                     continue
-                name = (entry.get("athlete") or {}).get("displayName", "")
-                if not name:
+                player = (entry.get("athlete") or {}).get("displayName", "")
+                if not player:
                     continue
-                row = {"player_name": name, "team_abbr": team_abbr}
-                for label, raw in zip(labels, values):
-                    field = _LABEL_FIELD.get(label)
+                # One player, one game, one row. Football lists a back who
+                # runs and catches under both `rushing` and `receiving`, and
+                # `store_stats` upserts on
+                # (player_name, sport, stat_type, game_date) -- so emitting a
+                # row per block would write two rows that collapse into one
+                # anyway, with `touchdowns` overwritten instead of summed.
+                row = merged.setdefault(
+                    (team_abbr, player),
+                    {"player_name": player, "team_abbr": team_abbr})
+                for name, raw in zip(names, values):
+                    field = field_map.get(name)
                     if field is not None:
-                        try:
-                            row[field] = float(raw)
-                        except (TypeError, ValueError):
-                            pass
+                        _put(row, field, raw)
                         continue
-                    made_field = _MADE_ATTEMPTED.get(label)
+                    made_field = made_map.get(name)
                     if made_field is not None:
-                        try:
-                            row[made_field] = float(str(raw).split("-")[0])
-                        except (TypeError, ValueError):
-                            pass
-                rows.append(row)
-    return rows
+                        _put(row, made_field, str(raw).split("-")[0])
+    return list(merged.values())
+
+
+def _naming(stat_block: dict) -> tuple[list, dict, dict]:
+    """The column names for one block, and the maps that read them.
+
+    Prefers ``keys``, which are unique across the whole payload. Falls back
+    to ``labels`` only for a block with no category ``name`` -- that is the
+    basketball shape, where a label IS unambiguous. A *named* block is a
+    football category, where labels collide (``YDS`` in seven of them), so a
+    football block that arrived without keys yields nothing rather than
+    plausible-looking wrong numbers.
+
+    ``keys`` is trusted only when it is the same length as the values it
+    describes; a mismatched array would read every column shifted.
+    """
+    keys = stat_block.get("keys") or []
+    labels = stat_block.get("labels") or []
+    if keys and _fits(stat_block, keys):
+        return list(keys), _KEY_FIELD, _KEY_MADE_ATTEMPTED
+    if stat_block.get("name") is None:
+        return list(labels), _LABEL_FIELD, _MADE_ATTEMPTED
+    return [], {}, {}
+
+
+def _fits(stat_block: dict, names: list) -> bool:
+    """Whether ``names`` lines up with the block's athlete rows."""
+    for entry in stat_block.get("athletes", []):
+        values = entry.get("stats") or []
+        if values:
+            return len(values) == len(names)
+    return True
+
+
+def _put(row: dict, field: str, raw) -> None:
+    """Store one parsed value, accumulating the fields fed by several blocks."""
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return
+    if field in _ADDITIVE_FIELDS:
+        row[field] = row.get(field, 0.0) + value
+    else:
+        row[field] = value
 
 
 def fetch_summary(sport: str, event_id: str,
