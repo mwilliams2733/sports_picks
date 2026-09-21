@@ -52,6 +52,14 @@ NCAAB_SB = ("https://site.api.espn.com/apis/site/v2/sports/basketball/"
 
 TODAY = et_today()
 YESTERDAY = TODAY - datetime.timedelta(days=1)
+#: Today's pass reconciles, so it also asks for the neighbouring stamps --
+#: a game ESPN files a day either side is otherwise invisible to the match.
+#: See `_with_neighbouring_dates`.
+TOMORROW = TODAY + datetime.timedelta(days=1)
+
+#: Which sport each scoreboard URL belongs to, so `_stub` can reproduce the
+#: query params production sends rather than restating them here.
+_SB_SPORT = {NBA_SB: "nba", NCAAB_SB: "ncaab"}
 
 
 def _event(home_abbr, away_abbr, status, home_score=None, away_score=None,
@@ -101,8 +109,17 @@ def _config():
 
 
 def _stub(httpx_mock, url, day, events):
-    httpx_mock.add_response(
-        url=f"{url}?dates={day.strftime('%Y%m%d')}", json={"events": events})
+    """Register one scoreboard response, matching the URL production builds.
+
+    The params come from `SCOREBOARD_PARAMS` rather than being written out
+    again: ncaab sends `groups=50`, and a stub that omitted it would stop
+    matching without the test saying anything useful about why.
+    """
+    from backend.collectors.espn import SCOREBOARD_PARAMS
+
+    query = [f"dates={day.strftime('%Y%m%d')}"]
+    query += [f"{k}={v}" for k, v in SCOREBOARD_PARAMS.get(_SB_SPORT[url], {}).items()]
+    httpx_mock.add_response(url=f"{url}?{'&'.join(query)}", json={"events": events})
 
 
 def test_a_game_played_yesterday_is_finalized_today(db_session, httpx_mock, scheduler):
@@ -117,6 +134,8 @@ def test_a_game_played_yesterday_is_finalized_today(db_session, httpx_mock, sche
         _stub(httpx_mock, NBA_SB, TODAY - datetime.timedelta(days=d), [])
     for d in range(0, 4):
         _stub(httpx_mock, NCAAB_SB, TODAY - datetime.timedelta(days=d), [])
+    _stub(httpx_mock, NBA_SB, TOMORROW, [])
+    _stub(httpx_mock, NCAAB_SB, TOMORROW, [])
 
     morning_scout(_config(), db_session.get_bind(), scheduler)
 
@@ -146,6 +165,8 @@ def test_a_lookback_day_never_cancels_a_row_it_could_not_match(db_session, httpx
         _stub(httpx_mock, NBA_SB, TODAY - datetime.timedelta(days=d), [])
     for d in range(0, 4):
         _stub(httpx_mock, NCAAB_SB, TODAY - datetime.timedelta(days=d), [])
+    _stub(httpx_mock, NBA_SB, TOMORROW, [])
+    _stub(httpx_mock, NCAAB_SB, TOMORROW, [])
 
     morning_scout(_config(), db_session.get_bind(), scheduler)
 
@@ -169,6 +190,8 @@ def test_todays_pass_still_reconciles(db_session, httpx_mock, scheduler):
         _stub(httpx_mock, NBA_SB, TODAY - datetime.timedelta(days=d), [])
     for d in range(0, 4):
         _stub(httpx_mock, NCAAB_SB, TODAY - datetime.timedelta(days=d), [])
+    _stub(httpx_mock, NBA_SB, TOMORROW, [])
+    _stub(httpx_mock, NCAAB_SB, TOMORROW, [])
 
     morning_scout(_config(), db_session.get_bind(), scheduler)
 
@@ -191,6 +214,8 @@ def test_an_in_season_college_game_is_fetched_too(db_session, httpx_mock, schedu
           [_event("DUKE", "UNC", "STATUS_FINAL", 80, 74, when=YESTERDAY)])
     for d in (2, 3):
         _stub(httpx_mock, NCAAB_SB, TODAY - datetime.timedelta(days=d), [])
+    _stub(httpx_mock, NBA_SB, TOMORROW, [])
+    _stub(httpx_mock, NCAAB_SB, TOMORROW, [])
 
     morning_scout(_config(), db_session.get_bind(), scheduler)
 

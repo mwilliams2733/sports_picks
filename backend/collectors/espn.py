@@ -10,6 +10,24 @@ SPORT_URLS = {
     "mma": "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard",
     "mlb": "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
 }
+#: Extra scoreboard query params per sport. Without a ``groups`` filter ESPN
+#: answers a college request with a featured subset rather than the division:
+#: 2 ncaab events for 2026-03-15, a conference championship Sunday. That
+#: truncation is what made `_reconcile_against_espn` cancel 15 games that had
+#: actually been played.
+#:
+#: ``50`` is Division I basketball and ``80`` is FBS football. They are NOT
+#: interchangeable -- asking college football for ``groups=50`` returns 6
+#: events for a full September Saturday. Pro leagues have a single division
+#: and need no filter.
+#:
+#: ``limit`` is deliberately absent: passing ``limit=900`` to college football
+#: *reduced* the result from 71 events to 25.
+SCOREBOARD_PARAMS = {
+    "ncaab": {"groups": "50"},
+    "ncaaf": {"groups": "80"},
+}
+
 # Boxing has no ESPN scoreboard API — games come from Odds API only
 
 #: ESPN's numeric season phase. Read from the EVENT, not the league block,
@@ -84,7 +102,8 @@ class ESPNCollector:
         url = SPORT_URLS.get(sport)
         if not url:
             return []
-        response = await get_with_retry(self.client, url, params={"dates": date_str})
+        params = {"dates": date_str, **SCOREBOARD_PARAMS.get(sport, {})}
+        response = await get_with_retry(self.client, url, params=params)
         response.raise_for_status()
         data = response.json()
         games = []

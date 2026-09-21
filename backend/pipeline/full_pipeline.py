@@ -43,6 +43,9 @@ async def fetch_and_store_games(session: Session, sports: list[str],
         for sport in sports:
             try:
                 games = await espn.fetch_scoreboard(sport, date_str)
+                if reconcile:
+                    games = await _with_neighbouring_dates(
+                        espn, sport, target_date, games)
                 stored = _store_games(session, sport, target_date, games,
                                       reconcile=reconcile)
                 total += stored
@@ -54,6 +57,45 @@ async def fetch_and_store_games(session: Session, sports: list[str],
     finally:
         await espn.close()
     return total
+
+
+async def _with_neighbouring_dates(espn: ESPNCollector, sport: str,
+                                   target_date: date,
+                                   games: list[dict]) -> list[dict]:
+    """``games`` plus the neighbouring stamps, deduplicated on ESPN's event id.
+
+    `_reconcile_against_espn` accepts a pair seen within
+    :data:`RECONCILE_WINDOW_DAYS`, but it can only match against events the
+    fetch asked for -- and a one-stamp request does not return a game ESPN
+    filed a day either side.
+
+    The target date is fetched first and kept first, so an exact match wins
+    when the same event appears under two stamps. A neighbour that fails is
+    logged and skipped: it is an enhancement, and losing one must not cost
+    the day the run is for.
+
+    Storing the neighbours is a second benefit rather than a side effect.
+    :func:`_store_games` matches on ``espn_id`` and corrects a drifted date
+    when it does, so these rows heal instead of merely being tolerated.
+    """
+    seen = {g.get("espn_id") for g in games if g.get("espn_id")}
+    merged = list(games)
+    for offset in range(-RECONCILE_WINDOW_DAYS, RECONCILE_WINDOW_DAYS + 1):
+        if offset == 0:
+            continue
+        stamp = (target_date + timedelta(days=offset)).strftime("%Y%m%d")
+        try:
+            for g in await espn.fetch_scoreboard(sport, stamp):
+                espn_id = g.get("espn_id")
+                if espn_id and espn_id in seen:
+                    continue
+                if espn_id:
+                    seen.add(espn_id)
+                merged.append(g)
+        except Exception as e:
+            logger.warning("ESPN neighbour fetch failed for %s %s: %s: %s",
+                           sport, stamp, type(e).__name__, e)
+    return merged
 
 
 async def fetch_and_store_odds(session: Session, sports: list[str], api_key: str,
@@ -190,8 +232,12 @@ def _store_games(session: Session, sport: str, target_date: date,
     # Rows we touched this run, so their point-in-time team_stats can be
     # (re)computed once scores have landed. See _refresh_team_stats below.
     touched: list[Game] = []
-    # Unordered team pairs ESPN listed for target_date. Used for reconciliation.
-    espn_pairs_target_date: set[frozenset[int]] = set()
+    # Unordered team pairs ESPN listed, keyed by the event's OWN Eastern date
+    # rather than target_date. Reconciliation accepts a pair seen anywhere in
+    # a +/-1 day window, because the date is unreliable on both sides: ESPN
+    # timestamps in UTC and files by Eastern date, and our own rows drift too
+    # (VAN vs NEB is stored here as 2026-03-22 against ESPN's 03-21).
+    espn_pairs_by_date: dict[date, set[frozenset[int]]] = defaultdict(set)
 
     for g in games:
         home_abbr = g["home_team"]
@@ -202,8 +248,7 @@ def _store_games(session: Session, sport: str, target_date: date,
         game_date = et_date(g["date"])
         start_time = _parse_start_time(g["date"])
 
-        if game_date == target_date:
-            espn_pairs_target_date.add(frozenset({home_id, away_id}))
+        espn_pairs_by_date[game_date].add(frozenset({home_id, away_id}))
 
         # ESPN's event id is the only stable identity we have. Matching on it
         # first is what lets the same game be recognised when it was stored
@@ -300,8 +345,11 @@ def _store_games(session: Session, sport: str, target_date: date,
         touched.append(game)
         count += 1
 
-    if reconcile and espn_pairs_target_date:
-        _reconcile_against_espn(session, sport, target_date, espn_pairs_target_date)
+    # Guarded on the TARGET date specifically, not the window: neighbours
+    # alone cannot prove the target date was covered, and if ESPN returned
+    # nothing for it we cannot tell an outage from an off-day.
+    if reconcile and espn_pairs_by_date.get(target_date):
+        _reconcile_against_espn(session, sport, target_date, espn_pairs_by_date)
 
     session.commit()
     _refresh_team_stats(session, touched)
@@ -347,13 +395,38 @@ def _refresh_team_stats(session: Session, games: list[Game]) -> None:
         logger.exception("team_stats refresh failed for %d games", len(games))
 
 
+#: How far either side of the target date a pair still counts as confirmed.
+#: Same window, and the same reason, as
+#: ``espn_box_score.resolve_espn_event``: ESPN timestamps in UTC but files
+#: its scoreboard by Eastern date. Widening it further would let a genuine
+#: rematch later in the week vouch for a phantom.
+RECONCILE_WINDOW_DAYS = 1
+
+
 def _reconcile_against_espn(session: Session, sport: str, target_date: date,
-                            espn_pairs: set[frozenset[int]]) -> None:
+                            espn_pairs_by_date: dict[date, set[frozenset[int]]]
+                            ) -> None:
     """Mark/unmark canceled status for (sport, target_date) rows based on
-    whether ESPN's authoritative list includes the team pair. Caller
-    should only invoke this when ESPN returned at least one event for the
-    target_date sport — otherwise we can't tell an outage from an off-day.
+    whether ESPN's authoritative list includes the team pair.
+
+    A pair counts as confirmed if ESPN listed it on target_date **or on
+    either neighbouring date**. Requiring an exact match wrongly canceled 15
+    played games on 2026-09-20, holding 18 ungraded picks: the date is
+    unreliable on both sides, ESPN's and ours.
+
+    The asymmetry is intentional. Failing to cancel a phantom leaves a row
+    that never grades and gets caught by the next run; canceling a real game
+    destroys a result and books its picks as pushes. When the evidence is
+    ambiguous, do not cancel.
+
+    Caller must only invoke this when ESPN returned at least one event for
+    the target_date sport — otherwise we can't tell an outage from an
+    off-day.
     """
+    confirmed: set[frozenset[int]] = set()
+    for offset in range(-RECONCILE_WINDOW_DAYS, RECONCILE_WINDOW_DAYS + 1):
+        confirmed |= espn_pairs_by_date.get(target_date + timedelta(days=offset), set())
+
     db_games = (
         session.query(Game)
         .filter(Game.sport == sport, Game.date == target_date)
@@ -363,7 +436,7 @@ def _reconcile_against_espn(session: Session, sport: str, target_date: date,
         if db_game.status in ("final", "in_progress"):
             continue
         pair = frozenset({db_game.home_team_id, db_game.away_team_id})
-        if pair in espn_pairs:
+        if pair in confirmed:
             if db_game.status == CANCELED:
                 db_game.status = "scheduled"
         else:
