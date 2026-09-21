@@ -64,6 +64,22 @@ VOID_RESULT = "push"
 VOID_PAYOUT = 0.0
 
 
+def settle_as_void(session, game, picks) -> int:
+    """Cancel ``game`` and settle its picks as a push. Returns picks settled.
+
+    The single definition of what voiding *means*, so every caller agrees:
+    `void_stuck_bouts` (too old for any source) and
+    `dedupe_combat_games.void_reschedules` (the fight moved and never
+    happened here) settle a position identically or the book stops being
+    comparable with itself.
+    """
+    game.status = CANCELED
+    for pick in picks:
+        session.add(PickResult(pick_id=pick.id, result=VOID_RESULT,
+                               payout=VOID_PAYOUT))
+    return len(picks)
+
+
 def voidable(session, sport: str, today: date,
              *, min_age_days: int = MAX_DAYS_FROM) -> list[Game]:
     """Scheduled bouts too old for any source to settle.
@@ -114,10 +130,7 @@ def run_on_session(session, *, sport: str = "boxing", today: date | None = None,
         summary["voided"] += 1
         summary["picks_settled"] += len(picks)
         if apply:
-            game.status = CANCELED
-            for pick in picks:
-                session.add(PickResult(pick_id=pick.id, result=VOID_RESULT,
-                                       payout=VOID_PAYOUT))
+            settle_as_void(session, game, picks)
 
     if apply and summary["voided"]:
         session.commit()
