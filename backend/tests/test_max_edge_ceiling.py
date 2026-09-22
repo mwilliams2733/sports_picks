@@ -54,18 +54,22 @@ def test_an_enormous_claimed_edge_is_refused():
     assert picks == [] or max(p.edge_pct for p in picks) < DEFAULT_MAX_EDGE
 
 
-def test_a_modest_edge_is_still_taken():
+def test_a_modest_edge_is_still_taken(model_claiming):
+    """A believable edge must survive the ceiling."""
+    model_claiming(0.62)          # vs a -110/-110 line: about 12pp
     s = EnsembleStrategy("ensemble", {"min_edge": 1.0})
-    game = _game(home_ml=-130, away_ml=110, home_elo=1560.0, away_elo=1500.0)
-    picks = s.predict(game)
+    picks = s.predict(_game(home_ml=-110, away_ml=-110))
     assert picks, "the ceiling swallowed an ordinary pick"
     assert all(p.edge_pct < DEFAULT_MAX_EDGE for p in picks)
 
 
-def test_the_ceiling_is_configurable():
-    game = _game(home_ml=-110, away_ml=-110, home_elo=2100.0, away_elo=1200.0)
+def test_the_ceiling_is_configurable(model_claiming):
+    model_claiming(0.95)          # vs a -110/-110 line: about 45pp
+    game = _game(home_ml=-110, away_ml=-110)
     wide = EnsembleStrategy("ensemble", {"min_edge": 5.0, "max_edge": 100.0})
     assert any(p.edge_pct >= DEFAULT_MAX_EDGE for p in wide.predict(game))
+    narrow = EnsembleStrategy("ensemble", {"min_edge": 5.0})
+    assert narrow.predict(game) == [], "the default ceiling must refuse it"
 
 
 def test_the_default_is_where_the_data_breaks():
@@ -88,11 +92,11 @@ def test_a_ceiling_below_the_floor_yields_nothing():
     assert s.predict(_game(home_elo=1800.0, away_elo=1400.0)) == []
 
 
-def test_the_refusal_is_logged(caplog):
+def test_the_refusal_is_logged(caplog, model_claiming):
     import logging
 
+    model_claiming(0.95)
     s = EnsembleStrategy("ensemble", {"min_edge": 5.0})
     with caplog.at_level(logging.INFO):
-        s.predict(_game(home_ml=-110, away_ml=-110,
-                        home_elo=2100.0, away_elo=1200.0))
+        s.predict(_game(home_ml=-110, away_ml=-110))
     assert "max_edge" in caplog.text or "implausible" in caplog.text.lower()

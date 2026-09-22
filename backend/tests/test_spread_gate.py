@@ -84,13 +84,15 @@ def test_the_gate_is_per_sport(monkeypatch):
     assert _spreads("nfl") == []
 
 
-def test_the_gate_does_not_suppress_other_markets():
+def test_the_gate_does_not_suppress_other_markets(model_claiming):
     """Only spreads are gated. Moneylines must be unaffected.
 
-    min_edge is dropped to 1.0 because this fixture's moneyline edge is
-    about 4% -- enough to prove the branch still runs, not enough to clear
-    the production floor.
+    The moneyline probability is pinned rather than derived, so this tests
+    the GATE and not whatever number the probability path happens to
+    produce. Deriving it made the test depend on the live database being
+    present -- it passed locally and failed in CI for 25+ commits.
     """
+    model_claiming(0.80)          # comfortably clear of the -200 line
     picks = EnsembleStrategy("ensemble", {"min_edge": 1.0, "max_edge": 100.0}
                              ).predict(_game("nba"))
     assert any(p.pick_type == "moneyline" for p in picks)
