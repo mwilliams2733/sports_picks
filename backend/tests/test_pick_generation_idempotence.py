@@ -64,7 +64,15 @@ def session(tmp_path):
     s.add(StrategyModel(id=1, name="ensemble",
                         # See test_max_edge_ceiling.py; these
                         # fixtures use large synthetic edges.
-                        config_json='{"max_edge": 100.0}',
+                        #
+                        # max_odds is disabled on purpose. These teams have
+                        # no stats, so the model sits near 0.51 and the only
+                        # side it can ever find an edge on is the UNDERDOG --
+                        # which DEFAULT_MAX_ODDS = 100 refuses. Left on, this
+                        # file would quietly stop producing the moneyline it
+                        # exists to refresh, and would be testing the ceiling
+                        # rather than the refresh it is named for.
+                        config_json='{"max_edge": 100.0, "max_odds": null}',
                         is_active=True, strategy_type="game"))
     s.commit()
     return s
@@ -112,9 +120,6 @@ def test_a_pick_on_an_unstarted_game_follows_the_market(session):
     assert before, "fixture produced no picks"
 
     for o in session.query(Odds).all():      # the market moves
-        # Both sides stay inside DEFAULT_MAX_ODDS: a moved price beyond
-        # the longshot ceiling is refused rather than refreshed, which
-        # would make this test about the ceiling instead of the refresh.
         o.moneyline_home, o.moneyline_away = -400, 190
     session.commit()
     generate_and_store_picks(session, 1, TODAY)
@@ -149,9 +154,6 @@ def test_a_pick_the_model_would_no_longer_make_is_left_standing(session):
     before = {p.id: (p.pick_value, p.odds_at_pick) for p in _picks(session)}
 
     for o in session.query(Odds).all():
-        # Both sides stay inside DEFAULT_MAX_ODDS: a moved price beyond
-        # the longshot ceiling is refused rather than refreshed, which
-        # would make this test about the ceiling instead of the refresh.
         o.moneyline_home, o.moneyline_away = -400, 190
     session.commit()
     generate_and_store_picks(session, 1, TODAY)
