@@ -82,6 +82,87 @@ def build_feature_row(
     return row
 
 
+def shrink_sport_coefficients(coefs: dict[str, float],
+                              counts: dict[str, int]) -> dict[str, float]:
+    """Partial-pool per-sport home-advantage coefficients toward their mean.
+
+    Each sport gets its own one-hot slot in :func:`build_feature_row`,
+    because home advantage has no other representation in this model. Every
+    slot is then fitted freely, so a coefficient supported by 31 games
+    carries the same authority as one supported by 1,253 -- which is how
+    nfl came to produce a 49% moneyline edge from a 31-game intercept.
+
+        w_s      = n_s / (n_s + K)
+        shrunk_s = mu + (coef_s - mu) * w_s
+
+    ``mu`` is the games-weighted mean of the sport coefficients. ``K`` is
+    derived rather than chosen: for a binary outcome the sampling variance
+    of a slot's coefficient goes as ``1 / (n * p(1-p))``, which is ``4/n``
+    at p = 0.5, so the empirical-Bayes weight ``tau^2 / (tau^2 + 4/n)``
+    gives ``K = 4 / tau^2`` with ``tau^2`` the between-sport variance
+    actually observed. A hand-tuned constant here would be a free parameter
+    fitted to nothing.
+
+    This is what a random intercept computes. `BinomialBayesMixedGLM` would
+    fit it as one, and is the textbook answer, but statsmodels is not
+    installed and swapping a deterministic `LogisticRegression` for a
+    variational-Bayes fit that can fail to converge is not a trade worth
+    making for an unproven gain.
+
+    Two degenerate cases return the input unchanged, because there is
+    genuinely nothing to pool: a single sport (no pool to shrink toward)
+    and zero between-sport variance (the sports already agree).
+    """
+    # No explicit single-sport guard: one sport has zero between-sport
+    # variance by construction, which the `k is None` branch below already
+    # returns unchanged. A second check would be an untested branch that can
+    # never change an answer.
+    #
+    # Only sports with training games can inform the pool. A sport with no
+    # games contributes no evidence to `mu` or `tau2` -- including it would
+    # let a slot fitted from nothing drag the mean it is about to be
+    # shrunk toward.
+    informative = {s: n for s in coefs if (n := max(0, counts.get(s, 0))) > 0}
+    if not informative:
+        return dict(coefs)
+
+    total = sum(informative.values())
+    mu = sum(coefs[s] * n for s, n in informative.items()) / total
+    tau2 = sum(n * (coefs[s] - mu) ** 2 for s, n in informative.items()) / total
+
+    # 4 = 1 / (p * (1 - p)) at p = 0.5, the variance factor of a binary
+    # outcome. Not a tuning knob.
+    k = (4.0 / tau2) if tau2 > 0 else None
+
+    shrunk = {}
+    for sport, coef in coefs.items():
+        n = informative.get(sport, 0)
+        if n == 0:
+            # No evidence of its own, so the pooled mean IS the estimate.
+            # Better than the 0.0 an unfitted slot carries, which reads as
+            # "this sport has no home advantage" rather than "unknown".
+            shrunk[sport] = mu
+        elif k is None:
+            # The sports that DO have data agree, so there is no
+            # between-sport variance to pool away from. Their own estimates
+            # stand; shrinking them to their own mean would be a no-op
+            # dressed up as a correction.
+            shrunk[sport] = coef
+        else:
+            shrunk[sport] = mu + (coef - mu) * (n / (n + k))
+    return shrunk
+
+
+#: Index of the first per-sport slot in a `build_feature_row` vector.
+#:
+#: DERIVED from the function itself rather than written as 5, so a new
+#: leading feature moves this automatically instead of silently shifting
+#: which coefficient the pooling reads. The trailing -1 is the neutral-site
+#: slot, which sits after the sport slots and is not one of them.
+SPORT_SLOT_OFFSET = (len(build_feature_row(0, 0, 0, 0, 0, SPORT_VOCAB[0]))
+                     - len(SPORT_VOCAB) - 1)
+
+
 # Canonical feature order — FEATURE_ORDER is the single source of truth.
 # extract_features() must return a dict with exactly these keys.
 FEATURE_ORDER = [
@@ -158,6 +239,9 @@ class CalibratedModel:
         self.model: LogisticRegression | None = None
         self.trained = False
         self.n_training_games = 0
+        #: Set by `train_from_db`: the per-sport home-advantage slots before
+        #: and after partial pooling, with the hosted-game counts behind them.
+        self.sport_pooling: dict | None = None
 
     def train_from_db(self, session: Session) -> None:
         """Query completed games and train the logistic regression model.
@@ -195,6 +279,7 @@ class CalibratedModel:
             self.trained = False
             return
 
+        sport_counts: dict[str, int] = {}
         X: list[list[float]] = []
         y: list[int] = []
 
@@ -268,12 +353,45 @@ class CalibratedModel:
 
             X.append(features)
             y.append(label)
+            # Only a HOSTED game informs a sport's home-advantage slot: a
+            # neutral game fires no slot (see build_feature_row), so counting
+            # it would overstate the evidence behind that coefficient.
+            if not game.neutral_site:
+                sport_counts[game.sport] = sport_counts.get(game.sport, 0) + 1
 
         X_arr = np.array(X, dtype=np.float64)
         y_arr = np.array(y, dtype=np.int64)
 
         self.model = LogisticRegression(max_iter=1000)
         self.model.fit(X_arr, y_arr)
+
+        # Partial-pool the per-sport home-advantage slots. Fitted freely,
+        # nfl's coefficient (31 hosted games) carried the same authority as
+        # nba's (1,253) -- which is how a 31-game intercept produced a 49%
+        # moneyline edge. Logged before and after, unconditionally: a
+        # silent adjustment to what the model believes is exactly the kind
+        # of change nobody would find later.
+        offset = SPORT_SLOT_OFFSET
+        coefs = self.model.coef_[0]
+        before = {sport: float(coefs[offset + i])
+                  for i, sport in enumerate(SPORT_VOCAB)}
+        after = shrink_sport_coefficients(before, sport_counts)
+        for i, sport in enumerate(SPORT_VOCAB):
+            coefs[offset + i] = after[sport]
+        #: What pooling did, kept for inspection. The fitted coefficients
+        #: alone cannot show it -- the raw values are overwritten -- so
+        #: without this there is no way to check the adjustment landed on
+        #: the sport slots rather than on the five leading features.
+        self.sport_pooling = {"hosted_games": dict(sport_counts),
+                              "before": before, "after": after}
+        logger.info(
+            "Sport home-advantage slots partial-pooled (hosted games %s):"
+            " %s -> %s",
+            {k: sport_counts.get(k, 0) for k in SPORT_VOCAB},
+            {k: round(v, 3) for k, v in before.items()},
+            {k: round(v, 3) for k, v in after.items()},
+        )
+
         self.trained = True
         self.n_training_games = len(y)
         logger.info(
