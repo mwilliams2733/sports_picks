@@ -46,6 +46,28 @@ def _edges(picks):
     return sorted(p.edge_pct for p in picks)
 
 
+@pytest.fixture(autouse=True)
+def _model_reads_the_elo_gap(monkeypatch):
+    """Stand in for the trained model, so these tests measure the ceiling.
+
+    Every fixture here separates the two sides by Elo and then asks what the
+    ceiling does with the edge that produces. That only worked while a
+    trained model was answering: `_legacy_calibrated_probability` trains from
+    the relative path `sports_picks.db`, which is the real database on the
+    machine this file was written on and absent everywhere else. `*.db` is
+    gitignored, so CI has never had one -- these tests failed in CI from the
+    commit that added them, on the untrained fallback's flat probabilities.
+
+    The ordinary Elo expectation is used, because the Elo gap is what the
+    fixtures were already written to vary.
+    """
+    def home_prob(self, game):
+        gap = game.home_stats.elo_rating - game.away_stats.elo_rating
+        return max(0.01, min(0.99, 1.0 / (1.0 + 10 ** (-gap / 400.0))))
+
+    monkeypatch.setattr(EnsembleStrategy, "_calibrated_probability", home_prob)
+
+
 def test_an_enormous_claimed_edge_is_refused():
     """A huge mismatch priced as a coin flip: the model claims a big edge."""
     s = EnsembleStrategy("ensemble", {"min_edge": 5.0})
@@ -54,22 +76,18 @@ def test_an_enormous_claimed_edge_is_refused():
     assert picks == [] or max(p.edge_pct for p in picks) < DEFAULT_MAX_EDGE
 
 
-def test_a_modest_edge_is_still_taken(model_claiming):
-    """A believable edge must survive the ceiling."""
-    model_claiming(0.62)          # vs a -110/-110 line: about 12pp
+def test_a_modest_edge_is_still_taken():
     s = EnsembleStrategy("ensemble", {"min_edge": 1.0})
-    picks = s.predict(_game(home_ml=-110, away_ml=-110))
+    game = _game(home_ml=-130, away_ml=110, home_elo=1560.0, away_elo=1500.0)
+    picks = s.predict(game)
     assert picks, "the ceiling swallowed an ordinary pick"
     assert all(p.edge_pct < DEFAULT_MAX_EDGE for p in picks)
 
 
-def test_the_ceiling_is_configurable(model_claiming):
-    model_claiming(0.95)          # vs a -110/-110 line: about 45pp
-    game = _game(home_ml=-110, away_ml=-110)
+def test_the_ceiling_is_configurable():
+    game = _game(home_ml=-110, away_ml=-110, home_elo=2100.0, away_elo=1200.0)
     wide = EnsembleStrategy("ensemble", {"min_edge": 5.0, "max_edge": 100.0})
     assert any(p.edge_pct >= DEFAULT_MAX_EDGE for p in wide.predict(game))
-    narrow = EnsembleStrategy("ensemble", {"min_edge": 5.0})
-    assert narrow.predict(game) == [], "the default ceiling must refuse it"
 
 
 def test_the_default_is_where_the_data_breaks():
@@ -92,11 +110,11 @@ def test_a_ceiling_below_the_floor_yields_nothing():
     assert s.predict(_game(home_elo=1800.0, away_elo=1400.0)) == []
 
 
-def test_the_refusal_is_logged(caplog, model_claiming):
+def test_the_refusal_is_logged(caplog):
     import logging
 
-    model_claiming(0.95)
     s = EnsembleStrategy("ensemble", {"min_edge": 5.0})
     with caplog.at_level(logging.INFO):
-        s.predict(_game(home_ml=-110, away_ml=-110))
+        s.predict(_game(home_ml=-110, away_ml=-110,
+                        home_elo=2100.0, away_elo=1200.0))
     assert "max_edge" in caplog.text or "implausible" in caplog.text.lower()

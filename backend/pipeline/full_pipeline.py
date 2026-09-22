@@ -331,7 +331,9 @@ def _store_games(session: Session, sport: str, target_date: date,
             continue
 
         game = Game(
-            sport=sport, season=season_label(sport, game_date, seasons),
+            sport=sport,
+            season=season_label(sport, game_date, seasons,
+                                espn_season_year=g.get("season_year")),
             date=game_date,
             start_time=start_time, espn_id=espn_id,
             home_team_id=home_id, away_team_id=away_id,

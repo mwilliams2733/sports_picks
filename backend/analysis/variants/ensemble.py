@@ -395,12 +395,23 @@ class EnsembleStrategy(Strategy):
                 from backend.database import get_engine, get_session
                 import os
                 db_path = os.environ.get("DB_PATH", "sports_picks.db")
-                engine = get_engine(db_path)
-                session = get_session(engine)
-                try:
-                    EnsembleStrategy._calibrated.train_from_db(session)
-                finally:
-                    session.close()
+                # sqlite CREATES a missing file on connect, so training used
+                # to leave an empty database wherever the process happened to
+                # be running and then fail on it with "no such table: games".
+                # Predicting is not a reason to bring a database into
+                # existence. Where there is none, say so once and use the
+                # fallback, which is what the exception produced anyway.
+                if db_path != ":memory:" and not os.path.exists(db_path):
+                    logger.warning(
+                        "No database at %r; the calibrated model is untrained "
+                        "and predictions use the fallback sigmoid.", db_path)
+                else:
+                    engine = get_engine(db_path)
+                    session = get_session(engine)
+                    try:
+                        EnsembleStrategy._calibrated.train_from_db(session)
+                    finally:
+                        session.close()
             except Exception:
                 logger.warning("Could not train calibrated model; using fallback.", exc_info=True)
         return EnsembleStrategy._calibrated.predict_home_win_prob(game)

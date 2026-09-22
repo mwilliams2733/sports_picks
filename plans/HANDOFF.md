@@ -2647,3 +2647,336 @@ claimed edge of **19.5%**.
 Gone were the least plausible: a 49.0% nfl moneyline, and `WSH +1.5` at
 44.2% on a baseball runline where a 44-point probability edge would be
 extraordinary.
+
+## The tiers were recording which side of the bet it was — 2026-09-20
+
+Three commits, one arc: NFL's entire board came back tier 1, and chasing that
+went through the confidence counters, into Elo, and back to a coverage gap
+nobody had noticed. `248667d`, `be86eac`, `726a3ca`.
+
+### The gap: collection began on 2026-09-17 and never looked back
+
+Nothing ever fetched what came before that date. NFL was missing week 1
+entirely; NCAAF was missing 08-24 through 09-16. The scheduler looks at today
+plus a short finalize-only lookback, so **the hole was permanent** — running
+the pipeline forward would never close it.
+
+`backend/scripts/backfill_date_range.py` delegates every date to
+`fetch_and_store_games`, the same function the scheduler calls. The older
+`backtesting.historical.store_games` also stores games and was the obvious
+candidate, but it drops ESPN's event id, writes neither `neutral_site` nor
+`season_type`, and never calls `_refresh_team_stats` — its rows cannot be found
+by the odds matcher and arrive with no features at all. Reconciliation is off,
+as the pipeline already documents for lookback days: on a past date a thin
+scoreboard is ordinary, and reconciling would mark real games canceled,
+destroying history while claiming to add it.
+
+`fetch_and_store_games` swallowed a per-sport fetch failure and returned 0 —
+which is also what an off-day returns. For a backfill those must be
+distinguishable, because a silently skipped date is a permanent hole rather
+than a retry, so it now takes an optional `errors` sink. Every existing caller
+is untouched.
+
+Inserting games *earlier* than rows already written left `elo_history`
+incoherent, because `backfill_elo_history` skips games it has already seen:
+team DEL read 1500.0 on 09-03, 1529.2 on 09-12 and **1500.0 again on 09-19**,
+still carrying the seed from when the database held no DEL history. `rebuild=True`
+discards one sport's history and replays the whole chain; the combat-sport
+refusal is checked first so the flag cannot route around it.
+
+```
+  nfl     1 -> 17 finals   (week 1 complete: 16 games)
+  ncaaf  73 -> 258 finals  (185 games added, 0 dates failed)
+```
+
+All rows carry `espn_id`, no duplicate ids, every final has both `elo_history`
+and `team_stats`. DEL now reads 1500.0 -> 1529.2 -> 1510.1, and no team's
+rating regresses to the seed after a later game.
+
+### Both vote counters were reading stats nothing computes
+
+`offensive_rating` and `defensive_rating` need possessions, which no collector
+fetches, so `_get_team_stats` hands both sides the same `100.0` default —
+deliberately, and documented as such in `team_stats.py`. What was never noticed
+is that two callers then treat those constants as evidence.
+
+The moneyline/spread counter's third comparison is `(off - def) > (off - def)`,
+i.e. **`0 > 0` for every game ever played**. It could never agree, so that path
+was capped at 2 of the 3 votes tier 5 requires and **the top tier was
+unreachable**. The same arithmetic collapses a team with no history at all:
+`point_diff` 0, and the Elo seed ties too — which is what NCAAF's 119 picks,
+every single one tier 1, were really saying.
+
+The totals counter is worse. It compares those defaults against constants:
+`pace <= 100`, `combined_off <= 200`, `combined_def <= 200`. All three are true
+by construction, so **every under scored a perfect 3 and every over a 0**. In
+the database that is all 42 NCAAB tier-5 picks being unders, and every over
+across boxing, MLB, MMA and NCAAF pinned to tier 1. The tier recorded which
+side of the bet it was, not how good it was — **and the recalibrator had just
+finished tightening NCAAB tier 5 on 37 of those**.
+
+The fix distinguishes absent evidence from contrary evidence. Both counters
+return `(agreeing, available)`; a signal that cannot separate the two sides is
+not available and does not vote either way. `calculate_confidence` scales the
+requirement to what was available, **rounding up** so 2-of-3 becomes 2-of-2
+rather than 1-of-2, and caps the tier at 1 when nothing is available — an edge
+no signal supports is an unsupported edge however large. The totals counter
+reports `(0, 0)` and says why. Callers that pass no availability are unchanged.
+
+### Elo served every team a rating one game stale
+
+`elo_history` stores the **pre**-game rating. A scheduled game has no row yet,
+so `_team_elo` fell back to the most recent prior row — which holds *that*
+game's pre-game rating. Every team read a rating one game behind. In NFL week 2
+each team's only prior row was its week 1 game, holding the 1500.0 seed: all 32
+teams identical, every signal tied, every pick tier 1. This is why NFL stayed
+flat even after the counter fix.
+
+The fix advances one step from the two stored pre-game ratings and the prior
+game's score. That is **not lookahead** — the game being advanced past is final
+and strictly earlier than the one being priced, and a game that already has its
+own row still reads that row untouched.
+
+The step goes through a new `elo.apply_result`, which the chronological replay
+in `backfill_elo_history` now calls too. One function decides what a result
+does to a rating, because the replay produces what the model **trains** on and
+this lookup produces what it is **served**; if they ever disagreed the
+difference would be invisible and systematic. A drawn game is skipped by both,
+as the replay always did. It degrades to the stored rating when the step cannot
+be taken honestly — missing opponent row, no scores, a draw — because those are
+cases where the rating genuinely did not move, and inventing a movement is
+worse than staleness.
+
+### Measured, on real upcoming games
+
+Votes shown as `(agreeing, available)`, with `team_stats` refreshed over the
+newly backfilled history:
+
+```
+  ncaaf  after be86eac  (1,1) x14, (2,2) x1, (0,2) x1, (0,1) x4
+  nfl    after be86eac  (0,0) x20                       still flat
+  nfl    after 726a3ca  (2,2) x12, (0,2) x12, (1,2) x1  30 distinct Elo values, 1464.3..1535.7
+  ncaaf  after 726a3ca  (2,2) x10, (1,2) x8, (0,2) x7
+```
+
+### Still open
+
+- **Totals stay at tier 1 by construction.** The totals counter now honestly
+  reports no available signals, which is the truth: pace, offensive and
+  defensive rating all need possessions, and no collector fetches them. Totals
+  confidence cannot mean anything until that changes. This is the same
+  structural refusal plan 008 recorded.
+- **Every tier grade recorded before `be86eac` is suspect**, and the NCAAB
+  tier-5 tightening the recalibrator applied to 37 unders was tightening a
+  label that meant "this is an under". Nothing has been re-graded or
+  un-tightened.
+- Four `2026-12-31` placeholder rows, the one-off-future limitation in the
+  combat-sport matchup detector, and the 316 graded duplicates are all
+  unchanged from their sections above.
+
+### Verifying locally
+
+No CI run covers these three commits yet; the suite has not been run since
+`726a3ca`. The new tests are `test_backfill_date_range.py`,
+`test_elo_history_rebuild.py`, `test_confidence_signal_availability.py` and
+`test_elo_staleness.py`.
+
+```
+.venv/Scripts/python.exe -m pytest backend/tests -q
+```
+
+The backfill is re-runnable and idempotent on dates already stored:
+
+```
+.venv/Scripts/python.exe -m backend.scripts.backfill_date_range \
+    --db <abs win path> --sport nfl --start 2026-09-04 --end 2026-09-16
+```
+
+**Back up `sports_picks.db` before any run that writes**, as every production
+section above does.
+
+## The season label, the week, and a recalibration floor — 2026-09-20
+
+Three more commits, pushed straight to `master`: `c676277`, `6177d1a`,
+`a607d98`. Reviewed here rather than written here.
+
+### The recalibrator was tightening thresholds on coin flips
+
+`MIN_PICKS_PER_TIER` was 20. At n=20 the standard error of a win rate near 0.5
+is 11.2 points, so the 5-point deviation the recalibrator acts on is **0.45 SE**
+— well inside noise. It was not measuring calibration; it was moving thresholds
+one point per night, indefinitely. The floor is now derived from the deviation
+rather than chosen, `n = (z * 0.5 / DEVIATION_THRESHOLD) ** 2` at z = 1.645,
+one-sided because the recalibrator only ever moves a threshold in the direction
+the deviation points: **271 decided picks**, where a 5-point gap is 1.65 SE.
+`DEVIATION_THRESHOLD` had been defined twice in the same module — exactly the
+drift the derivation prevents — and the duplicate is gone.
+
+This compounds the tier finding above. The four rows written on 2026-09-20 came
+from cohorts of 26, 34, 37 and 70, and the 37 were the NCAAB unders that were
+unders *because* the totals counter said so.
+
+### One season label, and where it still bends
+
+Three sites built the label three ways — `f"{y}-{str(y+1)[-2:]}"` in the
+backtesting loader, `f"{y}-{y+1}"` on the ESPN path, `f"{y}"` on the odds path
+— so the same season was recorded differently depending on which collector
+created the row. NBA carried four labels for two seasons. `config.season_label`
+now derives one from the season boundaries already in `config.yaml`, and 598
+rows were relabelled: nba 2025-26 (1264), ncaab 2025-26 (86), ncaaf 2026-27
+(333), nfl 2026-27 (48), mlb 2026 (129), boxing 2026 (139), mma 2026 (151) + 2027 (2).
+
+**The `f"{y}-{y+1}"` defect is genuinely fixed** — a January 2027 NFL game now
+reads `2026-27` rather than `2027-2028`, and the move from once-per-batch to
+once-per-game is right for the same reason `week_of` reads the event: a
+scoreboard response keyed to one date can carry a game from another.
+
+**What the derivation cannot express is a date before the configured start.**
+Run against the real `config.yaml`:
+
+```
+  nfl    2026-08-15  -> 2025-26     PRESEASON (start 09-05)
+  nba    2026-10-05  -> 2025-26     PRESEASON (start 10-22)
+  ncaaf  2026-08-20  -> 2025-26     week 0, four days early (start 08-24)
+  nfl    2027-01-15  -> 2026-27     correct, the bug this fixed
+  nba    2026-06-25  -> 2025-26     correct, Finals past the 06-20 end
+```
+
+The *tail* end comes out right by construction — a June NBA game is before the
+October start, so it lands in the season that started the previous October. The
+*head* end does not: anything between January 1 and the start date is
+attributed to the season before it, and preseason sits exactly there.
+`test_a_game_just_before_the_start_belongs_to_the_previous_season` asserts this
+deliberately, so it is a decision, not an oversight — but it is a decision made
+against NFL 09-04, one day out, where it looks obviously right.
+
+The underlying reason is that the `seasons` block was written to answer "is this
+sport active today", a coarse gate for the scheduler and the UI, and is now also
+the authority on season *identity*. A start date a few days off costs nothing
+for the first question and silently misattributes a game for the second.
+
+**Not reachable through the scheduler**, which gates on `is_sport_in_season` and
+so never fetches a preseason date. **Reachable through
+`backfill_date_range`**, which takes explicit dates and does not gate — the
+NCAAF backfill started on 08-24, the configured start exactly, which is the only
+reason it produced no mislabelled rows.
+
+**The fix the repo's own precedent points at**: ESPN's event carries
+`season.year`, authoritative for its own game, sitting in the dict
+`espn.season_type_of` already opens to read `season.type`. That is the same
+argument `6177d1a` made one commit earlier for `week.number` — store what ESPN
+already tells us — with `config.season_label` kept as the fallback for
+odds-path rows that have no ESPN event. Not done.
+
+### `Game.week` is populated
+
+`Game.week` existed on the model and was NULL for all 1,893 rows while every
+ESPN event already parsed carries `week.number`. Read from the event, not the
+scoreboard block. No sport allowlist — ESPN omits the block for sports without
+weeks, so the payload answers which sports have one, and `week_of` returns
+`None` rather than 0 because "no such concept" and "week zero" are different
+claims and NCAAF really does play a week zero. Backfilled: nfl 48 games, 0
+NULL, weeks 1-3 at exactly 16 each; ncaaf 333 games, 2 NULL. The two NULLs
+carry neither an `espn_id` nor an `odds_api_id`.
+
+### Still open, from these three
+
+- **The preseason label**, above. No rows are wrong today; the next backfill
+  that reaches a few days before a configured start will make some.
+- **The 598-row relabel has no script in the repo.** `backend/scripts/` holds a
+  backfill for espn_ids, game flags, prop fields, team stats and UFC Elo, but
+  nothing for the season label. Restoring a backup, or standing up a second
+  environment, leaves no way to reproduce it.
+
+## The season label, carried the rest of the way — 2026-09-20
+
+The finding in the section above, built. `b2e6a58`, `1e26b7e`.
+
+### Nearest season, not last season started
+
+`season_label` asked whether a date was past the configured start. That is
+right at the tail and wrong at the head, for the reason already recorded: the
+`seasons` block is a coarse "is this sport active today" gate, accurate to a
+few days, and a few days is the whole width of the second question it is now
+being asked. It now measures to the whole season window and takes the nearest,
+which leaves every tail answer unchanged and moves the head ones.
+
+### ESPN's year is a candidate, never a label
+
+The plan was to store what ESPN already tells us, the way `6177d1a` did for
+`week.number`. Reading the feed changed the shape of that: **ESPN names a
+season by the year it STARTED for the football sports and by the year it ENDS
+for basketball.** The 2025-26 nba season is `year: 2026`; the 2026 nfl season
+is also `year: 2026`. Formatting either directly would have renamed the 1,237
+nba rows stored as "2025-26" to "2026-27" — the exact history the label was
+chosen to avoid rewriting.
+
+So `espn.season_year_of` returns the number and `config.season_label` resolves
+it: both readings, `Y-1` and `Y`, are offered to the nearest-season test
+alongside the two the date itself suggests. Whichever convention a sport uses,
+the right season wins, and no per-sport table of ESPN conventions is needed.
+
+A year more than one from the game's own is dropped as a bad value rather than
+resolved. A season containing a date can only be named for the year before it,
+that year, or the year after, so anything else is not a disagreement — and 0 or
+a negative reached `date()` and raised `ValueError` before this.
+
+**The odds path keeps the fix without the year.** The nearest-season rule does
+not depend on ESPN being there, which is what makes this an improvement to the
+derivation rather than a dependency on the feed.
+
+```
+  nfl    2026-08-15  espn=2026   2025-26 -> 2026-27   preseason
+  nba    2026-10-05  espn=2027   2025-26 -> 2026-27   preseason, END-year
+  ncaaf  2026-08-20  espn=2026   2025-26 -> 2026-27   week 0
+  nfl    2027-01-15  espn=2026   2026-27              unchanged
+  nba    2026-06-25  espn=2026   2025-26              unchanged, Finals
+  nba    2025-11-01  espn=2026   2025-26              unchanged, stored rows
+```
+
+`test_a_game_just_before_the_start_belongs_to_the_previous_season` asserted the
+old rule and now asserts the new one under a new name. It was the only test to
+change.
+
+### The relabel is a script now
+
+`backend/scripts/backfill_season_labels.py`. It recomputes rather than
+rewriting the old strings, because the stored label is the one value that
+cannot be trusted — three formats were in production at once. `--dry-run`
+writes nothing, needs no network, and names every distinct move.
+
+**It has not been run against production.** Back up `sports_picks.db`, dry-run
+it, then:
+
+```
+.venv/Scripts/python.exe -m backend.scripts.backfill_season_labels \
+    --db <abs win path> --dry-run
+```
+
+Expect it to report no changes. Every stored row sits inside its season window,
+where the old rule and the new one agree; the 598 rows were already relabelled
+by hand. A non-empty report means a preseason row exists that was not known
+about.
+
+### Verified
+
+`975 passed, 2 failed` (`backend/tests`, Python 3.11 in a cloud container with
+the dependencies installed fresh). 956 of those passed on `a607d98`; the 19 new
+ones are 14 in `test_season_label.py` and 5 in `test_backfill_season_labels.py`.
+
+### CI has been red on master since 248667d, and not because of any of it
+
+`test_max_edge_ceiling.py::test_the_ceiling_is_configurable` and
+`::test_the_refusal_is_logged` fail, on `master` and on every commit back to
+`d4de5d4` — **the commit that introduced them.** They have never passed in a
+clean checkout. CI runs 73 through 77 are all red on exactly these two.
+
+Both depend on the 2100-vs-1200 Elo game producing an edge at or above 20%.
+In a checkout with no database, `_legacy_calibrated_probability` cannot train —
+`sqlite3.OperationalError: no such table: games` — and the fallback it drops to
+produces a smaller edge, so the ceiling never triggers and nothing is logged.
+They presumably pass on the Windows box, where the real `sports_picks.db` sits
+in the working directory. **The tests read an ambient production database.**
+
+Not touched here: what they should assert without a trained model is a decision
+about `d4de5d4`'s evidence, not a mechanical fix.

@@ -17,24 +17,27 @@ def db_session(db_engine):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_calibrated_model():
-    """Stop `EnsembleStrategy` reaching for the live database.
+def _untrained_calibrated_model():
+    """Stop the calibrated model leaking between tests.
 
-    `_legacy_calibrated_probability` trains a `CalibratedModel` from
-    `os.environ.get("DB_PATH", "sports_picks.db")` on first use, so a
-    strategy's probabilities -- and therefore whether a fixture clears
-    `min_edge` -- depended on whether an untracked 10 MB file happened to
-    sit in the working directory. Four tests passed on a developer machine
-    and failed in CI for 25+ commits because of it, while ci.yml claimed
-    "tests are isolated from the live database".
+    `EnsembleStrategy._calibrated` is a CLASS attribute, trained lazily on
+    first use from whatever database `DB_PATH` names -- by default the
+    relative `sports_picks.db`, which on a developer's machine is the real
+    one sitting in the repo root. Whichever test touched the strategy first
+    therefore decided what every later test was predicting with, and a suite
+    run from the repo root read production data.
 
-    `_calibrated` is also a CLASS attribute, so whichever test trained it
-    first silently fixed the probability source for every test after it in
-    the same process. Outcomes depended on collection order.
+    Reset around every test so the fixture a test sets up is the only thing
+    it is measuring.
 
-    Pinning an UNTRAINED model gives every test the deterministic
-    `_fallback_probability` path and no file access. A test that wants a
-    trained model assigns one itself.
+    An UNTRAINED instance, not ``None``. ``None`` is the "never touched"
+    sentinel `_legacy_calibrated_probability` retrains on, so resetting to
+    it makes every test that predicts refit the model -- and where the live
+    database IS present that is a LogisticRegression over ~1,800 games,
+    about 1,200 times. It is fast in CI only because there is no database
+    there to train from, which is the same machine-dependence this fixture
+    exists to remove. An instance short-circuits the retrain and gives the
+    deterministic fallback everywhere.
     """
     from backend.analysis.calibrated_model import CalibratedModel
     from backend.analysis.variants.ensemble import EnsembleStrategy
@@ -43,34 +46,3 @@ def _isolate_calibrated_model():
     EnsembleStrategy._calibrated = CalibratedModel()
     yield
     EnsembleStrategy._calibrated = previous
-
-
-@pytest.fixture
-def model_claiming():
-    """Pin what the model believes, for tests about what happens next.
-
-    A test about an edge CEILING needs a known edge. Deriving one from Elo
-    through `_fallback_probability` does not work -- that path saturates
-    around 13 percentage points, below `DEFAULT_MAX_EDGE`, so the ceiling
-    can never fire. Those tests only ever passed because a trained model
-    from the live database produced bigger numbers, which is precisely the
-    hidden dependency `_isolate_calibrated_model` removes.
-
-        def test_x(model_claiming):
-            model_claiming(0.95)
-            ...
-
-    Restored by `_isolate_calibrated_model`, which is autouse.
-    """
-    from backend.analysis.variants.ensemble import EnsembleStrategy
-
-    def _install(probability: float):
-        class _Fixed:
-            trained = True
-
-            def predict_home_win_prob(self, game):
-                return probability
-
-        EnsembleStrategy._calibrated = _Fixed()
-
-    return _install
