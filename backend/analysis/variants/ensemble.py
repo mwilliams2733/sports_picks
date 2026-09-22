@@ -36,37 +36,33 @@ logger = logging.getLogger(__name__)
 #: training game and produced a 49% moneyline edge on 2026-09-20.
 #:
 #: Override per strategy with config["max_edge"].
-#: Longest moneyline price the model is allowed to back.
+#: Longest moneyline price the model is allowed to back, or ``None`` for no
+#: ceiling.
 #:
-#: **100 means favourites only.** American odds jump from -100 to +100, so a
-#: ceiling here does not trim longshots -- it refuses every underdog. That is
-#: the intent, and it is worth stating plainly rather than leaving the reader
-#: to work it out from the arithmetic.
+#: **Off by default, by decision on 2026-09-21.** Underdog moneylines are
+#: generated again. The machinery is kept rather than deleted so the filter
+#: is one config value away: ``config["max_odds"] = 100`` refuses every
+#: underdog, ``200`` refuses longshots only.
 #:
-#: Set at 200 first, from the live book's 24 picks carrying a stored
-#: `model_prob` at >= +200 (model said 33.7%, market implied 12.3%, actual
-#: 12.5%). Importing nflverse history took the nfl backtest from 7 decided
-#: picks to 528, and on that sample the rot starts a band earlier:
+#: What that costs, so the decision stays legible. On 528 decided nfl
+#: backtest picks:
 #:
 #:     fav  <= -150     n=106   market 66.2%  actual 64.2%    -7.83u
 #:     fav  -150..-100  n= 88   market 52.3%  actual 48.9%    -9.74u
 #:     dog  +100..+200  n=334   market 39.7%  actual 33.8%   -61.02u
 #:
-#: 334 picks in the +100..+200 band, 78% of the loss, entirely inside the
-#: old ceiling. The model reads a 39.7% dog as a bet and it wins 33.8%.
+#:     ceiling off      593 picks   43.8%   -157.67u   -11.39% ROI
+#:     ceiling at 100   227 picks   58.6%    -30.30u    -5.78% ROI
 #:
-#: The whole 528-pick backtest is worse than a no-edge null at p = 0.0104 --
-#: the model's selections carry NEGATIVE information, so the bands it is
-#: least wrong about are the ones to keep. Favourites are where market and
-#: actual are closest (66.2/64.2 and 52.3/48.9).
+#: The underdog band is 78% of the loss. It is the worst band because edge
+#: is `model - implied` in ABSOLUTE probability points: reading a 12% shot
+#: as 33% is a 21-point edge, while reading a 66% favourite as 70% is 4. The
+#: same miscalibration therefore makes longshots look far more attractive,
+#: so a model selecting on its own largest disagreement selects its own
+#: largest errors.
 #:
-#: This does not make the strategy profitable. Favourites alone still lost
-#: 17.57u over 194 picks. It removes the segment where the model is most
-#: confidently wrong; it does not add an edge, and nothing here should be
-#: read as claiming one.
-#:
-#: Override with config["max_odds"]; None disables it.
-DEFAULT_MAX_ODDS = 100
+#: Override per strategy with config["max_odds"].
+DEFAULT_MAX_ODDS = None
 
 DEFAULT_MAX_EDGE = 20.0
 
