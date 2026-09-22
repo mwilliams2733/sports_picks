@@ -1,6 +1,9 @@
 __pycache__/
 *.pyc
 .venv/
+# Any sibling virtualenv, e.g. a .venv-ci/ built to run the suite on the
+# 3.12 the Dockerfile serves while .venv/ holds 3.14.
+.venv*/
 node_modules/
 dist/
 *.db

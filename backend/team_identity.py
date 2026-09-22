@@ -169,3 +169,29 @@ def resolution_of(sport: str, label: str) -> tuple[str | None, str]:
 def canonical_abbr(sport: str, label: str) -> str | None:
     """The ESPN abbreviation for ``label``, or None if we cannot tell."""
     return resolution_of(sport, label)[0]
+
+
+@functools.lru_cache(maxsize=None)
+def _espn_ids(sport: str) -> dict[str, str]:
+    return {
+        r["abbreviation"]: str(r["espn_id"])
+        for r in _table(sport)
+        if r.get("espn_id")
+    }
+
+
+def espn_team_id(sport: str, label: str) -> str | None:
+    """ESPN's numeric team id for ``label``, or None if we cannot tell.
+
+    Takes anything ``canonical_abbr`` takes -- an abbreviation, a display
+    name, or an Odds API label -- because a caller holding a ``Team`` row
+    cannot be sure which of those its ``abbreviation`` column contains; that
+    is the confusion plan 015 was written to repair.
+
+    Only sports with a committed snapshot resolve here. The rest return None,
+    which is a "ask ESPN" signal rather than "no such team".
+    """
+    abbr = canonical_abbr(sport, label)
+    if abbr is None:
+        return None
+    return _espn_ids(sport).get(abbr)

@@ -206,5 +206,5 @@ def test_analyze_combination_market(session):
 
 def test_receptions_uses_receptions_not_rec_yards():
     """player_receptions market should use receptions field, not rec_yards."""
-    from backend.analysis.prop_analyzer import MARKET_TO_STAT
-    assert MARKET_TO_STAT["player_receptions"] == ["receptions"]
+    from backend.analysis.prop_markets import MARKET_STAT_MAP
+    assert MARKET_STAT_MAP["player_receptions"] == ["receptions"]

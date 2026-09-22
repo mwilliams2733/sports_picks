@@ -27,7 +27,7 @@ def test_pick_model_carries_the_player_and_market_a_prop_needs(db_session):
 
     `pick_value` is prose -- "Dean Wade Over 0.5 3-Pointers" -- and the market
     cannot be recovered from it reliably: `prop_pipeline._market_label` maps
-    only 7 of the 16 keys in `MARKET_STAT_MAP`, so for the other 9 the label IS
+    only 7 of the 21 keys in `MARKET_STAT_MAP`, so for the other 14 the label IS
     the key and the reverse mapping is not one-to-one. Store both rather than
     re-parse.
     """

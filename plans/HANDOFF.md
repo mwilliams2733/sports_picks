@@ -603,11 +603,152 @@ Caught by the tests immediately and restored from `HEAD`. Editing Python by
 locating "the next `def`" is unreliable when the file mixes `def` and
 `async def`.
 
+## Four items off the "Still open" list — 2026-09-19
+
+Worked in the order they appear below. Backend **674 passing** (653 at the
+start, on Python 3.12), frontend eslint 0/0, tsc clean, vitest **20/20**
+(was 15).
+
+### The list's item 7 was already done
+
+`nba_api_source.fetch_recent_games` is fixed and has been since `adb66d8`,
+which removed the whole pre-game call rather than the bad kwarg: a pre-game
+fetch cannot contain the game being predicted, and `espn_box_score` writes
+the `game_log` rows post-game anyway. The list entry is stale, not open.
+
+### `EspnStatsSource._find_team_id` — defined (`4ed3630`)
+
+Called at `fetch_season_averages`, never defined. `PlayerStatsCollector`
+catches per source, so every call was logged as an ordinary "espn failed"
+rather than as a missing method.
+
+**Who it actually cost**, counted against the sports whose props the pipeline
+analyses rather than against the chain table, because those differ: **nfl,
+ncaab and ncaaf** name ESPN as their only source and so had no season
+averages at all. nba lost only its third fallback. boxing and mma sit in the
+chain but `odds_api.PROP_MARKETS` is empty for both, so no prop is ever
+fetched for them and nothing depended on it.
+
+Resolution is offline first — `backend/data/<sport>_teams.json` already
+carries `espn_id`, so nba and ncaab cost no request — via a new
+`team_identity.espn_team_id`, which takes a display name as readily as an
+abbreviation. Sports with no snapshot fall back to ESPN's teams endpoint,
+once per sport, `limit=500` so ncaaf is not truncated to 50.
+
+### The test suite was on the live internet (`4514281`)
+
+Found by fixing the above. `test_pipeline_api.py` and
+`test_pipeline_integration.py` drive `POST /pipeline/run` with nothing
+mocked, so six tests have been reaching ESPN and The Odds API for real.
+Invisible while every call failed fast — and `_find_team_id` was one of the
+things failing fast. With it defined, the same tests began crawling a live
+roster plus one statistics request per athlete: **one run timed out at 50s
+where the next passed in 2.9s.**
+
+Blocked at the socket layer in `conftest.py`. `pytest_httpx` intercepts
+inside httpx, well above sockets, so every mocked test is untouched, and the
+collectors already swallow per-source failures — so those tests assert
+exactly what they asserted before, now from zero rows by construction rather
+than by luck. `@pytest.mark.allow_network` opts back out. The suite got
+*faster*: 32s to 26s.
+
+### One market map (`026e4b4`)
+
+`grader.MARKET_STAT_MAP` and `prop_analyzer.MARKET_TO_STAT` had **already
+drifted, by five keys** — the grader knew `player_pass_tds`, the analyser
+knew four alias spellings. No conflicting values yet. Both now import
+`backend/analysis/prop_markets.py`; the test asserts the two modules read the
+same *object*, since equal contents is what the old arrangement had.
+
+**This surfaced a real gap.** `PROP_MARKETS` asks The Odds API for
+`batter_hits`, `batter_home_runs`, `batter_total_bases` and
+`pitcher_strikeouts`, and **none of the four can be settled**: `PlayerStat`
+has no baseball column, and `build_default_collector` has no mlb chain.
+Those props are fetched, stored, then neither analysed nor graded. It is a
+schema change, not a dict entry, so it is recorded as a named
+`UNSUPPORTED_SPORTS` entry with a test that states it.
+
+### The `DROP TABLE` is opt-in now (`3f2b5e0`)
+
+`migrate_api_usage` refuses unless given `allow_destructive=True` or
+`SPORTS_PICKS_ALLOW_DESTRUCTIVE_MIGRATIONS=1`; without one it stops the
+process with the rows intact. Refusing to boot is the point — on a legacy
+schema the alternative is a dropped table, and a process that will not start
+is recoverable in a way deleted rows are not. **Nothing changes for a current
+schema, production included**: the column check sees `endpoint` and returns.
+`DESTRUCTIVE_MIGRATIONS` is the list, and a test asserts anything on it takes
+the flag defaulting to False.
+
+### `PaperTrading.tsx` is on React Query (`8c227c1`)
+
+Plan 009's suppression is gone. Five `useState`s and three loaders called
+from a bare mount effect became two hooks. Games and props reuse
+`useTodaysPicks`/`useProps` keys, so arriving from another page renders from
+cache (`App.tsx` sets `staleTime` 30s). Picks and stats sit under
+`['users', id, ...]`, which is what let three hand-written refreshes go: each
+sat directly beneath an `invalidateQueries(['users'])` that now reaches them.
+That last part is a property of the key layout rather than of any code on the
+page, so it is tested.
+
+## Two decisions, now with the evidence — 2026-09-19
+
+Both were on the "Still open" list as judgment calls. Neither was taken
+unilaterally; here is what each actually turns on.
+
+### `EloRating` — "wire it up or delete it" is a false binary
+
+**Delete would break combat sports outright.** For mma and boxing `EloRating`
+is not a legacy table, it is the only Elo store and it is live:
+
+| | |
+|---|---|
+| seeded by | `backfill_ufc_elo.py`, `seed_boxing_fighters.py`, `scheduler.py:460` |
+| updated by | `grader._apply_combat_elo_update`, on every graded fight (K=24) |
+| read by | `pick_generator._build_fighter_stats` |
+
+For **team sports** it is exactly as stale as the list says: written only by
+`compute_historical_elo`, whose entry point `load_historical_data` has no
+caller in this repo, frozen at some past manual run, disagreeing with
+`elo_history` by **53 points on average and up to 134**.
+
+So the real decision is much narrower: **what should step 3 of `_team_elo`
+do for a team-sport team with no `EloHistory` row at all** — the 14 of 239
+upcoming NBA games. Today it returns that stale rating.
+
+*Recommendation:* drop step 3 for team sports and let them take the neutral
+1500.0, and stop `compute_historical_elo` writing team-sport rows, leaving
+`EloRating` unambiguously the combat-sports table. A rating on the wrong
+replay basis is a train/serve skew the model cannot absorb; 1500.0 is at
+least neutral and known. It changes picks for those 14 games, so it is a
+call to make deliberately rather than as a side effect.
+
+### The three constant features — the cost is a retrain
+
+`pace`, `offensive_rating` and `defensive_rating` are never written
+(`team_stats.py:27` refuses: nothing here fetches possessions). Consumers
+default them to 100.0, so **5 of the 13 entries in `FEATURE_ORDER` are
+constant**: `pace_diff` and `net_rating_diff` at 0, and the four
+`offensive_rating_*` / `defensive_rating_*` at 100.0.
+
+Two consequences worth separating. In the model, a constant column is
+collinear with the intercept — it teaches nothing and, unregularised, makes
+coefficients less identifiable. Separately, **the prop path's
+opponent-defence adjustment is inert**: `prop_pipeline.py:101` and
+`api/props.py:73` both look up a `defensive_rating` `TeamStat` that is never
+written, so that adjustment has never once applied.
+
+*Recommendation:* drop the five from `FEATURE_ORDER`. The blocker is not
+difficulty, it is that changing `FEATURE_ORDER` invalidates any persisted
+model artifact and the calibration baseline would need remeasuring — so it
+should be done deliberately, with a retrain, not folded into other work.
+
 ## Where things stand
 
-`master` is at `cc9eee2` and **pushed**. Test baseline: **646 passing backend,
-0 failed**, identical on Python **3.12 and 3.14**; frontend eslint 0/0, `tsc` clean, vitest 15/15.
-Started this session at 545.
+`master` is at `b64b8fd` and **pushed**. Test baseline: **674 passing
+backend, 0 failed** (653 before the 2026-09-19 work below; 646 at the last
+handoff), measured here on Python **3.12**, with CI covering 3.12 and 3.14;
+frontend eslint 0/0, `tsc` clean, **vitest 20/20**. The backend suite also
+got faster, 32s to 26s, once it stopped making live HTTP calls.
 
 **CI is live** (`.github/workflows/ci.yml`), ~50s for all three jobs. Local:
 
@@ -941,22 +1082,25 @@ Of the five "natural next pieces" listed on 2026-09-16, three are done:
 
 ### Still open
 
-1. **Decide `EloRating`'s fate.** Routed around rather than fixed. Still
-   written by `compute_historical_elo` and still read as the pick generator's
-   fallback for the 14/239 upcoming NBA games with no replayable history. The
-   convention clash that blocked this is resolved, so the decision is now
-   unblocked: wire it up properly or delete it.
-2. **Decide what to do about the three constant features.** `pace`,
-   `offensive_rating` and `defensive_rating` all need possession counts no
-   collector supplies. Every Brier number this project has produced came from
-   four working features, not seven. Options: source possessions, drop the
-   features, or leave them defaulted and stop counting them.
+1. **Decide `EloRating`'s fate** — evidence gathered 2026-09-19, see "Two
+   decisions" above. **Deleting it would break mma and boxing**, for which it
+   is the live and only Elo store. The real question is narrower: whether
+   step 3 of `_team_elo` should keep returning a stale team-sport rating (off
+   by up to 134 points from the training basis) for the 14/239 NBA games with
+   no replayable history, or fall through to a neutral 1500.0.
+2. **Decide what to do about the three constant features** — evidence
+   gathered 2026-09-19, see "Two decisions" above. They make **5 of the 13
+   entries in `FEATURE_ORDER` constant**, and separately leave the prop
+   path's opponent-defence adjustment permanently inert. The blocker on
+   dropping them is that it invalidates any persisted model artifact and the
+   calibration baseline needs remeasuring — so it wants a deliberate
+   retrain.
 3. **The underdog overconfidence — do not retune on it yet.** See the
    calibration section; the bins carrying the finding are n=15 and n=28, under
    the report's own `min_bin=30`. **More completed games, not a threshold
    change.**
-4. **Migrate `PaperTrading.tsx` to React Query** — 009 left a documented
-   suppression there naming this as the real fix.
+4. ~~**Migrate `PaperTrading.tsx` to React Query**~~ — **DONE 2026-09-19**
+   (`8c227c1`). The suppression is gone; eslint 0/0, vitest 20/20.
 5. **Prepare production and start the pipeline.** See the block at the top of
    this file. Until then nothing grades, no box scores accumulate, and 012's
    Task 4 cannot measure anything.
@@ -964,22 +1108,37 @@ Of the five "natural next pieces" listed on 2026-09-16, three are done:
    52 players have exactly one `game_log` row and **zero props clear the three
    values Task 3 now requires**. Running the report today returns 0 analysed
    and the calibration tool correctly refuses.
-7. **Make `espn_box_score` use `game.espn_id`** before that collection run.
-   It still calls `resolve_espn_event`, which searches the scoreboard on three
-   dates per game, because it predates the column — and its module docstring
-   now asserts something 014 made false ("ESPN shares no id with our Game").
-   Using the id turns ~4000 requests into ~1014 for a 1014-game run.
-8. **ncaab teams hold display names in `abbreviation`** (`"Pennsylvania
-   Quakers"`), so 60 rows can never match ESPN. Needs a team-identity fix.
-9. **`EspnStatsSource._find_team_id` does not exist**, so
-   `fetch_season_averages` raises `AttributeError` and the season-average
-   fallback is dead. P1 in its own right, given `nba_api` cannot reach
-   `stats.nba.com` from here.
-10. **`MARKET_STAT_MAP` is duplicated** in `grader.py:13` and
-    `prop_analyzer.py:12` (as `MARKET_TO_STAT`). A real drift risk.
-11. **Guard `migrate_api_usage`'s `DROP TABLE`.** It is the sharpest object in
-    the repo and the reason 011 mattered; an explicit opt-in for destructive
-    migrations would shrink the blast radius of every future mistake.
+7. ~~**Make `espn_box_score` use `game.espn_id`**~~ — **done in `a7112d7`**.
+   It reads `game.espn_id` first (`espn_box_score.py:210`) and only falls
+   back to `resolve_espn_event` when the column is empty, which was the
+   point: ~4000 requests become ~1014 for a 1014-game run.
+8. ~~**ncaab teams hold display names in `abbreviation`**~~ — **done**, and
+   it became plan 015. No abbreviation in the committed ncaab snapshot
+   contains a space; `backend/team_identity.py` is now the one bridge between
+   a display name and an abbreviation. See the 2026-09-19 sections above.
+9. ~~**`EspnStatsSource._find_team_id` does not exist**~~ — **DONE
+   2026-09-19** (`4ed3630`). It cost nfl, ncaab and ncaaf their season
+   averages entirely, not just nba its third fallback. Fixing it also
+   exposed six tests running against the live internet (`4514281`).
+10. ~~**`MARKET_STAT_MAP` is duplicated**~~ — **DONE 2026-09-19**
+    (`026e4b4`). They had already drifted by five keys. One definition now
+    in `backend/analysis/prop_markets.py`. Surfaced a new open item: mlb
+    props are fetched but can be neither analysed nor graded (see below).
+11. ~~**Guard `migrate_api_usage`'s `DROP TABLE`.**~~ — **DONE 2026-09-19**
+    (`3f2b5e0`). Opt-in via `allow_destructive=True` or
+    `SPORTS_PICKS_ALLOW_DESTRUCTIVE_MIGRATIONS=1`; refuses and stops the
+    process otherwise. No change for a current schema.
+
+12. **mlb props are fetched but cannot be settled.** `PROP_MARKETS` asks for
+    `batter_hits`, `batter_home_runs`, `batter_total_bases` and
+    `pitcher_strikeouts`; `PlayerStat` has no baseball column and
+    `build_default_collector` has no mlb chain. Credits are spent on props
+    that can never become a graded pick. Schema change, not a dict entry.
+
+13. **The prop path's opponent-defence adjustment has never applied.**
+    `prop_pipeline.py:101` and `api/props.py:73` look up a
+    `defensive_rating` `TeamStat` that nothing writes. Tied to the
+    constant-features decision above.
 5. **Let the scheduler run, then re-measure props.** This is the gate on the
    digest now. The grading chain is built and verified; it needs games
    carrying props to reach `final`. Until then the prop numbers rest on two

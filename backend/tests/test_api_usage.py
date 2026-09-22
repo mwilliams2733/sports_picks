@@ -75,7 +75,9 @@ def test_migrate_api_usage_drops_old_schema():
         conn.execute(text(
             "CREATE TABLE api_usage (id INTEGER PRIMARY KEY, source TEXT, request_count INTEGER, month TEXT, updated_at DATETIME)"
         ))
-    migrate_api_usage(engine)
+    # The drop is opt-in now; this test is about the mechanics of it, so it
+    # asks for it. That the default refuses is covered in test_migrations.py.
+    migrate_api_usage(engine, allow_destructive=True)
     assert "api_usage" not in inspect(engine).get_table_names()
     Base.metadata.create_all(engine)
     columns = [c["name"] for c in inspect(engine).get_columns("api_usage")]

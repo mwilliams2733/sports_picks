@@ -1,5 +1,8 @@
 import pytest
-from backend.collectors.player_stats.espn_stats_source import EspnStatsSource
+from backend.collectors.player_stats.espn_stats_source import (
+    ESPN_SPORT_URLS,
+    EspnStatsSource,
+)
 
 
 @pytest.fixture

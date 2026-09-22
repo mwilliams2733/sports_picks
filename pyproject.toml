@@ -38,3 +38,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["backend*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "allow_network: test genuinely needs real outbound network access",
+]

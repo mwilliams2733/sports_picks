@@ -144,7 +144,10 @@ def __getattr__(name: str):
     first import, and every API test does
     ``from backend.api.main import create_app`` -- so ``pytest`` in the repo
     root migrated the real ``sports_picks.db``. Harmless while every migration
-    is additive, but ``migrate_api_usage`` contains a ``DROP TABLE``.
+    is additive, but ``migrate_api_usage`` contains a ``DROP TABLE``. That
+    one now refuses to run without an explicit opt-in, so the two guards are
+    independent: this one stops the migration being reached by accident, and
+    ``database.DESTRUCTIVE_MIGRATIONS`` stops it destroying anything if it is.
 
     PEP 562. Only called for names not already defined in the module.
     """

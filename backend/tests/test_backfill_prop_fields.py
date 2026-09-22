@@ -17,13 +17,13 @@ def test_reverse_map_is_derived_from_the_forward_map():
     reverse = build_label_to_market()
     assert reverse["3-Pointers"] == "player_threes"
     assert reverse["Points"] == "player_points"
-    # 9 of 16 markets have no display label and fall through as themselves.
+    # 14 of 21 markets have no display label and fall through as themselves.
     assert reverse["player_blocks"] == "player_blocks"
 
 
 def test_every_market_round_trips():
     """No market may be unreachable through the reverse map."""
-    from backend.pipeline.grader import MARKET_STAT_MAP
+    from backend.analysis.prop_markets import MARKET_STAT_MAP
     reverse = build_label_to_market()
     assert set(reverse.values()) == set(MARKET_STAT_MAP)
 

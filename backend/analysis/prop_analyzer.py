@@ -1,6 +1,7 @@
 from backend.models import PlayerProp, PlayerStat
 from backend.data_types import PropAnalysis
 from backend.analysis.prop_confidence import calculate_prop_confidence
+from backend.analysis.prop_markets import MARKET_STAT_MAP
 
 try:
     from scipy.stats import norm, poisson
@@ -9,28 +10,6 @@ try:
 except ImportError:
     _HAS_SCIPY = False
 
-MARKET_TO_STAT: dict[str, list[str]] = {
-    "player_points": ["points"],
-    "player_rebounds": ["rebounds"],
-    "player_assists": ["assists"],
-    "player_threes": ["threes"],
-    "player_steals": ["steals"],
-    "player_blocks": ["blocks"],
-    "player_turnovers": ["turnovers"],
-    "player_points_rebounds": ["points", "rebounds"],
-    "player_points_assists": ["points", "assists"],
-    "player_rebounds_assists": ["rebounds", "assists"],
-    "player_points_rebounds_assists": ["points", "rebounds", "assists"],
-    "player_pass_yards": ["pass_yards"],
-    "player_pass_yds": ["pass_yards"],
-    "player_rush_yards": ["rush_yards"],
-    "player_rush_yds": ["rush_yards"],
-    "player_rec_yards": ["rec_yards"],
-    "player_reception_yds": ["rec_yards"],
-    "player_touchdowns": ["touchdowns"],
-    "player_anytime_td": ["touchdowns"],
-    "player_receptions": ["receptions"],
-}
 
 # Count-based markets where Poisson is appropriate for low means
 _COUNT_BASED_MARKETS = {
@@ -105,7 +84,7 @@ class PropAnalyzer:
             return None
 
         # Validate market is known
-        fields = MARKET_TO_STAT.get(prop.market)
+        fields = MARKET_STAT_MAP.get(prop.market)
         if fields is None:
             return None
 
