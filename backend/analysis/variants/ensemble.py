@@ -38,32 +38,35 @@ logger = logging.getLogger(__name__)
 #: Override per strategy with config["max_edge"].
 #: Longest moneyline price the model is allowed to back.
 #:
-#: The model overestimates underdogs badly, and it is the single largest
-#: loss source in the book. On live picks carrying a stored `model_prob`, at
-#: prices of +200 or longer:
+#: **100 means favourites only.** American odds jump from -100 to +100, so a
+#: ceiling here does not trim longshots -- it refuses every underdog. That is
+#: the intent, and it is worth stating plainly rather than leaving the reader
+#: to work it out from the arithmetic.
 #:
-#:     model said 33.7%  market implied 12.3%  actually won 12.5%  (n=24)
+#: Set at 200 first, from the live book's 24 picks carrying a stored
+#: `model_prob` at >= +200 (model said 33.7%, market implied 12.3%, actual
+#: 12.5%). Importing nflverse history took the nfl backtest from 7 decided
+#: picks to 528, and on that sample the rot starts a band earlier:
 #:
-#: The market was calibrated to within 0.2 points; the model claimed nearly
-#: three times the true probability. Because edge is `model - implied`, the
-#: bigger the overestimate the more attractive the bet looked -- so the
-#: worst-priced picks were also the ones that qualified most easily.
+#:     fav  <= -150     n=106   market 66.2%  actual 64.2%    -7.83u
+#:     fav  -150..-100  n= 88   market 52.3%  actual 48.9%    -9.74u
+#:     dog  +100..+200  n=334   market 39.7%  actual 33.8%   -61.02u
 #:
-#: What it cost: moneyline at >= +200 was 83 picks, 10.8% won, -23.62u,
-#: against a whole-book loss of -10.10u. Removing only those turns the book
-#: positive, and they are why the moneyline market ran at 31.5% while every
-#: other market sat near or above 50%.
+#: 334 picks in the +100..+200 band, 78% of the loss, entirely inside the
+#: old ceiling. The model reads a 39.7% dog as a bet and it wins 33.8%.
 #:
-#: **+200, not the best-performing cut.** Backtested, `skip >= +150` scored
-#: better (+5.47% ROI against +2.51%). +200 is used anyway because it is the
-#: boundary the miscalibration was independently diagnosed at, while +150 is
-#: the best of six thresholds tried against 61 games -- and the best of six
-#: at p = 0.205 is what luck looks like. A threshold read off a results
-#: table is fitted to that table.
+#: The whole 528-pick backtest is worse than a no-edge null at p = 0.0104 --
+#: the model's selections carry NEGATIVE information, so the bands it is
+#: least wrong about are the ones to keep. Favourites are where market and
+#: actual are closest (66.2/64.2 and 52.3/48.9).
 #:
-#: This guards a MODEL property, not a market one, so it applies to every
-#: strategy by default. Override with config["max_odds"]; None disables it.
-DEFAULT_MAX_ODDS = 200
+#: This does not make the strategy profitable. Favourites alone still lost
+#: 17.57u over 194 picks. It removes the segment where the model is most
+#: confidently wrong; it does not add an edge, and nothing here should be
+#: read as claiming one.
+#:
+#: Override with config["max_odds"]; None disables it.
+DEFAULT_MAX_ODDS = 100
 
 DEFAULT_MAX_EDGE = 20.0
 
