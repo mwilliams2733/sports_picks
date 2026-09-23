@@ -156,12 +156,43 @@ def windowless_sports(active_sports) -> list[str]:
     return [s for s in active_sports if s not in ESPN_TEAM_SPORTS]
 
 
-def fetch_windowless_odds(config, engine, sports) -> None:
-    """Fetch odds, and generate picks, for sports that get no window.
+def slate_sports(session, sports, target_date) -> list[str]:
+    """Of `sports`, the ones that actually have a game on `target_date`.
 
-    There is nothing to cluster a window around: these games are created by
-    the odds fetch itself. Failures are logged rather than raised -- boxing
-    being unavailable must not cost the rest of the scout.
+    Every odds fetch costs an API credit, and asking about a sport with
+    nothing on the card buys nothing. Order follows `sports` rather than the
+    database so a budget-exhausted run stops at the same place every day
+    instead of starving a different sport each time.
+    """
+    with_games = {row[0] for row in
+                  session.query(Game.sport)
+                  .filter(Game.sport.in_(list(sports)),
+                          Game.date == target_date,
+                          Game.status == "scheduled")
+                  .distinct().all()}
+    return [s for s in sports if s in with_games]
+
+
+def fetch_odds_and_pick(config, engine, sports) -> None:
+    """Fetch odds and generate picks for a list of sports, now.
+
+    Two callers, one body. Nothing here was ever windowless-specific -- the
+    old name came from its first caller.
+
+    * **Windowless sports** (boxing, mma) have no ESPN schedule, so there is
+      nothing to cluster a window around and this is the only thing that
+      fetches their odds at all.
+    * **The morning slate.** Window jobs fire `LEAD_TIME` before each game so
+      the price is fresh, which for evening baseball means picks appear
+      around 22:00 UTC -- hours after the 11:00 ET digest has already run and
+      found nothing. Pricing the slate in the morning gives the digest
+      something to send; the window runs afterwards refresh each pick as the
+      market moves, which `generate_and_store_picks` already does for any
+      game that has not started.
+
+    Failures are logged rather than raised. A dead odds API must not stop the
+    scout from scheduling windows -- that would cost the whole day rather
+    than just the morning.
     """
     if not sports:
         return
@@ -295,7 +326,22 @@ def morning_scout(config, engine, scheduler, is_retry=False):
 
         # Sports with no ESPN schedule never get a window, so this is the
         # only thing that fetches their odds at all.
-        fetch_windowless_odds(config, engine, windowless_sports(active_sports))
+        fetch_odds_and_pick(config, engine, windowless_sports(active_sports))
+
+        # The morning slate. Window jobs price each game two hours before it
+        # starts, so on an evening card nothing exists when the 11:00 ET
+        # digest runs -- it reported "empty; nothing sent" on 2026-09-21 and
+        # 2026-09-22 while picks for both days were written that evening.
+        # Restricted to sports with a game today so no credit is spent asking
+        # about an empty card.
+        slate = slate_sports(session, scheduled_sports, today)
+        # Logged unconditionally, including the empty case. An empty slate is
+        # a normal answer on a quiet Tuesday, and a silent one would read
+        # exactly like this call having been deleted -- which is the state
+        # the windowed sports were actually in.
+        logger.info("Morning slate for %s: %s", today,
+                    ", ".join(slate) if slate else "nothing scheduled")
+        fetch_odds_and_pick(config, engine, slate)
 
         existing_jobs = {j.id for j in scheduler.get_jobs()}
         # Windows already due are collected here and run after every sport has

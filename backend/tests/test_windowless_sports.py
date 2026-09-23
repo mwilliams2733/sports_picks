@@ -58,17 +58,17 @@ def test_a_sport_with_an_espn_schedule_is_not_windowless():
 
 
 def test_their_odds_are_fetched(calls, monkeypatch):
-    sch.fetch_windowless_odds(CONFIG, object(), ["boxing", "mma"])
+    sch.fetch_odds_and_pick(CONFIG, object(), ["boxing", "mma"])
     assert calls["odds"] == [("boxing", "mma")]
 
 
 def test_nothing_is_fetched_without_a_key(calls):
-    sch.fetch_windowless_odds({"seasons": {}}, object(), ["boxing"])
+    sch.fetch_odds_and_pick({"seasons": {}}, object(), ["boxing"])
     assert calls["odds"] == []
 
 
 def test_nothing_is_fetched_for_an_empty_list(calls):
-    sch.fetch_windowless_odds(CONFIG, object(), [])
+    sch.fetch_odds_and_pick(CONFIG, object(), [])
     assert calls["odds"] == []
 
 
@@ -78,4 +78,4 @@ def test_a_collector_failure_does_not_propagate(calls, monkeypatch):
         raise RuntimeError("odds api down")
 
     monkeypatch.setattr(sch, "fetch_and_store_odds", boom)
-    sch.fetch_windowless_odds(CONFIG, object(), ["boxing"])   # must not raise
+    sch.fetch_odds_and_pick(CONFIG, object(), ["boxing"])   # must not raise

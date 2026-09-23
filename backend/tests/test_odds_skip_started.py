@@ -14,7 +14,7 @@ games.
 `fetch_and_store_props` was already scoped by `window_game_ids`. Odds never
 was. The guard here is on game state rather than window membership, because
 the invariant is "do not overwrite a takeable price with an untakeable one"
--- which is equally true for `fetch_odds_now` and `fetch_windowless_odds`,
+-- which is equally true for `fetch_odds_now` and `fetch_odds_and_pick`,
 neither of which has a window.
 
 This is the same rule `generate_and_store_picks` already follows, and it

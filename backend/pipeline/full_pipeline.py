@@ -505,7 +505,7 @@ def _store_odds(session: Session, sport: str, odds_data: list[dict],
     touched 208 bookmaker rows, 80 of them on games already underway.
 
     The guard is on game state, not window membership, because
-    ``fetch_odds_now`` and ``fetch_windowless_odds`` have no window and the
+    ``fetch_odds_now`` and ``fetch_odds_and_pick`` have no window and the
     same invariant applies. A game with no ``start_time`` is priced: unknown
     is not past, the convention ``generate_and_store_picks`` already uses,
     and boxing and mma fixtures routinely have none.
