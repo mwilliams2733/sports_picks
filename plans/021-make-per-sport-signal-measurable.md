@@ -286,6 +286,31 @@ Behaviour:
   `do_orm_execute` + `with_loader_criteria` approach
   `calibration_report.py` already uses. Do **not** reimplement the feature
   build; a second copy is how train and serve drift.
+
+  **The existing helper takes one date; this report needs one per sport.**
+  `calibration_report._games_before(session, split_date)` and `_fit_model`
+  bound the fit with `with_loader_criteria(Game, Game.date < split_date)`,
+  a single global cutoff. A global cutoff would put whole sports on one side
+  of the line, which is the thing this report exists to avoid. Write a
+  sibling context manager in **this** module that takes a
+  `{sport: split_date}` mapping and builds a compound criterion:
+
+  ```python
+  from sqlalchemy import and_, or_
+  from sqlalchemy.orm import with_loader_criteria
+
+  criterion = or_(*[and_(Game.sport == sport, Game.date < cutoff)
+                    for sport, cutoff in splits.items()])
+  # then, inside a do_orm_execute event handler, for the duration of the fit:
+  #   with_loader_criteria(Game, criterion, include_aliases=True)
+  ```
+
+  Model the handler's registration, teardown and the
+  `EnsembleStrategy._calibrated` save/restore on `_games_before`
+  (`calibration_report.py:259-281`) — read it and follow its shape rather
+  than inventing one. A sport absent from `splits` contributes **no** games
+  to the fit, which is correct: a sport with too few games to split must not
+  leak its whole history into training.
 - Score the eval half per sport and report, per sport: eval n, effective n,
   model Brier, base-rate Brier (the train half's home-win rate), and 0.25.
 - `--min-eval` (default 40) below which a sport prints "not enough evaluation
