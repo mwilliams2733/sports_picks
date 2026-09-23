@@ -143,7 +143,12 @@ def test_store_odds_writes_to_the_dated_game(session):
                         "moneyline_away": 100, "spread_home": -1.5,
                         "spread_away": 1.5, "over_under": 8.5}],
     }]
-    _store_odds(session, "mlb", events)
+    # skip_started=False because this file is about WHICH game a price
+    # attaches to, not whether it was placeable. These fixtures are dated in
+    # the past on purpose -- they reproduce a specific production slate --
+    # and the started-game guard would drop every event before the matching
+    # under test ever ran.
+    _store_odds(session, "mlb", events, skip_started=False)
     from backend.models import Odds
     rows = session.query(Odds).all()
     assert len(rows) == 1

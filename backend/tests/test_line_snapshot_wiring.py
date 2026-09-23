@@ -18,7 +18,11 @@ from backend.database import get_engine, get_session
 from backend.models import Base, Game, LineSnapshot, Odds, Team
 from backend.pipeline.full_pipeline import _store_odds
 
-D20 = datetime.date(2026, 9, 20)
+#: Far enough ahead that the started-game guard in `_store_odds` keeps
+#: these events. A fixed past date would make every test here pass or fail
+#: for a reason that has nothing to do with snapshots.
+KICKOFF = (datetime.datetime.now(datetime.timezone.utc)
+           + datetime.timedelta(hours=3)).replace(tzinfo=None, microsecond=0)
 
 
 @pytest.fixture()
@@ -28,9 +32,9 @@ def session(tmp_path):
     s.add_all([Team(id=1, name="Buffalo Bills", abbreviation="BUF", sport="nfl"),
                Team(id=2, name="Miami Dolphins", abbreviation="MIA", sport="nfl")])
     s.flush()
-    s.add(Game(id=10, sport="nfl", season="2026-27", date=D20,
+    s.add(Game(id=10, sport="nfl", season="2026-27", date=KICKOFF.date(),
                status="scheduled", home_team_id=1, away_team_id=2,
-               start_time=datetime.datetime(2026, 9, 20, 17, 0)))
+               start_time=KICKOFF))
     s.commit()
     return s
 
@@ -38,7 +42,7 @@ def session(tmp_path):
 def _event(spread=-3.5, ml_home=-150, books=("draftkings",)):
     return [{
         "home_team": "Buffalo Bills", "away_team": "Miami Dolphins",
-        "commence_time": "2026-09-20T17:00:00Z",
+        "commence_time": KICKOFF.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "bookmakers": [{
             "key": b, "moneyline_home": ml_home, "moneyline_away": 130,
             "spread_home": spread, "spread_away": -spread, "over_under": 44.5,

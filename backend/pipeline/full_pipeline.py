@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from sqlalchemy.orm import Session
 from backend.config import season_label, seasons_config
 from backend.collectors.espn import CANCELED, ESPNCollector
-from backend.time_utils import et_date
+from backend.time_utils import et_date, game_start_utc
 from backend.collectors.odds_api import OddsAPICollector, redact_api_key
 from backend.collectors.budget import check_budget, record_api_call, BudgetStatus
 from backend.exceptions import BudgetExhaustedError
@@ -490,13 +490,31 @@ def _event_start(event: dict) -> datetime | None:
 
 
 def _store_odds(session: Session, sport: str, odds_data: list[dict],
-                skipped: frozenset[tuple[str, str]] | None = None) -> int:
+                skipped: frozenset[tuple[str, str]] | None = None,
+                *, skip_started: bool = True) -> int:
     """Store odds on the game each event was priced for.
 
     The return value counts bookmaker rows written, not events -- the log
     line calling it "events" has always been wrong.
+
+    ``skip_started`` refuses to price a game that has already kicked off.
+    The Odds API returns every event for a sport, including ones in progress,
+    so a fetch aimed at the late slate also re-priced games that had been
+    playing for hours -- replacing each one's last takeable quote with an
+    in-play number nobody could have bet. Measured 2026-09-23: one mlb fetch
+    touched 208 bookmaker rows, 80 of them on games already underway.
+
+    The guard is on game state, not window membership, because
+    ``fetch_odds_now`` and ``fetch_windowless_odds`` have no window and the
+    same invariant applies. A game with no ``start_time`` is priced: unknown
+    is not past, the convention ``generate_and_store_picks`` already uses,
+    and boxing and mma fixtures routinely have none.
+
+    Backfills opt out, matching ``generate_and_store_picks(skip_started=
+    False)``.
     """
     count = 0
+    started: list[int] = []
     for event in odds_data:
         game = _find_game_by_teams(
             session, sport, event["home_team"], event["away_team"],
@@ -523,6 +541,12 @@ def _store_odds(session: Session, sport: str, odds_data: list[dict],
                 " (skipped as speculative)" if expected else "",
             )
             continue
+
+        if skip_started:
+            start = game_start_utc(game)
+            if start is not None and start <= datetime.now(tz=timezone.utc):
+                started.append(game.id)
+                continue
 
         for bk in event["bookmakers"]:
             existing = session.query(Odds).filter(
@@ -557,6 +581,17 @@ def _store_odds(session: Session, sport: str, odds_data: list[dict],
             # run, because only it can see the previous price.
             record_snapshot(session, game.id, bk["key"], bk)
             count += 1
+
+    # One line with a count, not one per game: a full slate of late games
+    # would otherwise bury every other line in the run, and a message that
+    # always fires stops being read.
+    if started:
+        logger.info(
+            "%s: %d game(s) already underway were not re-priced (%s) -- their "
+            "last pre-game quote is kept rather than overwritten with an "
+            "in-play one", sport, len(started),
+            ", ".join(str(i) for i in started[:8])
+            + (", ..." if len(started) > 8 else ""))
 
     session.commit()
     return count
