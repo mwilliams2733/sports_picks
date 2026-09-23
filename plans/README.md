@@ -34,6 +34,39 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 012 | Prop projections have never seen recent form | P1 | M | 010, 013, 014 | **DONE 2026-09-18.** Tasks 1-3 landed; Task 4 measured in production: 26,843 game_log rows, 75 of 82 props graded, tier 5 **75.0%** vs tier 4 50.0% — but across **2 games** (effective n 19.5), so every tier is flagged unreliable. A partial run read 61.5% on the same props. |
 | 013 | Nobody asks ESPN about yesterday, so games never finalize | **P0** | M | — | **Tasks 1-2 DONE 2026-09-17** as `5603514` (3-day finalize-only lookback; ESPN_TEAM_SPORTS widened from nba/nfl). Task 3's catch-up script shipped as `1c75c11` and ran against a **copy only**: 250 of 334 finalized (nba 218/239, ncaab 21/81, mlb 11/14), 0 rows canceled. Production not yet caught up. |
 | 014 | ESPN dates are UTC, so every evening game is stored a day late | P1 | M | 013 — done | **DONE 2026-09-17** (`eddf502`, `a5f9201`, `e04fa24`, `822f5ef`): `Game.espn_id` + identity matching; 13 twin pairs merged; dates now Eastern via one shared `time_utils.et_date`. Found **9 games double-counted in the Elo replay** — replay moved 957 of 2098 ratings, max 20.64 pts. Task 4 obsolete (0 same-id duplicates remain). **Production untouched: apply backfill + merge BEFORE this code ingests there.** |
+| 015 | ncaab teams hold display names | P1 | M | — | **DONE 2026-09-19** in production; see `plans/HANDOFF.md`. |
+| 016 | One intercept for every sport | P1 | M | — | **DONE 2026-09-19** (`70b6f5e`, `f6832a8`, `616d3f5`). |
+| 017 | The digest ranks picks by win probability and refuses longshots | P1 | S | — | **DONE 2026-09-23** on `haiku`, reviewed: commit `2fb5d51` on branch `worktree-agent-ac908ca002c395f1e` (worktree `.claude/worktrees/agent-ac908ca002c395f1e`). 7 new tests, both mutation checks failed as required, full suite 1437 passed. **Not merged** — operator's call. |
+| 018 | The active MLB model reads the starting pitcher | P1 | M | — | **DONE 2026-09-23** on `sonnet`, reviewed: commit `fa31769` on branch `worktree-agent-a781964c1c35882a5`. 8 new tests, both mutation checks failed as required, full suite 1438 passed. **Not merged** — operator's call. |
+| 019 | The morning slate prices MLB with the day's starting pitchers | P1 | S | 018 (to have effect) | **DONE 2026-09-23** on `sonnet`, reviewed: commit `1d6936e` on branch `worktree-agent-a9a4a8c9981887223`. 4 new tests, mutation check failed as required, full suite 1434 passed. **Open after merge:** the next-morning `scheduler.log` check in Step 4 (needs deployment + scheduler restart). **Not merged** — operator's call. |
+| 020 | The email states what is measured, not an edge | P1 | S | 017 | **DONE 2026-09-23** on `sonnet`, reviewed: commit `65902f3` on branch `worktree-agent-ab526c82369e5971e`, which carries 017 as cherry-pick `4ec3073`. 12 new tests, both mutation checks failed as required, full suite 1449 passed. Dry run on 2026-09-21: header `MLB · last 30 days 16-21`, rows `Model 59% · Price 47%`. **Not merged** — operator's call. |
+
+> **2026-09-23 batch (017-020), planned against `84dc78c`.** A focused
+> audit of the pick logic and the digest, football and baseball first.
+> The digest was ranking by claimed edge, which is largest where the model
+> is most wrong: on the graded book, moneyline picks longer than +200 win
+> 16% (n=58) and favorites at -150 or shorter win 73% (n=15). The active
+> strategy never reads the MLB starting pitcher, and the morning slate
+> never fetches it. Order: 017 → 020 (both edit `selector.py`), and
+> 018 → 019 (019's effect is invisible until 018 lands). Baseline at
+> `84dc78c`: the full backend suite passes; run it before starting.
+> Each plan's Status block names the cheapest executor model that can run
+> it as written (`haiku` only where every edit is literal code; `sonnet`
+> wherever tests or edits are written from prose). Review of the diff stays
+> with the advisor session, on the most capable model.
+>
+> **Not planned from that audit, recorded so it is not re-audited:**
+> `CalibratedModel` fits one slope per feature across sports whose scales
+> differ (mean |run-diff gap| 2.15 for mlb against 8.78 points for nba;
+> net rating and pace are nba/ncaab-only and read 0 for football and
+> baseball). Real, HIGH confidence that it is wrong, MED that fixing it
+> moves the win rate; deferred until 018 lands, since it changes what the
+> MLB model would then be trained on. Two direction items, not defects:
+> blend with the de-vigged market as a model input (the shrinkage fit says
+> the model's weight against the price is 0.00 held out, so picks would
+> become rare and better), and football signal from players rather than
+> teams (the EPA experiment closed the team-rating door; QB status and
+> line movement via `line_snapshots` are the open ones).
 
 Current `master`: **674 backend tests passing**, 0 failed (360 at the start of
 the audit), verified by CI on Python **3.12 and 3.14**. Frontend: eslint 0/0,
