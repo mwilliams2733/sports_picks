@@ -20,6 +20,8 @@ SCOUT_LINE = ("2026-09-23 08:00:15 INFO:backend.pipeline.scheduler:"
               "MLB pitcher scores: 14 game(s), 28 stat row(s) recorded")
 SCOUT_LINE_ZERO = ("2026-09-23 08:00:15 INFO:backend.pipeline.scheduler:"
                     "MLB pitcher scores: 16 game(s), 0 stat row(s) recorded")
+SCOUT_LINE_CLAIMS_ROWS = ("2026-09-23 08:00:15 INFO:backend.pipeline.scheduler:"
+                          "MLB pitcher scores: 16 game(s), 32 stat row(s) recorded")
 YESTERDAY_SCOUT_LINE = ("2026-09-22 08:00:15 INFO:backend.pipeline.scheduler:"
                         "MLB pitcher scores: 12 game(s), 24 stat row(s) recorded")
 
@@ -89,6 +91,25 @@ def test_a_scout_line_reporting_zero_rows_is_not_an_alarm():
 
     assert result.outcome is Outcome.NO_STARTERS_ANNOUNCED
     assert result.ok is True
+
+
+def test_a_log_line_claiming_rows_that_do_not_exist_is_an_alarm():
+    """The rows are the measurable evidence; the log line is only a claim.
+
+    When they disagree, the rows win. A scout that logged "32 stat row(s)
+    recorded" but left zero rows behind for today did not simply fail to
+    run -- something removed what it wrote (e.g. a later
+    `drop_unknown_pitcher_rows --apply`). An operator reading
+    pitcher_health.log needs to see that distinction, not a generic "never
+    ran" that points them at the wrong half of the pipeline.
+    """
+    result = classify([SCOUT_LINE_CLAIMS_ROWS], TODAY, mlb_games_today=16,
+                      rows_today=[])
+
+    assert result.outcome is Outcome.SCOUT_NEVER_RAN
+    assert result.ok is False
+    assert "32" in result.detail
+    assert "none" in result.detail.lower() or "0" in result.detail
 
 
 def test_yesterdays_scout_line_is_not_todays():
