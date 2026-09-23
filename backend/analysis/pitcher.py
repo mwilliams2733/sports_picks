@@ -39,8 +39,17 @@ def pitcher_skill_score(era: float | None, k9: float | None) -> float:
     """Return a skill score in [0, 1] where 0.5 is league-average.
 
     Lower ERA -> higher score; higher K/9 -> higher score.
-    Missing inputs -> 0.5 (neutral) so MLB picks still generate when pitchers
-    haven't been announced.
+    Missing inputs -> 0.5, same as a genuinely league-average pitcher. No
+    production caller passes this function `None` any more:
+    `scheduler.fetch_pitcher_scores_for_date` emits `None` for a side with no
+    data instead of calling in here with `None`, because a 0.5 from this
+    function is indistinguishable from a real league-average starter, and the
+    downstream consumers (`ensemble.pitcher_logit_shift`,
+    `sport_specific._pitcher_score`, `strategy._build_factors`,
+    `scheduler._persist_pitcher_scores`) all use `None` to mean "unknown".
+    Picks still generate for an unannounced starter because each consumer
+    skips the pitcher term entirely on `None`, not because this function
+    hands them a neutral score.
     """
     if era is None and k9 is None:
         return 0.5
