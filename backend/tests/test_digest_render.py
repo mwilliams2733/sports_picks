@@ -151,3 +151,57 @@ def test_html_escapes_angle_bracket_in_pick_value():
     )
     _, html, _ = render_digest([section], date(2026, 9, 20))
     assert "&lt;1.5 Rebounds" in html
+
+
+def test_game_row_shows_model_and_price_not_edge():
+    section = DigestSection(
+        sport="nfl",
+        picks=[DigestPick(sport="nfl", matchup="Bills @ Chiefs", pick_value="HOME ML",
+                          odds=-110, confidence=5, edge_pct=8.1,
+                          rationale="", model_prob=0.64, price_prob=0.58)],
+        props=[],
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "Model 64%" in html
+    assert "Price 58%" in html
+    assert "Model 64%" in text
+    assert "Price 58%" in text
+    assert "8.1" not in html
+    assert "8.1" not in text
+
+
+def test_missing_probabilities_render_as_dash():
+    section = DigestSection(
+        sport="nfl",
+        picks=[DigestPick(sport="nfl", matchup="Bills @ Chiefs", pick_value="HOME ML",
+                          odds=-110, confidence=5, edge_pct=8.1,
+                          rationale="", model_prob=None, price_prob=None)],
+        props=[],
+    )
+    _, _, text = render_digest([section], date(2026, 9, 20))
+    assert "Model —" in text
+
+
+def test_section_header_shows_trailing_record():
+    section = DigestSection(
+        sport="nfl",
+        picks=[DigestPick(sport="nfl", matchup="Bills @ Chiefs", pick_value="HOME ML",
+                          odds=-110, confidence=5, edge_pct=8.1, rationale="")],
+        props=[],
+        record=(3, 2),
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "last 30 days 3-2" in html
+    assert "last 30 days 3-2" in text
+
+
+def test_section_without_record_has_no_record_text():
+    section = DigestSection(
+        sport="nfl",
+        picks=[DigestPick(sport="nfl", matchup="Bills @ Chiefs", pick_value="HOME ML",
+                          odds=-110, confidence=5, edge_pct=8.1, rationale="")],
+        props=[],
+        record=None,
+    )
+    _, _, text = render_digest([section], date(2026, 9, 20))
+    assert "last 30 days" not in text

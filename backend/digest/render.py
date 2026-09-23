@@ -26,6 +26,17 @@ def _label(sport: str) -> str:
     return SPORT_LABELS.get(sport, sport.upper())
 
 
+def _pct(p: float | None) -> str:
+    return "—" if p is None else f"{round(p * 100)}%"
+
+
+def _record(section: DigestSection) -> str:
+    if section.record is None:
+        return ""
+    w, l = section.record
+    return f"last 30 days {w}-{l}"
+
+
 def _count_phrase(n_picks: int, n_props: int, n_sports: int) -> str:
     """Describe what the body actually contains.
 
@@ -65,12 +76,16 @@ def render_digest(sections: list[DigestSection], target_date: date):
     text_lines = [f"TOP PICKS — {pretty}", ""]
 
     for section in sections:
+        record_text = _record(section)
+        record_html = f" &nbsp;·&nbsp; {record_text}" if record_text else ""
         rows.append(
             f'<tr><td style="{_FONT}padding:18px 0 6px 0;font-size:13px;'
             f'letter-spacing:.08em;text-transform:uppercase;color:#6b7280;">'
-            f'{_label(section.sport)}</td></tr>'
+            f'{_label(section.sport)}{record_html}</td></tr>'
         )
-        text_lines.append(f"-- {_label(section.sport)} --")
+        text_lines.append(
+            f"-- {_label(section.sport)} --" + (f" {record_text}" if record_text else "")
+        )
 
         for p in section.picks:
             rationale_html = (
@@ -82,10 +97,14 @@ def render_digest(sections: list[DigestSection], target_date: date):
                 f'<div style="{_FONT}font-size:15px;font-weight:600;color:#111827;">'
                 f'{_escape(p.pick_value)} <span style="font-weight:400;color:#6b7280;">({p.odds})</span></div>'
                 f'<div style="{_FONT}font-size:13px;color:#374151;padding-top:2px;">'
-                f'{_escape(p.matchup)} &nbsp;·&nbsp; {_stars(p.confidence)} &nbsp;·&nbsp; +{p.edge_pct}%</div>'
+                f'{_escape(p.matchup)} &nbsp;·&nbsp; {_stars(p.confidence)} &nbsp;·&nbsp; '
+                f'Model {_pct(p.model_prob)} &nbsp;·&nbsp; Price {_pct(p.price_prob)}</div>'
                 f'{rationale_html}</td></tr>'
             )
-            text_lines.append(f"  {p.pick_value} ({p.odds}) — {p.matchup} — {_stars(p.confidence)} +{p.edge_pct}%")
+            text_lines.append(
+                f"  {p.pick_value} ({p.odds}) — {p.matchup} — {_stars(p.confidence)} "
+                f"Model {_pct(p.model_prob)} / Price {_pct(p.price_prob)}"
+            )
             if p.rationale:
                 text_lines.append(f"      {p.rationale}")
 
@@ -96,11 +115,12 @@ def render_digest(sections: list[DigestSection], target_date: date):
             )
             text_lines.append("  Player props:")
             for p in section.props:
-                # No edge_pct here on purpose: a prop's edge is
+                # No claimed edge here on purpose: a prop's nominal edge is
                 # (prob - 0.5) * 200 and ignores the prop's price, while a
-                # game pick's edge is measured against the de-vigged market.
-                # Rendering both as "+X%" invites exactly the cross-scale
-                # comparison the selector's two-query separation prevents.
+                # game pick's model/price probabilities are measured against
+                # an actual quoted price. Rendering both the same way invites
+                # exactly the cross-scale comparison the selector's
+                # two-query separation prevents.
                 rows.append(
                     f'<tr><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;">'
                     f'<div style="{_FONT}font-size:14px;color:#111827;">'
@@ -125,9 +145,14 @@ def render_digest(sections: list[DigestSection], target_date: date):
         f'{count_phrase}</td></tr>'
         + "".join(rows)
         + f'<tr><td style="{_FONT}font-size:11px;color:#9ca3af;padding-top:18px;">'
-        f'Model output for research, not betting advice.</td></tr>'
+        f'Model output for research, not betting advice. "Model" is the '
+        f'model\'s win probability; "Price" is what the quoted price implies.'
+        f'</td></tr>'
         f'</table></td></tr></table></body></html>'
     )
 
-    text_lines.append("Model output for research, not betting advice.")
+    text_lines.append(
+        'Model output for research, not betting advice. "Model" is the '
+        'model\'s win probability; "Price" is what the quoted price implies.'
+    )
     return subject, html, "\n".join(text_lines)
