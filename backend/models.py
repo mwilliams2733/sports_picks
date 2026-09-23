@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 from sqlalchemy import (
-    Column, Integer, String, Float, Date, DateTime, ForeignKey, Boolean, Text
+    Column, Integer, String, Float, Date, DateTime, ForeignKey, Boolean, Text,
+    Index
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -137,6 +138,50 @@ class Odds(Base):
     over_price = Column(Integer, nullable=True)
     under_price = Column(Integer, nullable=True)
     timestamp = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
+
+class LineSnapshot(Base):
+    """One observed price for one bookmaker on one game, never overwritten.
+
+    `Odds` holds the CURRENT price and is upserted in place, so every quote
+    this project has seen except the latest is discarded. This table is the
+    series that upsert destroys: opening lines, line movement, and any
+    closing-line-value measurement all need the prices that came before.
+
+    Not named ``OddsSnapshot`` because `backend.data_types.OddsSnapshot` is
+    the in-memory dataclass handed to strategies, and two different things
+    under one name in one codebase is how the wrong one gets imported.
+
+    A row is appended only when a price DIFFERS from the latest row for the
+    same (game, bookmaker). An unchanged re-observation extends
+    ``last_seen_at`` instead, so a line that held for six hours is one row
+    that says so rather than six identical ones -- while still being
+    distinguishable from a line nobody watched. The price columns are
+    immutable; ``last_seen_at`` is the only field that ever changes.
+    """
+    __tablename__ = "line_snapshots"
+    id = Column(Integer, primary_key=True)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
+    bookmaker = Column(String, nullable=False)
+    moneyline_home = Column(Integer, nullable=True)
+    moneyline_away = Column(Integer, nullable=True)
+    spread_home = Column(Float, nullable=True)
+    spread_away = Column(Float, nullable=True)
+    over_under = Column(Float, nullable=True)
+    spread_home_price = Column(Integer, nullable=True)
+    spread_away_price = Column(Integer, nullable=True)
+    over_price = Column(Integer, nullable=True)
+    under_price = Column(Integer, nullable=True)
+    #: When this price was FIRST seen. The series is ordered by this.
+    captured_at = Column(DateTime, nullable=False,
+                         default=lambda: datetime.now(tz=timezone.utc))
+    #: When this price was most recently confirmed still on the board.
+    last_seen_at = Column(DateTime, nullable=False,
+                          default=lambda: datetime.now(tz=timezone.utc))
+
+    __table_args__ = (
+        Index("ix_line_snapshots_series", "game_id", "bookmaker", "captured_at"),
+    )
+
 
 class StrategyModel(Base):
     __tablename__ = "strategies"

@@ -5,7 +5,7 @@
 copy in ``pipeline/full_pipeline.py`` and ``backtesting/historical.py`` -- with
 the same defect in both.
 """
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 #: The timezone every US sports schedule in this project is expressed in.
@@ -51,3 +51,18 @@ def et_today() -> date:
     Anything that compares against ``Game.date`` must use this.
     """
     return datetime.now(ET).date()
+
+
+def game_start_utc(game) -> datetime | None:
+    """A game's kickoff as a timezone-aware UTC datetime, or None.
+
+    ``Game.start_time`` is stored naive because SQLite has no timezone type,
+    and the values written are UTC. Three call sites were each re-deriving
+    that -- ``skip_started``, ``_can_refresh`` and the snapshot close cutoff
+    -- so it lives here once. Returning None for a missing start_time keeps
+    the project-wide convention that unknown is not past.
+    """
+    start = getattr(game, "start_time", None)
+    if start is None:
+        return None
+    return start if start.tzinfo is not None else start.replace(tzinfo=timezone.utc)

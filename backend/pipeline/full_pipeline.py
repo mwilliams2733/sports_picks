@@ -9,6 +9,7 @@ from backend.time_utils import et_date
 from backend.collectors.odds_api import OddsAPICollector, redact_api_key
 from backend.collectors.budget import check_budget, record_api_call, BudgetStatus
 from backend.exceptions import BudgetExhaustedError
+from backend.analysis.line_snapshots import record_snapshot
 from backend.models import Team, Game, Odds, PlayerProp
 from backend.team_identity import ABBREVIATION_SPORTS, canonical_abbr
 
@@ -548,6 +549,13 @@ def _store_odds(session: Session, sport: str, odds_data: list[dict],
                     over_price=bk.get("over_price"),
                     under_price=bk.get("under_price"),
                 ))
+            # Beside the upsert, never instead of it. `Odds` stays the
+            # current-price cache every strategy reads; this appends the
+            # observation to the series that upsert destroys. Recorded for
+            # EVERY bookmaker row, including ones whose price did not move --
+            # `record_snapshot` decides whether that is a new row or a longer
+            # run, because only it can see the previous price.
+            record_snapshot(session, game.id, bk["key"], bk)
             count += 1
 
     session.commit()

@@ -16,7 +16,7 @@ from backend.analysis.confidence import get_thresholds
 from backend.analysis.kelly import (UNITS_PER_BANKROLL, fractional_kelly,
                                     sizing_fraction)
 from backend.analysis.recalibrator import EXPECTED_WIN_RATES
-from backend.time_utils import et_today
+from backend.time_utils import et_today, game_start_utc
 
 logger = logging.getLogger(__name__)
 
@@ -151,12 +151,9 @@ def generate_and_store_picks(session: Session, strategy_id: int,
         now = datetime.now(tz=timezone.utc)
         kept = []
         for g in games:
-            start = g.start_time
-            if start is not None:
-                if start.tzinfo is None:
-                    start = start.replace(tzinfo=timezone.utc)
-                if start <= now:
-                    continue
+            start = game_start_utc(g)
+            if start is not None and start <= now:
+                continue
             kept.append(g)
         if len(kept) != len(games):
             logger.info("Skipped %d game(s) already underway", len(games) - len(kept))
@@ -355,11 +352,9 @@ def _refreshable(existing: PickModel, game: Game, graded_pick_ids: set) -> bool:
     """
     if existing.id in graded_pick_ids:
         return False
-    if game.start_time is None:
+    start = game_start_utc(game)
+    if start is None:
         return True
-    start = game.start_time
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=timezone.utc)
     return start > datetime.now(timezone.utc)
 
 
