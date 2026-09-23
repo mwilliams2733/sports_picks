@@ -38,6 +38,12 @@ digest:
   # shorter win 73%. Picks past the ceiling are still generated and graded;
   # they are just not emailed. `null` disables the ceiling.
   max_odds: 150
+  # Optional. When set (e.g. 0.50), a sport whose trailing 30-day record is
+  # below this win rate on at least min_trailing_picks decided picks is left
+  # out of the email. Off by default: with five graded NFL picks a record
+  # is noise, and the reader can see the record in the header either way.
+  # min_trailing_win_pct: 0.50
+  # min_trailing_picks: 20
   from: "picks@example.com"   # placeholder -- must be a sender the transport accepts
   recipients:
     - "mwilliams2733@gmail.com"

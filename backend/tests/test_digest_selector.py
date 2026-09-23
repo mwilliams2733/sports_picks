@@ -1,8 +1,8 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 
 from backend.database import get_engine, get_session
-from backend.models import Base, Team, Game, StrategyModel, PickModel
+from backend.models import Base, Team, Game, StrategyModel, PickModel, PickResult
 from backend.digest.selector import select_digest
 
 SEASONS = {"nfl": {"start": "09-05", "end": "02-10"},
@@ -324,3 +324,119 @@ def test_ceiling_does_not_touch_props():
     sections = select_digest(s, d, ["nfl"], SEASONS)
     assert len(sections[0].props) == 1
     assert sections[0].picks == []
+
+
+def _grade(session, pick_id, result):
+    session.add(PickResult(pick_id=pick_id, result=result, payout=0.91 if result == "win" else 0.0))
+    session.commit()
+
+
+def _pick_ids(session, gid):
+    return [p.id for p in
+            session.query(PickModel).filter(PickModel.game_id == gid).order_by(PickModel.id).all()]
+
+
+def test_digest_pick_carries_model_and_price_probability():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 4.0, -150, 0.62)])
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    picks = sections[0].picks
+    assert picks[0].model_prob == 0.62
+    assert abs(picks[0].price_prob - 0.6) < 1e-9
+
+
+def test_missing_price_gives_no_price_probability():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 4.0, None, 0.55)])
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    assert sections[0].picks[0].price_prob is None
+
+
+def test_trailing_record_counts_decided_game_picks_only():
+    s = _session()
+    d = date(2026, 11, 1)
+    # Live pick for the section itself, on the target date -- never graded.
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(5, 9.0, -110, 0.6)])
+    # Game 10 days before d: three graded moneyline picks and one graded prop.
+    d_recent = d - timedelta(days=10)
+    _mk_priced(s, "nfl", 2, 3, 4, d_recent,
+               [(5, 9.0, -110, 0.6), (4, 8.0, -110, 0.55), (3, 5.0, -110, 0.52)])
+    s.add(PickModel(game_id=2, strategy_id=1, pick_type="prop",
+                    pick_value="Prop", confidence=4, edge_pct=10.0, odds_at_pick=-110))
+    s.commit()
+    ids = _pick_ids(s, 2)
+    _grade(s, ids[0], "win")
+    _grade(s, ids[1], "loss")
+    _grade(s, ids[2], "push")
+    _grade(s, ids[3], "win")  # the prop -- must not be counted
+    # Game 40 days before d: one graded win, outside the trailing window.
+    d_old = d - timedelta(days=40)
+    _mk_priced(s, "nfl", 3, 5, 6, d_old, [(5, 9.0, -110, 0.6)])
+    _grade(s, _pick_ids(s, 3)[0], "win")
+
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    assert sections[0].record == (1, 1)
+
+
+def test_no_graded_history_gives_no_record():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(5, 9.0, -110, 0.6)])
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    assert sections[0].record is None
+
+
+def test_trailing_record_excludes_today():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(5, 9.0, -110, 0.6)])
+    _mk_priced(s, "nfl", 2, 3, 4, d, [(5, 9.0, -110, 0.6)])
+    _grade(s, _pick_ids(s, 2)[0], "win")
+
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    assert sections[0].record is None
+
+
+def test_suppression_is_off_by_default():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(5, 9.0, -110, 0.6)])
+    d_recent = d - timedelta(days=5)
+    _mk_priced(s, "nfl", 2, 3, 4, d_recent,
+               [(5, 9.0, -110, 0.6)] * 25)
+    for pid in _pick_ids(s, 2):
+        _grade(s, pid, "loss")
+
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    assert len(sections) == 1
+
+
+def test_suppression_needs_the_minimum_sample():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(5, 9.0, -110, 0.6)])
+    d_recent = d - timedelta(days=5)
+    _mk_priced(s, "nfl", 2, 3, 4, d_recent, [(5, 9.0, -110, 0.6)] * 5)
+    for pid in _pick_ids(s, 2):
+        _grade(s, pid, "loss")
+
+    sections = select_digest(s, d, ["nfl"], SEASONS, min_trailing_win_pct=0.5)
+    assert len(sections) == 1
+
+
+def test_suppression_fires_below_the_floor():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(5, 9.0, -110, 0.6)])
+    d_recent = d - timedelta(days=5)
+    _mk_priced(s, "nfl", 2, 3, 4, d_recent, [(5, 9.0, -110, 0.6)] * 20)
+    ids = _pick_ids(s, 2)
+    for pid in ids[:15]:
+        _grade(s, pid, "loss")
+    for pid in ids[15:]:
+        _grade(s, pid, "win")
+
+    sections = select_digest(s, d, ["nfl"], SEASONS, min_trailing_win_pct=0.5)
+    assert sections == []

@@ -4,13 +4,17 @@ Pure with respect to time and network: the caller supplies the target date
 and a session. No sending, no formatting.
 """
 import json
+import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from backend.config import is_sport_in_season
 from backend.data_types import PickFactor
 from backend.analysis.rationale import render_rationale
-from backend.models import Game, PickModel, Team
+from backend.analysis.odds_utils import InvalidOddsError, american_to_implied_prob
+from backend.models import Game, PickModel, PickResult, Team
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -22,6 +26,8 @@ class DigestPick:
     confidence: int
     edge_pct: float
     rationale: str
+    model_prob: float | None = None
+    price_prob: float | None = None
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,47 @@ class DigestSection:
     sport: str
     picks: list[DigestPick]
     props: list[DigestPick]
+    record: tuple[int, int] | None = None   # (wins, losses) over the trailing window
+
+
+def _price_prob(odds: int | None) -> float | None:
+    """What the quoted price implies, vig included, or None without a price.
+
+    Raw rather than de-vigged on purpose: the email shows one side, and a
+    reader can check a raw implied probability against the price by hand.
+    """
+    if odds is None:
+        return None
+    try:
+        return american_to_implied_prob(odds)
+    except InvalidOddsError:
+        return None
+
+
+TRAILING_DAYS = 30
+
+
+def trailing_record(session, sport: str, target_date, days: int = TRAILING_DAYS):
+    """(wins, losses) for this sport's graded game picks in the last `days`.
+
+    Decided results only: a push is neither. Props are excluded because they
+    are graded on a different scale and listed separately. None when nothing
+    has been graded, which is different from 0-0 -- a sport with no history
+    must not print a record.
+    """
+    cutoff = target_date - timedelta(days=days)
+    rows = (session.query(PickResult.result)
+            .join(PickModel, PickModel.id == PickResult.pick_id)
+            .join(Game, Game.id == PickModel.game_id)
+            .filter(Game.sport == sport,
+                    Game.date >= cutoff, Game.date < target_date,
+                    PickModel.pick_type != "prop",
+                    PickResult.result.in_(("win", "loss")))
+            .all())
+    if not rows:
+        return None
+    wins = sum(1 for (r,) in rows if r == "win")
+    return wins, len(rows) - wins
 
 
 def _matchup(session, game: Game) -> str:
@@ -93,7 +140,9 @@ def _recency(pick: PickModel) -> tuple:
 
 
 def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
-                  max_odds: int | None = 150):
+                  max_odds: int | None = 150,
+                  min_trailing_win_pct: float | None = None,
+                  min_trailing_picks: int = 20):
     """Return one DigestSection per active sport that has something to show.
 
     Game picks are filtered by a price ceiling to avoid emailing longshots that
@@ -148,6 +197,10 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
                      if p.odds_at_pick is None or p.odds_at_pick <= max_odds]
 
         def _pick_sort_key(p):
+            # start_time is nullable, and stored rows may be naive or aware.
+            # Comparing a datetime to a date, or a naive to an aware datetime,
+            # raises TypeError mid-sort — normalize to naive and push missing
+            # start times to the end.
             st = games_by_id[p.game_id].start_time
             when = st.replace(tzinfo=None) if st is not None else datetime.max
             # Win probability first. Confidence is a threshold on edge, and
@@ -169,6 +222,8 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
                 confidence=p.confidence,
                 edge_pct=round(p.edge_pct or 0.0, 1),
                 rationale=_rationale_for(session, p, games_by_id[p.game_id]),
+                model_prob=p.model_prob,
+                price_prob=_price_prob(p.odds_at_pick),
             )
             for p in picks[:max_per_sport]
         ]
@@ -198,6 +253,17 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
 
         if not digest_picks and not digest_props:
             continue
-        sections.append(DigestSection(sport=sport, picks=digest_picks, props=digest_props))
+
+        record = trailing_record(session, sport, target_date)
+
+        if (min_trailing_win_pct is not None and record is not None
+                and sum(record) >= min_trailing_picks
+                and record[0] / sum(record) < min_trailing_win_pct):
+            logger.info("Digest: %s suppressed, trailing %d-%d below %.0f%%",
+                        sport, record[0], record[1], min_trailing_win_pct * 100)
+            continue
+
+        sections.append(DigestSection(sport=sport, picks=digest_picks, props=digest_props,
+                                      record=record))
 
     return sections
