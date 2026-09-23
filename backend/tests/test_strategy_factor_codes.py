@@ -75,7 +75,8 @@ def test_the_fixture_really_fires_every_code():
     (RecentFormStrategy, frozenset({"recent_form"})),
     (ValueOnlyStrategy, frozenset({"rating_gap", "recent_form", "net_rating"})),
     (EnsembleStrategy, frozenset({"rating_gap", "recent_form", "net_rating",
-                                  "schedule_fatigue", "lookahead_spot"})),
+                                  "schedule_fatigue", "lookahead_spot",
+                                  "pitcher_edge"})),
     (SportSpecificStrategy, ALL_CODES),
     (CombatSportsStrategy, frozenset()),
 ])

@@ -1,4 +1,5 @@
 import logging
+import math
 
 import numpy as np
 from scipy.stats import norm
@@ -80,6 +81,46 @@ DEFAULT_MAX_EDGE = 20.0
 #: different k; both argue that the spread model is weak, which the report
 #: says plainly.
 MARGIN_SHRINKAGE_K = 5.0
+
+#: Logit shift per unit of starting-pitcher skill difference, MLB only.
+#:
+#: `pitcher_skill_score` maps ERA/K9 to [0, 1] with 0.5 at league average:
+#: an ace (ERA 2.50) sits near 0.76, a replacement starter (ERA 5.50) near
+#: 0.26. At weight 1.0 an ace against an average starter (+0.26) moves
+#: P(home) from 0.50 to about 0.565, and ace against replacement (+0.50)
+#: to about 0.62. Those are the right order of magnitude for how the
+#: market prices a starter, and deliberately far smaller than the 45%
+#: weight `SportSpecificStrategy` gives the same signal.
+#:
+#: A PRIOR, not a measurement. No table stores historical pitcher scores,
+#: so this cannot be fitted from results yet. Re-fit it once they are
+#: persisted; until then do not tune it by hand against the live book.
+PITCHER_LOGIT_WEIGHT = 1.0
+
+
+def _logit(p: float) -> float:
+    p = min(max(p, 1e-6), 1 - 1e-6)
+    return math.log(p / (1 - p))
+
+
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def pitcher_logit_shift(game: GameData) -> float:
+    """Logit adjustment to P(home win) from the two starting pitchers.
+
+    Zero unless the game is MLB and BOTH scores are known. One missing
+    starter is unknown, not average: shifting on half the matchup would
+    price an announced ace against a phantom.
+    """
+    if game.sport != "mlb":
+        return 0.0
+    h = game.home_stats.pitcher_skill_score
+    a = game.away_stats.pitcher_skill_score
+    if h is None or a is None:
+        return 0.0
+    return PITCHER_LOGIT_WEIGHT * (h - a)
 
 
 def shrink_margin(point_diff: float, games: int) -> float:
@@ -172,8 +213,11 @@ class EnsembleStrategy(Strategy):
     # adjustments directly, over a base probability that reads point_diff
     # ("recent_form"), elo_rating ("rating_gap") and off-def net
     # ("net_rating") — via LightGBM's extract_features, the logistic
-    # CalibratedModel, or _fallback_probability. Pitcher scores are never
-    # read on any of those paths.
+    # CalibratedModel, or _fallback_probability. The MLB pitcher shift in
+    # _calibrated_probability reads pitcher_skill_score directly, applied
+    # after the base probability via pitcher_logit_shift; _build_factors
+    # only emits "pitcher_edge" when both scores are present, which is the
+    # same condition pitcher_logit_shift requires.
     #
     # rest_advantage is deliberately EXCLUDED: rest_days only reaches the
     # model through extract_features, i.e. only when a LightGBM or logistic
@@ -184,7 +228,7 @@ class EnsembleStrategy(Strategy):
     # which path ran.
     FACTOR_CODES = frozenset({
         "rating_gap", "recent_form", "net_rating",
-        "schedule_fatigue", "lookahead_spot",
+        "schedule_fatigue", "lookahead_spot", "pitcher_edge",
     })
 
     def __init__(self, name: str, config: dict, thresholds: dict | None = None):
@@ -374,6 +418,15 @@ class EnsembleStrategy(Strategy):
             home_prob = self._lgbm_model.home_win_prob(np.array([feature_array]))
         else:
             home_prob = self._legacy_calibrated_probability(game)
+
+        # Starting pitcher, MLB only. Applied in logit space so the shift is
+        # symmetric around the base probability and cannot be flattened by
+        # the clamp below on one side only. The base model never sees the
+        # pitcher: nothing stores historical scores to train on, so this is
+        # a post-hoc term like the two schedule adjustments that follow.
+        shift = pitcher_logit_shift(game)
+        if shift:
+            home_prob = _sigmoid(_logit(home_prob) + shift)
 
         # Schedule adjustments
         if game.home_stats.is_schedule_fatigued:
