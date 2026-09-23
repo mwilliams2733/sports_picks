@@ -24,6 +24,7 @@ __pycache__/
 codebase_export.txt
 config.yaml
 digest_health.log
+digest_health.log.*
 digest_preview.html
 dist/
 node_modules/

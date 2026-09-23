@@ -49,6 +49,14 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 DEFAULT_LOG = os.path.join(REPO, "scheduler.log")
 
+#: Where this script records its own verdicts.
+HEALTH_LOG = os.path.join(REPO, "digest_health.log")
+
+#: Rotate the health log past this size, keeping KEEP older generations.
+#: At roughly 400 bytes an entry that is over a year per file.
+MAX_BYTES = 128 * 1024
+KEEP = 3
+
 _SENT_RE = re.compile(r"Digest sent to (\d+) recipient")
 _EMPTY_RE = re.compile(r"Digest for (\d{4}-\d{2}-\d{2}) is empty")
 _SLATE_RE = re.compile(r"Morning slate for (\d{4}-\d{2}-\d{2}): (.+?)\s*$")
@@ -56,6 +64,45 @@ _SLATE_RE = re.compile(r"Morning slate for (\d{4}-\d{2}-\d{2}): (.+?)\s*$")
 
 #: Hour (ET) the digest job fires. Mirrors config digest.send_hour_et.
 DEFAULT_SEND_HOUR_ET = 11
+
+
+def rotate(path: str, *, max_bytes: int = MAX_BYTES, keep: int = KEEP) -> None:
+    """Move `path` aside once it exceeds `max_bytes`, keeping `keep` older ones.
+
+    Generations shift down: .2 -> .3, .1 -> .2, current -> .1, and only the
+    generation past `keep` is removed.
+
+    `start_scheduler.ps1` rotates scheduler.log to a single .prev, so every
+    restart destroys the previous one -- usually the log covering whatever is
+    being investigated. A health record exists to answer "has this failed
+    before?", which one generation cannot do, so this keeps several and drops
+    only the oldest.
+    """
+    if not os.path.exists(path) or os.path.getsize(path) < max_bytes:
+        return
+
+    oldest = f"{path}.{keep}"
+    if os.path.exists(oldest):
+        os.remove(oldest)
+    # Downwards, so a generation is never overwritten before it has moved.
+    for n in range(keep - 1, 0, -1):
+        src = f"{path}.{n}"
+        if os.path.exists(src):
+            os.replace(src, f"{path}.{n + 1}")
+    os.replace(path, f"{path}.1")
+
+
+def append_entry(path: str, body: str, *, exit_code: int = 0,
+                 max_bytes: int = MAX_BYTES, keep: int = KEEP) -> None:
+    """Append one dated entry, rotating first if the log has grown.
+
+    Rotation happens here rather than on a schedule of its own, so there is
+    no way to write to an unrotated log.
+    """
+    rotate(path, max_bytes=max_bytes, keep=keep)
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(f"===== {stamp} (exit {exit_code}) =====\n{body}\n")
 
 
 class Outcome(enum.Enum):
@@ -185,6 +232,8 @@ def main(argv=None) -> int:
     ap.add_argument("--db", default=os.path.join(REPO, "sports_picks.db"))
     ap.add_argument("--date", help="ISO date. Defaults to today in ET.")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--health-log", default=HEALTH_LOG,
+                    help="Where to append the verdict. '' disables.")
     args = ap.parse_args(argv)
 
     if args.date:
@@ -193,12 +242,21 @@ def main(argv=None) -> int:
         from backend.time_utils import et_today
         target = et_today()
 
+    def _emit(text: str, code: int) -> int:
+        print(text)
+        if args.health_log:
+            try:
+                append_entry(args.health_log, text, exit_code=code)
+            except OSError as e:
+                # Never let the record-keeping fail the check itself.
+                print(f"(could not write {args.health_log}: {type(e).__name__})")
+        return code
+
     try:
         with open(args.log, encoding="utf-8", errors="replace") as fh:
             lines = fh.readlines()
     except OSError as e:
-        print(f"CANNOT READ LOG {args.log}: {type(e).__name__}")
-        return 1
+        return _emit(f"CANNOT READ LOG {args.log}: {type(e).__name__}", 1)
 
     from backend.time_utils import ET
     now_et = datetime.datetime.now(tz=ET)
@@ -206,18 +264,20 @@ def main(argv=None) -> int:
                       et_hour=now_et.hour if now_et.date() == target else None)
 
     if args.json:
-        print(json.dumps({"date": target.isoformat(),
-                          "outcome": result.outcome.value, "ok": result.ok,
-                          "slate": result.slate, "picks_now": result.picks_now,
-                          "detail": result.detail}, indent=2))
+        report = json.dumps({"date": target.isoformat(),
+                             "outcome": result.outcome.value, "ok": result.ok,
+                             "slate": result.slate,
+                             "picks_now": result.picks_now,
+                             "detail": result.detail}, indent=2)
     else:
-        print(f"[{target}] {'OK' if result.ok else 'PROBLEM'}: "
-              f"{result.outcome.value}")
-        print(f"  morning slate : "
-              f"{result.slate if result.slate is not None else '(line absent)'}")
-        print(f"  picks for today now: {result.picks_now}")
-        print(f"  {result.detail}")
-    return result.exit_code
+        slate = result.slate if result.slate is not None else "(line absent)"
+        report = "\n".join([
+            f"[{target}] {'OK' if result.ok else 'PROBLEM'}: "
+            f"{result.outcome.value}",
+            f"  morning slate : {slate}",
+            f"  picks for today now: {result.picks_now}",
+            f"  {result.detail}"])
+    return _emit(report, result.exit_code)
 
 
 if __name__ == "__main__":

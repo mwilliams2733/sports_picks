@@ -11,10 +11,16 @@
     machine is on Arizona time, which does not shift while Eastern does. The
     check reads the traces of both the 8am ET scout and the 11am ET send.
 
-    Output is APPENDED to digest_health.log, one run per line group, so a
-    week of mornings can be read at a glance. The file is never truncated --
-    a health record that overwrites itself cannot show a pattern, and "it
-    broke last Thursday too" is the useful observation.
+    The PYTHON side appends the verdict to digest_health.log and rotates it
+    past 128 KB, keeping 3 older generations. Rotation lives with the write
+    so there is no way to append to an unrotated log, and it keeps several
+    generations rather than the single .prev start_scheduler.ps1 uses -- a
+    health record exists to answer "has this failed before?", which one
+    generation cannot do.
+
+    This script therefore does NOT write the log itself; a second writer
+    would double every entry. It only catches the case Python cannot report
+    on: the interpreter failing to start at all.
 
     The exit code is the real signal: 0 healthy, 1 not. Task Scheduler stores
     it as LastTaskResult, so:
@@ -38,15 +44,21 @@ if (-not (Test-Path $Python)) { throw "interpreter missing: $Python" }
 
 Set-Location $Repo
 
-# 2>&1 so a traceback lands in the health log rather than vanishing: a check
-# that fails silently is worse than no check, because its silence reads as
-# health.
+# 2>&1 so a traceback is captured rather than vanishing: a check that fails
+# silently is worse than no check, because its silence reads as health.
 $output = & $Python -m backend.scripts.check_digest 2>&1
 $code = $LASTEXITCODE
 
-$stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-Add-Content -Path $Log -Value "===== $stamp (exit $code) ====="
-Add-Content -Path $Log -Value $output
-
 Write-Output $output
+
+# Python writes its own verdict. It can only fail to do so if it never got
+# far enough to try -- a broken venv, a missing module -- and that case has
+# to leave a trace too, or a dead check looks exactly like a quiet one.
+if ($code -ne 0 -and ($output -join "`n") -notmatch '\[\d{4}-\d{2}-\d{2}\]') {
+    $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    Add-Content -Path $Log -Value "===== $stamp (exit $code) ====="
+    Add-Content -Path $Log -Value "LAUNCH FAILED -- python produced no verdict:"
+    Add-Content -Path $Log -Value $output
+}
+
 exit $code
