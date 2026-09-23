@@ -35,6 +35,7 @@ digest:
   max_per_sport: 5
   from: "picks@example.com"   # placeholder -- must be a sender the transport accepts
   recipients:
+    - "mwilliams2733@gmail.com"
     - "mlwilliams1236@gmail.com"
-    - "atlasinvestories2093@gmail.com"
+    - "atlasinventories2093@gmail.com"
     - "davidc1205@gmail.com"
