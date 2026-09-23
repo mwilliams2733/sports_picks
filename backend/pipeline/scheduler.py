@@ -647,17 +647,18 @@ def grade_pending_picks(session) -> dict:
             "paper": paper_graded}
 
 
-async def fetch_pitcher_scores_for_date(target_date) -> dict[tuple[str, str], dict[str, float]]:
+async def fetch_pitcher_scores_for_date(target_date) -> dict[tuple[str, str], dict[str, float | None]]:
     """Return {(home_abbr, away_abbr): {'home': score, 'away': score}} for today's MLB games.
 
     Keying by team abbreviation tuple keeps the upstream MLB game pk out of our
     internal data model — the caller translates the tuple to Game.id by querying
-    the local DB. Missing pitchers (not yet announced) get neutral 0.5 scores.
+    the local DB. A side with no announced starter (or no recent stats for one)
+    gets `None`, not a neutral 0.5 — see `_score` below for why.
     """
     from backend.collectors.mlb_stats import MLBStatsCollector
     from backend.analysis.pitcher import pitcher_skill_score
     collector = MLBStatsCollector()
-    out: dict[tuple[str, str], dict[str, float]] = {}
+    out: dict[tuple[str, str], dict[str, float | None]] = {}
     skipped = 0
     try:
         games = await collector.fetch_schedule(target_date)
@@ -675,16 +676,27 @@ async def fetch_pitcher_scores_for_date(target_date) -> dict[tuple[str, str], di
             away_id = g.get("away_probable_pitcher_id")
             home_stats = await collector.fetch_pitcher_recent(home_id, season=target_date.year) if home_id else None
             away_stats = await collector.fetch_pitcher_recent(away_id, season=target_date.year) if away_id else None
-            out[(home_abbr, away_abbr)] = {
-                "home": pitcher_skill_score(
-                    era=home_stats["era_recent"] if home_stats else None,
-                    k9=home_stats["k9_recent"] if home_stats else None,
-                ),
-                "away": pitcher_skill_score(
-                    era=away_stats["era_recent"] if away_stats else None,
-                    k9=away_stats["k9_recent"] if away_stats else None,
-                ),
-            }
+
+            def _score(stats):
+                """The side's skill score, or None when no starter is known.
+
+                None, not 0.5: `pitcher_skill_score` returns 0.5 both for a
+                league-average pitcher and for one it has no data on, and the
+                four consumers downstream all branch on None to mean
+                "unknown". Substituting 0.5 here made every one of those
+                branches dead, so a game with ONE announced starter priced
+                the known pitcher against a phantom average one -- which is
+                the case `ensemble.pitcher_logit_shift` documents itself as
+                preventing. Measured 2026-09-23, the first day these were
+                persisted: 4 of 32 stored rows were exactly 0.5.
+                """
+                if stats is None:
+                    return None
+                return pitcher_skill_score(era=stats["era_recent"],
+                                           k9=stats["k9_recent"])
+
+            out[(home_abbr, away_abbr)] = {"home": _score(home_stats),
+                                           "away": _score(away_stats)}
     finally:
         await collector.close()
     if skipped:
