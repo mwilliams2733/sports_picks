@@ -173,6 +173,57 @@ def slate_sports(session, sports, target_date) -> list[str]:
     return [s for s in sports if s in with_games]
 
 
+#: Stat type under which a start's pitcher skill score is stored.
+#:
+#: Written here rather than by `pipeline.team_stats.compute_team_stats`,
+#: which derives its stats from completed games. This one is only knowable
+#: BEFORE the game, from the probable-pitcher feed, so it is recorded at the
+#: moment a pick is priced on it. Deliberately NOT added to
+#: COMPUTED_STAT_TYPES: that tuple is the vocabulary `compute_team_stats`
+#: emits, and this is not one of them.
+#:
+#: Why it exists at all: the pitcher term shipped on 2026-09-23 shifts every
+#: MLB probability, and until these rows exist its effect cannot be measured
+#: -- the score was fetched, used, and thrown away, so no past pick can be
+#: re-scored against the starter it was priced on.
+PITCHER_STAT_TYPE = "pitcher_skill_score"
+
+
+def _persist_pitcher_scores(session, scores: dict[int, dict[str, float]]) -> int:
+    """Record each game's two starter scores. Returns rows written.
+
+    Best-effort and never raises: failing to record a measurement input must
+    not cost the day's picks, which is what the caller is really doing.
+    """
+    from backend.models import Game
+    from backend.pipeline.team_stats import _upsert_stats
+
+    written = 0
+    try:
+        for game_id, sides in scores.items():
+            game = session.get(Game, game_id)
+            if game is None:
+                continue
+            for side, team_id in (("home", game.home_team_id),
+                                  ("away", game.away_team_id)):
+                value = sides.get(side)
+                if value is None:
+                    continue
+                written += _upsert_stats(session, game_id, team_id,
+                                         {PITCHER_STAT_TYPE: float(value)})
+        session.commit()
+    except Exception:
+        logger.exception("Could not persist pitcher scores; picks continue")
+        try:
+            session.rollback()
+        except Exception:
+            # A session that could not commit may also be unable to roll
+            # back (e.g. a test double with neither method) -- the contract
+            # is "never raises", not "never leaves the session dirty".
+            pass
+    return written
+
+
 def mlb_pitcher_scores(session, today) -> dict[int, dict[str, float]] | None:
     """Today's probable-pitcher skill scores keyed by MLB game id, or None.
 
@@ -186,7 +237,10 @@ def mlb_pitcher_scores(session, today) -> dict[int, dict[str, float]] | None:
     """
     try:
         scores_by_abbr = asyncio.run(fetch_pitcher_scores_for_date(today))
-        return _remap_pitcher_scores_to_game_ids(session, scores_by_abbr, today)
+        scores = _remap_pitcher_scores_to_game_ids(session, scores_by_abbr, today)
+        logger.info("MLB pitcher scores: %d game(s), %d stat row(s) recorded",
+                    len(scores), _persist_pitcher_scores(session, scores))
+        return scores
     except Exception as exc:
         logger.warning(
             "MLB pitcher fetch failed (%s); proceeding with neutral pitcher scores", exc)
