@@ -233,7 +233,33 @@ def _stat_value(stats: list[TeamStat], stat_type: str) -> float | None:
 
 
 class CalibratedModel:
-    """Logistic regression model trained on historical game outcomes."""
+    """Logistic regression model trained on historical game outcomes.
+
+    One slope per feature is shared across every sport, BY MEASUREMENT, not
+    by oversight (plan 021, 2026-09-23). The proposal was to give each sport
+    its own slopes, or to standardize each feature within sport, on the
+    theory that the five difference features live on scales that differ by
+    up to a factor of eight across sports. Both variants were fitted against
+    the production database on a 70/30 time split taken WITHIN each sport
+    (the per-sport home-advantage one-hot from `build_feature_row` left in
+    place, so the slopes were the only thing under test). Out-of-sample
+    Brier, lower is better::
+
+        sport   eval n   effective n   pooled (today)   standardized   per-sport slopes
+        mlb     45       29.8          0.2494           0.2784         too few to fit
+        nba     375      291.9         0.1692           0.1704         0.1736
+        ncaaf   79       40.8          0.1729           0.1635         0.1772
+        nfl     352      302.2         0.2305           0.2313         0.2341
+
+    Per-sport slopes were worse in every sport that could support them.
+    Standardization was worse in three of four sports and better only in
+    ncaaf, at an effective n of 40.8. The pooled fit stays.
+
+    Re-run `backend.analysis.sport_signal_report` before revisiting this --
+    it answers, per sport, whether the model beats a base-rate null on the
+    current data -- and update the numbers above if the picture has changed
+    enough to be worth re-measuring the slopes question.
+    """
 
     def __init__(self) -> None:
         self.model: LogisticRegression | None = None
