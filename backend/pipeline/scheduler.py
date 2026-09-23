@@ -173,6 +173,26 @@ def slate_sports(session, sports, target_date) -> list[str]:
     return [s for s in sports if s in with_games]
 
 
+def mlb_pitcher_scores(session, today) -> dict[int, dict[str, float]] | None:
+    """Today's probable-pitcher skill scores keyed by MLB game id, or None.
+
+    The one place the pitcher fetch is wired, so the morning slate and the
+    pre-game window price the same starters. Until this existed only the
+    window fetched them, and the 11 ET digest -- which reads the morning
+    picks -- went out priced on a neutral starter every day.
+
+    None on any failure, logged: a dead MLB Stats API must not cost the
+    odds fetch or the picks, only the pitcher term.
+    """
+    try:
+        scores_by_abbr = asyncio.run(fetch_pitcher_scores_for_date(today))
+        return _remap_pitcher_scores_to_game_ids(session, scores_by_abbr, today)
+    except Exception as exc:
+        logger.warning(
+            "MLB pitcher fetch failed (%s); proceeding with neutral pitcher scores", exc)
+        return None
+
+
 def fetch_odds_and_pick(config, engine, sports) -> None:
     """Fetch odds and generate picks for a list of sports, now.
 
@@ -210,8 +230,14 @@ def fetch_odds_and_pick(config, engine, sports) -> None:
             StrategyModel.strategy_type == "game",
         ).first()
         if strategy is not None:
+            today = et_today()
+            # The slate is what the 11 ET digest reads. Without the starters
+            # here, every MLB pick in the email priced a neutral pitcher.
+            pitcher_scores = (mlb_pitcher_scores(session, today)
+                              if "mlb" in sports else None)
             count = generate_and_store_picks(
-                session, strategy.id, et_today(), sports=tuple(sports))
+                session, strategy.id, today, sports=tuple(sports),
+                pitcher_scores=pitcher_scores)
             logger.info("Generated %d picks for %s", count, ", ".join(sports))
     except Exception:
         logger.exception("Odds fetch failed for %s", ", ".join(sports))
@@ -434,16 +460,7 @@ def _run_window(config, engine, sport: str, window: dict):
             StrategyModel.is_active == True, StrategyModel.strategy_type == "game",
         ).first()
         if game_strategy:
-            pitcher_scores = None
-            if sport == "mlb":
-                try:
-                    scores_by_abbr = asyncio.run(fetch_pitcher_scores_for_date(today))
-                    pitcher_scores = _remap_pitcher_scores_to_game_ids(session, scores_by_abbr, today)
-                except Exception as exc:
-                    logger.warning(
-                        "MLB pitcher fetch failed (%s); proceeding with neutral pitcher scores", exc
-                    )
-                    pitcher_scores = None
+            pitcher_scores = mlb_pitcher_scores(session, today) if sport == "mlb" else None
             count = generate_and_store_picks(session, game_strategy.id, today, pitcher_scores=pitcher_scores)
             logger.info(f"Generated {count} game picks")
         prop_strategy = session.query(StrategyModel).filter(

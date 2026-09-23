@@ -63,7 +63,7 @@ class _FakeSession:
 
 @pytest.fixture()
 def calls(monkeypatch):
-    seen = {"odds": [], "picks": []}
+    seen = {"odds": [], "picks": [], "pitchers": []}
     monkeypatch.setattr(sch, "get_session", lambda engine: _FakeSession())
 
     async def fake_odds(session, sports, api_key, budget=None):
@@ -72,11 +72,29 @@ def calls(monkeypatch):
 
     def fake_picks(session, strategy_id, target_date, **kw):
         seen["picks"].append(tuple(kw.get("sports") or ()))
+        seen["pitchers"].append(kw.get("pitcher_scores"))
         return 0
 
     monkeypatch.setattr(sch, "fetch_and_store_odds", fake_odds)
     monkeypatch.setattr(sch, "generate_and_store_picks", fake_picks)
     return seen
+
+
+@pytest.fixture()
+def pitcher_fetch(monkeypatch):
+    """Fake the MLB Stats API round trip; records whether it was asked."""
+    state = {"asked": 0, "raise": False}
+
+    async def fake_fetch(target_date):
+        state["asked"] += 1
+        if state["raise"]:
+            raise RuntimeError("mlb api down")
+        return {("NYY", "BOS"): {"home": 0.7, "away": 0.4}}
+
+    monkeypatch.setattr(sch, "fetch_pitcher_scores_for_date", fake_fetch)
+    monkeypatch.setattr(sch, "_remap_pitcher_scores_to_game_ids",
+                        lambda session, by_abbr, today: {101: by_abbr[("NYY", "BOS")]})
+    return state
 
 
 CONFIG = {"odds_api_key": "k", "seasons": {}}
@@ -166,6 +184,40 @@ def test_picks_are_still_generated_when_the_odds_call_returns_nothing(calls):
     sch.fetch_odds_and_pick(CONFIG, object(), ["mlb"])
 
     assert calls["picks"] == [("mlb",)]
+
+
+# --- the slate prices MLB with the day's starters --------------------------
+
+def test_slate_with_mlb_passes_pitcher_scores(calls, pitcher_fetch):
+    sch.fetch_odds_and_pick(CONFIG, object(), ["mlb"])
+
+    assert pitcher_fetch["asked"] == 1
+    assert calls["pitchers"] == [{101: {"home": 0.7, "away": 0.4}}]
+
+
+def test_slate_without_mlb_does_not_ask_for_pitchers(calls, pitcher_fetch):
+    sch.fetch_odds_and_pick(CONFIG, object(), ["nfl"])
+
+    assert pitcher_fetch["asked"] == 0
+    assert calls["pitchers"] == [None]
+
+
+def test_pitcher_fetch_failure_still_generates_picks(calls, pitcher_fetch):
+    pitcher_fetch["raise"] = True
+    sch.fetch_odds_and_pick(CONFIG, object(), ["mlb", "nfl"])
+
+    assert calls["picks"] == [("mlb", "nfl")]
+    assert calls["pitchers"] == [None]
+
+
+def test_window_and_slate_share_one_helper():
+    """Structural guard for the derive-don't-duplicate rule: only one place
+    in this file may call the pitcher fetch directly."""
+    import inspect
+    import re
+
+    src = inspect.getsource(sch)
+    assert len(re.findall(r"asyncio\.run\(fetch_pitcher_scores_for_date", src)) == 1
 
 
 # --- the scout must actually call it --------------------------------------
