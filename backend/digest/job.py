@@ -35,6 +35,7 @@ def send_daily_digest(config: dict, engine, target_date=None) -> dict:
             cfg.get("sports", ["ncaaf", "nfl", "nba", "mlb"]),
             config.get("seasons", {}),
             max_per_sport=cfg.get("max_per_sport", 5),
+            max_odds=cfg.get("max_odds", 150),
         )
         result["sections"] = len(sections)
         result["picks"] = sum(len(s.picks) for s in sections)

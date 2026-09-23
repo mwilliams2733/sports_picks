@@ -33,6 +33,11 @@ digest:
   send_hour_et: 11
   sports: ["ncaaf", "nfl", "nba", "mlb"]
   max_per_sport: 5
+  # Longest American price the email will show. Measured on the graded
+  # book: picks longer than +200 win 16% of the time; favorites at -150 or
+  # shorter win 73%. Picks past the ceiling are still generated and graded;
+  # they are just not emailed. `null` disables the ceiling.
+  max_odds: 150
   from: "picks@example.com"   # placeholder -- must be a sender the transport accepts
   recipients:
     - "mwilliams2733@gmail.com"

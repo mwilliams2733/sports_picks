@@ -25,6 +25,23 @@ def _mk(session, sport, gid, tid_h, tid_a, d, picks):
     session.commit()
 
 
+def _mk_priced(session, sport, gid, tid_h, tid_a, d, picks, pick_type="moneyline"):
+    """picks: list of (confidence, edge, odds, model_prob)."""
+    session.add_all([
+        Team(id=tid_h, name=f"H{gid}", abbreviation=f"H{gid}", sport=sport),
+        Team(id=tid_a, name=f"A{gid}", abbreviation=f"A{gid}", sport=sport),
+    ])
+    session.flush()
+    session.add(Game(id=gid, sport=sport, season="2026", date=d,
+                     home_team_id=tid_h, away_team_id=tid_a, status="scheduled"))
+    session.flush()
+    for i, (conf, edge, odds, prob) in enumerate(picks):
+        session.add(PickModel(game_id=gid, strategy_id=1, pick_type=pick_type,
+                              pick_value=f"P{gid}-{i}", confidence=conf,
+                              edge_pct=edge, odds_at_pick=odds, model_prob=prob))
+    session.commit()
+
+
 def _session():
     engine = get_engine(":memory:")
     Base.metadata.create_all(engine)
@@ -233,3 +250,77 @@ def test_dedup_tolerates_a_missing_or_naive_created_at():
     kept = _dedupe_latest([old, naive, aware])
     assert len(kept) == 1
     assert kept[0].edge_pct == 9.9, "the newest row wins; a NULL never does"
+
+
+def test_ranks_by_model_probability_over_confidence():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+               [(5, 18.0, -110, 0.40),
+                (3, 4.0, -110, 0.70),
+                (4, 9.0, -110, 0.55)])
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    vals = [p.pick_value for p in sections[0].picks]
+    assert vals == ["P1-1", "P1-2", "P1-0"]
+
+
+def test_pick_without_probability_sorts_last():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+               [(5, 9.0, -110, None),
+                (2, 3.0, -110, 0.52)])
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    vals = [p.pick_value for p in sections[0].picks]
+    assert vals == ["P1-1", "P1-0"]
+
+
+def test_longshot_past_the_ceiling_is_not_emailed():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+               [(5, 18.0, 248, 0.34),
+                (3, 4.0, -130, 0.60)])
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    vals = [p.pick_value for p in sections[0].picks]
+    assert vals == ["P1-1"]
+
+
+def test_price_at_the_ceiling_is_kept():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+               [(3, 4.0, 150, 0.45)])
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    vals = [p.pick_value for p in sections[0].picks]
+    assert vals == ["P1-0"]
+
+
+def test_missing_price_is_kept():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+               [(3, 4.0, None, 0.55)])
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    vals = [p.pick_value for p in sections[0].picks]
+    assert vals == ["P1-0"]
+
+
+def test_ceiling_can_be_disabled():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+               [(5, 18.0, 800, 0.20)])
+    sections = select_digest(s, d, ["nfl"], SEASONS, max_odds=None)
+    vals = [p.pick_value for p in sections[0].picks]
+    assert vals == ["P1-0"]
+
+
+def test_ceiling_does_not_touch_props():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+               [(3, 10.0, 300, 0.6)], pick_type="prop")
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    assert len(sections[0].props) == 1
+    assert sections[0].picks == []

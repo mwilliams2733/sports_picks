@@ -92,8 +92,26 @@ def _recency(pick: PickModel) -> tuple:
     return (created.replace(tzinfo=None), pick.id or 0)
 
 
-def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5):
-    """Return one DigestSection per active sport that has something to show."""
+def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
+                  max_odds: int | None = 150):
+    """Return one DigestSection per active sport that has something to show.
+
+    Game picks are filtered by a price ceiling to avoid emailing longshots that
+    carry high edges but poor win rates. Measured on the graded book (moneyline,
+    five team sports, 129 decided picks):
+
+    | price band | n | win % | units |
+    |---|---|---|---|
+    | favorite at -150 or shorter | 15 | 73% | +1.3 |
+    | favorite -149 to -101 | 14 | 43% | -3.4 |
+    | dog +100 to +200 | 42 | 40% | -3.0 |
+    | dog longer than +200 | 58 | 16% | -16.6 |
+
+    A pick with no stored price is kept: unknown is not a longshot, and the
+    renderer shows it at -110 anyway. The ceiling is applied here rather than
+    in the strategy, so that the picks still exist for grading and measurement;
+    only what gets emailed changes.
+    """
     sections: list[DigestSection] = []
 
     for sport in sports:
@@ -123,14 +141,22 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5)
 
         picks = _dedupe_latest(picks)
 
+        if max_odds is not None:
+            # A pick with no stored price is kept: unknown is not a longshot,
+            # and the renderer shows it at -110 anyway.
+            picks = [p for p in picks
+                     if p.odds_at_pick is None or p.odds_at_pick <= max_odds]
+
         def _pick_sort_key(p):
-            # start_time is nullable, and stored rows may be naive or aware.
-            # Comparing a datetime to a date, or a naive to an aware datetime,
-            # raises TypeError mid-sort — normalize to naive and push missing
-            # start times to the end.
             st = games_by_id[p.game_id].start_time
             when = st.replace(tzinfo=None) if st is not None else datetime.max
-            return (-p.confidence, -(p.edge_pct or 0.0), when, p.id or 0)
+            # Win probability first. Confidence is a threshold on edge, and
+            # edge is model minus market in absolute points, which is largest
+            # exactly where the model is most wrong (long-priced underdogs).
+            # A pick with no stored probability sorts after every pick that
+            # has one; among those, the old order still applies.
+            prob = p.model_prob if p.model_prob is not None else -1.0
+            return (-prob, -p.confidence, -(p.edge_pct or 0.0), when, p.id or 0)
 
         picks.sort(key=_pick_sort_key)
 
