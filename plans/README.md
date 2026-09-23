@@ -100,6 +100,22 @@ The digest's gate is no longer machinery — it is sample size. Plan 010 built
 and verified the whole grading chain; every prop number so far rests on two
 games. See `plans/HANDOFF.md`.
 
+> **Open finding, 2026-09-23, found while verifying plan 021 in production.**
+> `pitcher_skill_score` returns **0.5 for an unknown starter and 0.5 for a
+> league-average one**, and `fetch_pitcher_scores_for_date` computes each side
+> independently, so it never emits `None`. Consequence: the guard
+> `if h is None or a is None: return 0.0` in `ensemble.pitcher_logit_shift`
+> **cannot fire on the production path**. With one starter announced and the
+> other not, the shift prices a real pitcher against a phantom — the exact
+> case its docstring says it prevents. Reachable only from tests today.
+> First persisted day: 4 of 32 rows were exactly 0.5, all in both-unknown
+> games where the error cancels; the harmful mixed case simply did not occur.
+> It also makes the stored rows ambiguous for the measurement 021 exists to
+> enable — drop or flag exact-0.5 rows before regressing on them. Fix is to
+> emit `None` per side upstream, which revives the guard and makes
+> `_persist_pitcher_scores` skip that side; it changes live MLB probabilities,
+> so it needs a before/after count of its own. Not yet planned.
+
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) |
 REJECTED (one-line rationale).
 
