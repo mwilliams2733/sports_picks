@@ -41,6 +41,7 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 019 | The morning slate prices MLB with the day's starting pitchers | P1 | S | 018 (to have effect) | **DONE 2026-09-23** on `sonnet`, reviewed: commit `1d6936e` on branch `worktree-agent-a9a4a8c9981887223`. 4 new tests, mutation check failed as required, full suite 1434 passed. **Step 4 check CLOSED 2026-09-23**: merged, scheduler restarted (PID 18356), forced scout logged `Morning slate for 2026-09-23: mlb` then `Generated 12 picks for mlb`, and 8 of those 12 picks carry a `pitcher_edge` factor (0 of 50 before). **Not merged** — operator's call. |
 | 020 | The email states what is measured, not an edge | P1 | S | 017 | **DONE 2026-09-23** on `sonnet`, reviewed: commit `65902f3` on branch `worktree-agent-ab526c82369e5971e`, which carries 017 as cherry-pick `4ec3073`. 12 new tests, both mutation checks failed as required, full suite 1449 passed. Dry run on 2026-09-21: header `MLB · last 30 days 16-21`, rows `Model 59% · Price 47%`. **Not merged** — operator's call. |
 | 021 | Make per-sport model signal measurable; record the refused slopes | P1 | M | 018, 019 — merged | **DONE 2026-09-23** on `sonnet`, reviewed over one revision round: `75dc0cb` + `50645c5`, merged as `eead9a8`. 11 new tests, three mutation checks, full suite 1472. Review caught the report hiding its realised split (ncaaf trains on 105 games, not the 70% a reader would infer); revision added a `train n` column and a drift footnote. Production DB verified untouched by the report. |
+| 022 | An unknown starter is not an average one | P1 | S | 018, 019, 021 — merged | TODO — executor `sonnet` |
 
 > **2026-09-23 batch (017-020), planned against `84dc78c`.** A focused
 > audit of the pick logic and the digest, football and baseball first.
@@ -114,7 +115,7 @@ games. See `plans/HANDOFF.md`.
 > enable — drop or flag exact-0.5 rows before regressing on them. Fix is to
 > emit `None` per side upstream, which revives the guard and makes
 > `_persist_pitcher_scores` skip that side; it changes live MLB probabilities,
-> so it needs a before/after count of its own. Not yet planned.
+> so it needs a before/after count of its own. **Planned as 022.**
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) |
 REJECTED (one-line rationale).
