@@ -40,6 +40,7 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 018 | The active MLB model reads the starting pitcher | P1 | M | — | **DONE 2026-09-23** on `sonnet`, reviewed: commit `fa31769` on branch `worktree-agent-a781964c1c35882a5`. 8 new tests, both mutation checks failed as required, full suite 1438 passed. **Not merged** — operator's call. |
 | 019 | The morning slate prices MLB with the day's starting pitchers | P1 | S | 018 (to have effect) | **DONE 2026-09-23** on `sonnet`, reviewed: commit `1d6936e` on branch `worktree-agent-a9a4a8c9981887223`. 4 new tests, mutation check failed as required, full suite 1434 passed. **Step 4 check CLOSED 2026-09-23**: merged, scheduler restarted (PID 18356), forced scout logged `Morning slate for 2026-09-23: mlb` then `Generated 12 picks for mlb`, and 8 of those 12 picks carry a `pitcher_edge` factor (0 of 50 before). **Not merged** — operator's call. |
 | 020 | The email states what is measured, not an edge | P1 | S | 017 | **DONE 2026-09-23** on `sonnet`, reviewed: commit `65902f3` on branch `worktree-agent-ab526c82369e5971e`, which carries 017 as cherry-pick `4ec3073`. 12 new tests, both mutation checks failed as required, full suite 1449 passed. Dry run on 2026-09-21: header `MLB · last 30 days 16-21`, rows `Model 59% · Price 47%`. **Not merged** — operator's call. |
+| 021 | Make per-sport model signal measurable; record the refused slopes | P1 | M | 018, 019 — merged | TODO — executor `sonnet` |
 
 > **2026-09-23 batch (017-020), planned against `84dc78c`.** A focused
 > audit of the pick logic and the digest, football and baseball first.
@@ -56,12 +57,16 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 > with the advisor session, on the most capable model.
 >
 > **Not planned from that audit, recorded so it is not re-audited:**
-> `CalibratedModel` fits one slope per feature across sports whose scales
-> differ (mean |run-diff gap| 2.15 for mlb against 8.78 points for nba;
-> net rating and pace are nba/ncaab-only and read 0 for football and
-> baseball). Real, HIGH confidence that it is wrong, MED that fixing it
-> moves the win rate; deferred until 018 lands, since it changes what the
-> MLB model would then be trained on. Two direction items, not defects:
+> ~~`CalibratedModel` fits one slope per feature across sports whose scales
+> differ.~~ **MEASURED AND REJECTED 2026-09-23** — see plan 021. Fitted on a
+> per-sport 70/30 time split, out-of-sample Brier: per-sport slopes were
+> WORSE in every sport that could support them (nba 0.1736 vs 0.1692, nfl
+> 0.2341 vs 0.2305, ncaaf 0.1772 vs 0.1729), and within-sport standardization
+> was worse in three of four, better only in ncaaf at effective n 40.8. The
+> pooled fit stays. What the experiment did find is in plan 021: **mlb's model
+> is indistinguishable from a coin flip** (0.2494 against 0.2500 at effective
+> n 29.8) and the pitcher term shipped in 018 **cannot be evaluated at all**,
+> because nothing persists the scores it prices on. Two direction items, not defects:
 > blend with the de-vigged market as a model input (the shrinkage fit says
 > the model's weight against the price is 0.00 held out, so picks would
 > become rare and better), and football signal from players rather than
