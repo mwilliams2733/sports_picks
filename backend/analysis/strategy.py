@@ -35,6 +35,70 @@ def consensus_moneyline(prices) -> int | None:
     return Strategy._prob_to_american(sum(usable) / len(usable))
 
 
+def average_odds(odds) -> dict | None:
+    """Average book-level odds into a single consensus quote.
+
+    THE single definition of consensus in this project. ``odds_at_pick`` is
+    produced by it, so anything comparing a price to ``odds_at_pick`` -- CLV
+    above all -- must run its prices through the same function. A second
+    hand-written averager would make CLV measure the gap between two
+    definitions of consensus as well as the movement it exists to measure.
+
+    Takes the list of book quotes directly rather than a ``GameData`` so the
+    closing-line path can hand it snapshots instead of live odds rows.
+
+    Moneyline prices are averaged in probability space (American odds are
+    non-linear around +/-100, so an arithmetic mean of prices is wrong and
+    can even land in the invalid (-100, 100) band). Spread/total lines are
+    points, not prices, so those stay arithmetic, rounded to 1 decimal.
+    """
+    if not odds:
+        return None
+    ml_home_prices = [o.moneyline_home for o in odds if o.moneyline_home is not None]
+    ml_away_prices = [o.moneyline_away for o in odds if o.moneyline_away is not None]
+    if not ml_home_prices or not ml_away_prices:
+        return None
+
+    home_price = consensus_moneyline(ml_home_prices)
+    away_price = consensus_moneyline(ml_away_prices)
+    if home_price is None or away_price is None:
+        return None
+
+    result = {
+        "moneyline_home": home_price,
+        "moneyline_away": away_price,
+    }
+
+    sp_home = [o.spread_home for o in odds if o.spread_home is not None]
+    sp_away = [o.spread_away for o in odds if o.spread_away is not None]
+    if sp_home:
+        result["spread_home"] = round(sum(sp_home) / len(sp_home), 1)
+        result["spread_away"] = round(sum(sp_away) / len(sp_away), 1)
+    else:
+        result["spread_home"] = None
+        result["spread_away"] = None
+
+    ou = [o.over_under for o in odds if o.over_under is not None]
+    if ou:
+        result["over_under"] = round(sum(ou) / len(ou), 1)
+    else:
+        result["over_under"] = None
+
+    # Spread and total PRICES, consensused the same way moneylines are:
+    # in probability space, because American odds are non-linear around
+    # +/-100 and an arithmetic mean of -110 and +110 is 0, which is not a
+    # price. None when no book quoted one -- every row predating the
+    # collector capturing them -- so the caller can fall back explicitly
+    # rather than receive a number nobody quoted.
+    for field in ("spread_home_price", "spread_away_price",
+                  "over_price", "under_price"):
+        prices = [getattr(o, field, None) for o in odds]
+        prices = [p for p in prices if p is not None]
+        result[field] = consensus_moneyline(prices) if prices else None
+
+    return result
+
+
 class Strategy(ABC):
     #: The factor codes this strategy is allowed to emit — i.e. the signals it
     #: genuinely consumes when computing a probability. `_build_factors` can
@@ -62,58 +126,8 @@ class Strategy(ABC):
         return cls(name=config.get("name", cls.__name__), config=config)
 
     def _average_odds(self, game: GameData) -> dict | None:
-        """Average a game's book-level odds into a single consensus quote.
-
-        Moneyline prices are averaged in probability space (American odds are
-        non-linear around +/-100, so an arithmetic mean of prices is wrong and
-        can even land in the invalid (-100, 100) band). Spread/total lines are
-        points, not prices, so those stay arithmetic, rounded to 1 decimal.
-        """
-        if not game.odds:
-            return None
-        ml_home_prices = [o.moneyline_home for o in game.odds if o.moneyline_home is not None]
-        ml_away_prices = [o.moneyline_away for o in game.odds if o.moneyline_away is not None]
-        if not ml_home_prices or not ml_away_prices:
-            return None
-
-        home_price = consensus_moneyline(ml_home_prices)
-        away_price = consensus_moneyline(ml_away_prices)
-        if home_price is None or away_price is None:
-            return None
-
-        result = {
-            "moneyline_home": home_price,
-            "moneyline_away": away_price,
-        }
-
-        sp_home = [o.spread_home for o in game.odds if o.spread_home is not None]
-        sp_away = [o.spread_away for o in game.odds if o.spread_away is not None]
-        if sp_home:
-            result["spread_home"] = round(sum(sp_home) / len(sp_home), 1)
-            result["spread_away"] = round(sum(sp_away) / len(sp_away), 1)
-        else:
-            result["spread_home"] = None
-            result["spread_away"] = None
-
-        ou = [o.over_under for o in game.odds if o.over_under is not None]
-        if ou:
-            result["over_under"] = round(sum(ou) / len(ou), 1)
-        else:
-            result["over_under"] = None
-
-        # Spread and total PRICES, consensused the same way moneylines are:
-        # in probability space, because American odds are non-linear around
-        # +/-100 and an arithmetic mean of -110 and +110 is 0, which is not a
-        # price. None when no book quoted one -- every row predating the
-        # collector capturing them -- so the caller can fall back explicitly
-        # rather than receive a number nobody quoted.
-        for field in ("spread_home_price", "spread_away_price",
-                      "over_price", "under_price"):
-            prices = [getattr(o, field, None) for o in game.odds]
-            prices = [p for p in prices if p is not None]
-            result[field] = consensus_moneyline(prices) if prices else None
-
-        return result
+        """This game's consensus quote. Delegates to `average_odds`."""
+        return average_odds(game.odds)
 
     @staticmethod
     def _prob_to_american(p: float) -> int:

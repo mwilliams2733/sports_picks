@@ -159,3 +159,80 @@ def closing_line(session: Session, game_id: int, *,
     pre_game = [s for s in history
                 if s.captured_at.replace(tzinfo=timezone.utc) < start]
     return pre_game[-1] if pre_game else None
+
+
+def closing_books(session: Session, game_id: int) -> list[LineSnapshot]:
+    """Each book's last PRE-KICKOFF observation for a game.
+
+    One row per bookmaker. A book whose only quotes came after kickoff does
+    not appear at all -- its in-play number would otherwise drag a consensus
+    every other book formed before the game.
+    """
+    out = []
+    for (bookmaker,) in (session.query(LineSnapshot.bookmaker)
+                         .filter(LineSnapshot.game_id == game_id)
+                         .distinct().all()):
+        snap = closing_line(session, game_id, bookmaker=bookmaker)
+        if snap is not None:
+            out.append(snap)
+    return out
+
+
+def closing_consensus(session: Session, game_id: int) -> dict | None:
+    """The consensus closing quote, or None when there is no pre-game price.
+
+    Built by handing each book's last pre-game snapshot to
+    :func:`backend.analysis.strategy.average_odds` -- the SAME function that
+    produces ``odds_at_pick``. That is the whole point: CLV subtracts one
+    from the other, so if the two were consensused differently the
+    difference would include the gap between two definitions of "the price"
+    as well as the movement CLV is meant to measure.
+
+    The returned dict is `average_odds`' own, plus ``books`` (how many
+    contributed) and ``captured_at`` (the latest contributing observation).
+    A close struck four hours before kickoff is a different measurement from
+    one struck four minutes before, and a caller comparing picks needs to be
+    able to tell.
+
+    ``nflverse_close`` rows participate. Elsewhere they are deliberately kept
+    out of the live consensus because using a closing line to make a pick is
+    lookahead -- here lookahead is the entire purpose, and for the imported
+    NFL history it is the only closing price on record.
+    """
+    from backend.analysis.strategy import average_odds
+
+    snaps = closing_books(session, game_id)
+    if not snaps:
+        return None
+    consensus = average_odds(snaps)
+    if consensus is None:
+        return None
+    consensus["books"] = len(snaps)
+    consensus["captured_at"] = max(s.captured_at for s in snaps)
+    return consensus
+
+
+def series_depth(session: Session, game_ids) -> dict[int, int]:
+    """Map game_id -> the most observations any single book has on it.
+
+    1 means no book was ever seen to change its price, so nothing about that
+    game's line MOVED within this database. A closing price drawn from such a
+    series is the same observation as the opening one, and any CLV computed
+    against it compares a pick-time price to an anchor of unknown timing
+    rather than to a real close.
+
+    Every game seeded by `backfill_line_snapshots` has depth 1 by
+    construction -- the upsert had already destroyed the rest.
+    """
+    ids = list(game_ids)
+    if not ids:
+        return {}
+    counts: dict[tuple[int, str], int] = {}
+    for game_id, bookmaker in (session.query(LineSnapshot.game_id,
+                                             LineSnapshot.bookmaker)
+                               .filter(LineSnapshot.game_id.in_(ids)).all()):
+        counts[(game_id, bookmaker)] = counts.get((game_id, bookmaker), 0) + 1
+    out: dict[int, int] = {}
+    for (game_id, _), n in counts.items():
+        out[game_id] = max(out.get(game_id, 0), n)
+    return out

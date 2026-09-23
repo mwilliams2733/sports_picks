@@ -1,39 +1,39 @@
-"""Backfill odds_at_close and line_at_close on existing pick_results rows.
+"""Recompute odds_at_close and line_at_close on existing pick_results rows.
 
-Reads the most recent Odds snapshot per game and rewrites closing-line fields
-using the same logic as backend.pipeline.grader.capture_closing_odds. Safe to
-re-run; only rows that produce a different value are updated.
+Delegates to `capture_closing_odds` rather than mirroring it. The previous
+version kept its own copy of that logic under a comment saying "mirrors
+capture_closing_odds", which is two code paths that must agree -- and they
+stopped agreeing the moment the grader learned to read the snapshot series.
 
-Usage:
+What re-running this changes
+----------------------------
+Both the grader and this script used to take the most recent `Odds` row for
+a game. `Odds` is one row per (game, BOOKMAKER), so "most recent" meant
+whichever book was written last in the final upsert pass, and before
+``7463de7`` that write was frequently an IN-PLAY price. The close is now
+every book's last pre-kickoff snapshot, consensused by `average_odds` -- the
+same function that produced `odds_at_pick`, which is what CLV subtracts it
+from.
+
+**Expect the usable sample to SHRINK.** Historical snapshots are backfill
+anchors stamped with `Odds.timestamp`, the last write, so for a game that
+was re-priced after kickoff every surviving row is post-kickoff and there is
+no valid pre-game close to recover. Those rows are CLEARED rather than left
+holding the old number: a stale close is not a conservative default, it is a
+wrong measurement that enters the CLV average silently. Fewer honest closes
+beat more dishonest ones.
+
+Safe to re-run; only rows whose value actually changes are counted.
+
     python -m backend.backfill_closing_lines [db_path] [--dry-run]
-
-Defaults to sports_picks.db if no path given. --dry-run prints the diff and
-does not commit.
 """
 from __future__ import annotations
+
 import sys
 
 from backend.database import get_engine, get_session
-from backend.models import Odds, PickModel, PickResult
-
-
-def _closing_for(odds: Odds, pick_type: str, pick_value: str) -> tuple[int | None, float | None]:
-    """Return (odds_at_close, line_at_close) for a single pick + closing snapshot.
-
-    Mirrors capture_closing_odds. odds_at_close for spread/total is intentionally
-    left to the caller (set to odds_at_pick) because juice is not stored.
-    """
-    if pick_type == "moneyline":
-        if "HOME" in pick_value:
-            return odds.moneyline_home, None
-        return odds.moneyline_away, None
-    if pick_type == "spread":
-        if "HOME" in pick_value:
-            return None, odds.spread_home
-        return None, odds.spread_away
-    if pick_type == "over_under":
-        return None, odds.over_under
-    return None, None
+from backend.models import PickModel, PickResult
+from backend.pipeline.grader import capture_closing_odds
 
 
 def backfill(db_path: str = "sports_picks.db", dry_run: bool = False) -> dict:
@@ -45,52 +45,43 @@ def backfill(db_path: str = "sports_picks.db", dry_run: bool = False) -> dict:
             .join(PickModel, PickResult.pick_id == PickModel.id)
             .all()
         )
-        # Group closing snapshots by game so we hit the DB once per game.
-        game_ids = {pm.game_id for _, pm in rows}
-        closing_by_game: dict[int, Odds] = {}
-        for gid in game_ids:
-            o = (
-                session.query(Odds)
-                .filter(Odds.game_id == gid)
-                .order_by(Odds.timestamp.desc())
-                .first()
-            )
-            if o:
-                closing_by_game[gid] = o
 
         changed_odds = 0
         changed_line = 0
-        skipped_no_close = 0
+        cleared = 0
         for pr, pm in rows:
-            closing = closing_by_game.get(pm.game_id)
-            if closing is None:
-                skipped_no_close += 1
-                continue
-            new_odds_at_close, new_line_at_close = _closing_for(closing, pm.pick_type, pm.pick_value)
-            # For spread/total, odds_at_close should reflect odds_at_pick (juice fallback).
-            if pm.pick_type in ("spread", "over_under"):
-                new_odds_at_close = pm.odds_at_pick
+            before = (pr.odds_at_close, pr.line_at_close)
 
-            if pr.odds_at_close != new_odds_at_close:
-                if not dry_run:
-                    pr.odds_at_close = new_odds_at_close
+            # Cleared first so a row the new rules cannot price ends up NULL
+            # instead of keeping a value the old rules invented.
+            pr.odds_at_close = None
+            pr.line_at_close = None
+            capture_closing_odds(session, pr, pm.game_id, pm.pick_type,
+                                 pm.pick_value, pm.odds_at_pick)
+            after = (pr.odds_at_close, pr.line_at_close)
+
+            if before[0] != after[0]:
                 changed_odds += 1
-            if pr.line_at_close != new_line_at_close:
-                if not dry_run:
-                    pr.line_at_close = new_line_at_close
+            if before[1] != after[1]:
                 changed_line += 1
+            if any(b is not None for b in before) and all(a is None for a in after):
+                cleared += 1
 
-        if not dry_run:
+            if dry_run:
+                pr.odds_at_close, pr.line_at_close = before
+
+        if dry_run:
+            session.rollback()
+        else:
             session.commit()
 
-        summary = {
+        return {
             "scanned": len(rows),
             "changed_odds_at_close": changed_odds,
             "changed_line_at_close": changed_line,
-            "skipped_no_closing_snapshot": skipped_no_close,
+            "cleared_no_valid_close": cleared,
             "dry_run": dry_run,
         }
-        return summary
     finally:
         session.close()
 
@@ -99,6 +90,5 @@ if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     flags = [a for a in sys.argv[1:] if a.startswith("--")]
     db_path = args[0] if args else "sports_picks.db"
-    dry_run = "--dry-run" in flags
-    result = backfill(db_path, dry_run=dry_run)
+    result = backfill(db_path, dry_run="--dry-run" in flags)
     print(result)

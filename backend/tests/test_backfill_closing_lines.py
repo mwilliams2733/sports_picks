@@ -1,8 +1,15 @@
-"""Tests for the closing-line backfill script."""
+"""Tests for the closing-line backfill script.
+
+The fixture records a LINE SNAPSHOT as well as an `Odds` row, because the
+close is now read from the snapshot series. An `Odds` row alone is the
+pre-2026-09-23 data shape: one row per bookmaker, no history. Production
+rows all have a snapshot, seeded by `backfill_line_snapshots`.
+"""
 from datetime import date, datetime, timezone
 
 import pytest
 
+from backend.analysis.line_snapshots import record_snapshot
 from backend.backfill_closing_lines import backfill
 from backend.database import get_engine, get_session
 from backend.models import (
@@ -34,10 +41,13 @@ def db_with_legacy_picks(tmp_path):
     session.add(g)
     session.flush()
 
-    session.add(Odds(game_id=g.id, bookmaker="dk",
-                     moneyline_home=-160, moneyline_away=140,
-                     spread_home=-3.5, spread_away=3.5, over_under=219.0,
+    closing = dict(moneyline_home=-160, moneyline_away=140,
+                   spread_home=-3.5, spread_away=3.5, over_under=219.0)
+    session.add(Odds(game_id=g.id, bookmaker="dk", **closing,
                      timestamp=datetime(2026, 1, 1, 19, 0, tzinfo=timezone.utc)))
+    session.flush()
+    record_snapshot(session, g.id, "dk", closing,
+                    now=datetime(2026, 1, 1, 19, 0, tzinfo=timezone.utc))
 
     ml_pick = PickModel(game_id=g.id, strategy_id=strat.id,
                         pick_type="moneyline", pick_value="HOME ML",

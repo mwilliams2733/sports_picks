@@ -131,39 +131,47 @@ def grade_prop_pick(pick_value: str, market: str, player_stat) -> tuple[str, flo
 def capture_closing_odds(session, pick_result, game_id: int, pick_type: str, pick_value: str, odds_at_pick: int | None = None):
     """Store closing odds (and, for spread/total, the closing line) on a PickResult.
 
-    Called during grading when a game reaches 'final' status. The most recent
-    pre-game odds snapshot is treated as the closing line.
+    Called during grading when a game reaches 'final' status.
+
+    The close is every book's last PRE-KICKOFF snapshot, consensused by
+    `average_odds` -- the same function that produced ``odds_at_pick``. This
+    used to read `Odds` ordered by timestamp and take the first row, which is
+    one row per BOOKMAKER: whichever book happened to be written last in the
+    final upsert pass. Subtracting that from a consensus ``odds_at_pick``
+    measured the gap between one arbitrary book and the field as well as the
+    movement CLV is for. Before 7463de7 that last write was often an in-play
+    price too.
 
     For moneyline bets the price moves materially, so odds_at_close stores the
     closing moneyline price. For spread/total bets the price (juice) is rarely
     stored historically and barely moves; the meaningful CLV is in the line
-    number, which is stored in line_at_close. odds_at_close defaults to
-    odds_at_pick for those bet types so price-CLV becomes a no-op rather than
-    fabricated -110.
+    number, which is stored in line_at_close. odds_at_close stays
+    ``odds_at_pick`` for those bet types so price-CLV is a deliberate no-op:
+    a real closing price against an ``odds_at_pick`` that fell back to
+    STANDARD_JUICE would fabricate movement in the other direction.
+
+    Records nothing when there is no pre-game price on record. An absent
+    close must stay absent -- a guessed one enters the CLV average silently.
     """
-    from backend.models import Odds
-    closing = (
-        session.query(Odds)
-        .filter(Odds.game_id == game_id)
-        .order_by(Odds.timestamp.desc())
-        .first()
-    )
+    from backend.analysis.line_snapshots import closing_consensus
+
+    closing = closing_consensus(session, game_id)
     if not closing:
         return
 
     if pick_type == "moneyline":
         if "HOME" in pick_value:
-            pick_result.odds_at_close = closing.moneyline_home
+            pick_result.odds_at_close = closing["moneyline_home"]
         else:
-            pick_result.odds_at_close = closing.moneyline_away
+            pick_result.odds_at_close = closing["moneyline_away"]
     elif pick_type == "spread":
         if "HOME" in pick_value:
-            pick_result.line_at_close = closing.spread_home
+            pick_result.line_at_close = closing["spread_home"]
         else:
-            pick_result.line_at_close = closing.spread_away
+            pick_result.line_at_close = closing["spread_away"]
         pick_result.odds_at_close = odds_at_pick
     elif pick_type == "over_under":
-        pick_result.line_at_close = closing.over_under
+        pick_result.line_at_close = closing["over_under"]
         pick_result.odds_at_close = odds_at_pick
 
 
