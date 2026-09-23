@@ -14,6 +14,15 @@ reusing ``calibration_report``'s statistics core rather than reimplementing
 it -- ``effective_sample_size`` and the ``do_orm_execute`` /
 ``with_loader_criteria`` fit-restriction approach both come from there.
 
+The split is a DATE, not a game count -- and a sport whose games cluster on
+few distinct dates (college football is nearly all Saturdays) can land far
+from the requested ``--train-frac`` because a whole slate moves to whichever
+side of the cutoff its one date falls on. The cutoff stays a date regardless
+-- splitting mid-day would put same-day games on both sides of the line --
+so the table reports each sport's REALISED train/eval split (``train n``)
+rather than assuming it matches the requested fraction, and flags a sport
+whose realised fraction drifts from the request by more than 0.10.
+
 What this tool produced when it was written (plan 021, 2026-09-23)
 --------------------------------------------------------------------
 A 70/30 time split taken WITHIN each sport, per-sport home-advantage one-hot
@@ -283,7 +292,20 @@ def run_report(
         EnsembleStrategy._calibrated = previous
 
 
-def format_report(results: list[SportSignal], min_eval: int) -> str:
+#: A sport's realised train fraction (n_train / (n_train + n_eval)) drifting
+#: from the requested ``--train-frac`` by more than this is flagged. The
+#: cutoff is a date, so a sport whose games cluster on few distinct dates
+#: (college football is nearly all Saturdays) can land far from the request
+#: -- a whole slate moves to whichever side of the cutoff its date falls on.
+TRAIN_FRAC_DRIFT_FLAG = 0.10
+
+
+def _actual_train_frac(r: SportSignal) -> float | None:
+    total = r.n_train + r.n_eval
+    return (r.n_train / total) if total > 0 else None
+
+
+def format_report(results: list[SportSignal], min_eval: int, train_frac: float) -> str:
     lines: list[str] = []
     lines.append("Per-sport signal report -- does the model beat its nulls?")
     lines.append(
@@ -298,21 +320,55 @@ def format_report(results: list[SportSignal], min_eval: int) -> str:
     )
     lines.append("")
     lines.append(
-        "  sport      eval n   effective n     model    base rate   0.5    beats base rate"
+        "  sport      train n   eval n   effective n     model    base rate   0.5    beats base rate"
     )
-    lines.append("  " + "-" * 88)
+    lines.append("  " + "-" * 96)
+    any_drift = False
     for r in results:
+        actual_frac = _actual_train_frac(r)
+        drifted = (
+            actual_frac is not None
+            and abs(actual_frac - train_frac) > TRAIN_FRAC_DRIFT_FLAG
+        )
+        any_drift = any_drift or drifted
+        marker = "*" if drifted else ""
         if r.below_min_eval:
             reason = "not enough evaluation games" if r.train_split else "no train/eval split (too few games)"
-            lines.append(f"  {r.sport:<9}  {r.n_eval:6d}   {reason}")
+            lines.append(
+                f"  {r.sport:<9}  {r.n_train:6d}   {r.n_eval:6d}   {reason}{marker}"
+            )
             continue
         ess = effective_sample_size(r.n_eval, r.n_teams, ICC)
         beats = "yes" if r.beats_base_rate else "no"
         lines.append(
-            f"  {r.sport:<9}  {r.n_eval:6d}   {ess:11.1f}   {r.model_brier:7.4f}"
-            f"   {r.base_rate_brier:9.4f}   {COIN_FLIP_BRIER:.4f}   {beats}"
+            f"  {r.sport:<9}  {r.n_train:6d}   {r.n_eval:6d}   {ess:11.1f}   {r.model_brier:7.4f}"
+            f"   {r.base_rate_brier:9.4f}   {COIN_FLIP_BRIER:.4f}   {beats}{marker}"
         )
     lines.append("")
+    if any_drift:
+        lines.append(
+            f"  * realised train fraction differs from the requested "
+            f"--train-frac ({train_frac}) by more than {TRAIN_FRAC_DRIFT_FLAG}."
+        )
+        lines.append(
+            "    The split cutoff is a DATE: a sport whose games cluster on"
+        )
+        lines.append(
+            "    few distinct dates (e.g. college football is nearly all"
+        )
+        lines.append(
+            "    Saturdays) can send a whole slate to one side of it. The"
+        )
+        lines.append(
+            "    cutoff stays a date regardless -- splitting mid-day would put"
+        )
+        lines.append(
+            "    same-day games on both sides -- so 'train n' above is this"
+        )
+        lines.append(
+            "    sport's REAL split, not the requested one."
+        )
+        lines.append("")
     lines.append(
         "NOTE: 'base rate' is the TRAIN half's home-win rate for that sport,"
     )
@@ -352,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
             min_eval=args.min_eval,
             sport=args.sport,
         )
-        print(format_report(results, args.min_eval))
+        print(format_report(results, args.min_eval, args.train_frac))
     finally:
         session.rollback()  # belt and braces: this tool writes nothing
         session.close()

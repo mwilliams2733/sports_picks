@@ -108,6 +108,65 @@ def test_base_rate_null_uses_the_train_half_only(db_session):
     assert row.base_rate != 2 / 9
 
 
+def test_a_clustered_schedule_reports_its_real_train_fraction(db_session):
+    """The split cutoff is a DATE. A sport whose games cluster on very few
+    distinct dates (college football is nearly all Saturdays) can land far
+    from the requested `--train-frac`, because a whole slate moves to
+    whichever side of the cutoff its one date falls on. `n_train` must
+    report the REAL count of games before the cutoff, not
+    `round(total * train_frac)` -- the two disagree exactly when clustering
+    matters.
+    """
+    Base.metadata.create_all(db_session.get_bind())
+    sport = "ncaaf"
+    offset = 200
+
+    teams = [Team(id=offset + i, name=f"{sport}T{i}", abbreviation=f"{sport}T{i}",
+                  sport=sport) for i in range(1, 9)]
+    db_session.add_all(teams)
+    db_session.flush()
+    db_session.add_all([EloRating(team_id=offset + i, sport=sport, rating=1500.0 + 20 * i)
+                       for i in range(1, 9)])
+
+    gid = offset
+    # 10 games spread one-per-day early in the season.
+    for k in range(10):
+        gid += 1
+        home = offset + (k % 8) + 1
+        away = offset + ((k + 3) % 8) + 1
+        db_session.add(Game(id=gid, sport=sport, season="2026",
+                            date=date(2026, 1, 1) + timedelta(days=k),
+                            home_team_id=home, away_team_id=away,
+                            home_score=110, away_score=100, status="final"))
+        db_session.add(Odds(game_id=gid, bookmaker="book",
+                            moneyline_home=-150, moneyline_away=130))
+    # 90 games -- a whole slate -- all on one later Saturday.
+    saturday = date(2026, 2, 1)
+    for k in range(90):
+        gid += 1
+        home = offset + (k % 8) + 1
+        away = offset + ((k + 3) % 8) + 1
+        home_win = k % 2 == 0
+        db_session.add(Game(id=gid, sport=sport, season="2026", date=saturday,
+                            home_team_id=home, away_team_id=away,
+                            home_score=110 if home_win else 100,
+                            away_score=100 if home_win else 110, status="final"))
+        db_session.add(Odds(game_id=gid, bookmaker="book",
+                            moneyline_home=-150, moneyline_away=130))
+    db_session.commit()
+
+    results = run_report(db_session, train_frac=0.7, min_eval=1)
+    row = next(r for r in results if r.sport == sport)
+
+    # The cutoff lands on the clustered Saturday, so everything before it
+    # (the 10 spread-out games) is train and the whole 90-game slate is eval
+    # -- a realised train fraction of 0.10 against a requested 0.70.
+    assert row.n_train == 10
+    assert row.n_eval == 90
+    naive = round((row.n_train + row.n_eval) * 0.7)
+    assert row.n_train != naive
+
+
 def test_report_writes_no_rows(db_session):
     Base.metadata.create_all(db_session.get_bind())
     _seed_sport(db_session, "nba", [True, True, False, True, False] * 10)
