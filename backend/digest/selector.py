@@ -28,6 +28,8 @@ class DigestPick:
     rationale: str
     model_prob: float | None = None
     price_prob: float | None = None
+    home_team: str | None = None
+    away_team: str | None = None
 
 
 @dataclass(frozen=True)
@@ -78,12 +80,21 @@ def trailing_record(session, sport: str, target_date, days: int = TRAILING_DAYS)
     return wins, len(rows) - wins
 
 
-def _matchup(session, game: Game) -> str:
+def _team_names(session, game: Game) -> tuple[str, str]:
+    """(away_name, home_name), with the same fallbacks `_matchup` has used.
+
+    One resolver, because the rendered label and the matchup line must agree:
+    an email that says "Pittsburgh Pirates to win" above "Cardinals at Home"
+    would be worse than the jargon it replaced.
+    """
     home = session.get(Team, game.home_team_id)
     away = session.get(Team, game.away_team_id)
-    home_name = home.name if home else "Home"
-    away_name = away.name if away else "Away"
-    return f"{away_name} @ {home_name}"
+    return (away.name if away else "Away", home.name if home else "Home")
+
+
+def _matchup(session, game: Game) -> str:
+    away_name, home_name = _team_names(session, game)
+    return f"{away_name} at {home_name}"
 
 
 def _rationale_for(session, pick: PickModel, game: Game) -> str:
@@ -213,20 +224,24 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
 
         picks.sort(key=_pick_sort_key)
 
-        digest_picks = [
-            DigestPick(
+        def _make_pick(p: PickModel) -> DigestPick:
+            game = games_by_id[p.game_id]
+            away_name, home_name = _team_names(session, game)
+            return DigestPick(
                 sport=sport,
-                matchup=_matchup(session, games_by_id[p.game_id]),
+                matchup=_matchup(session, game),
                 pick_value=p.pick_value,
                 odds=p.odds_at_pick or -110,
                 confidence=p.confidence,
                 edge_pct=round(p.edge_pct or 0.0, 1),
-                rationale=_rationale_for(session, p, games_by_id[p.game_id]),
+                rationale=_rationale_for(session, p, game),
                 model_prob=p.model_prob,
                 price_prob=_price_prob(p.odds_at_pick),
+                home_team=home_name,
+                away_team=away_name,
             )
-            for p in picks[:max_per_sport]
-        ]
+
+        digest_picks = [_make_pick(p) for p in picks[:max_per_sport]]
 
         # Props come from the same table but are ranked among themselves only.
         props = (
@@ -238,18 +253,22 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
         )
         props = _dedupe_latest(props)
         props.sort(key=_pick_sort_key)
-        digest_props = [
-            DigestPick(
+        def _make_prop(p: PickModel) -> DigestPick:
+            game = games_by_id[p.game_id]
+            away_name, home_name = _team_names(session, game)
+            return DigestPick(
                 sport=sport,
-                matchup=_matchup(session, games_by_id[p.game_id]),
+                matchup=_matchup(session, game),
                 pick_value=p.pick_value,
                 odds=p.odds_at_pick or -110,
                 confidence=p.confidence,
                 edge_pct=round(p.edge_pct or 0.0, 1),
-                rationale=_rationale_for(session, p, games_by_id[p.game_id]),
+                rationale=_rationale_for(session, p, game),
+                home_team=home_name,
+                away_team=away_name,
             )
-            for p in props[:max_per_sport]
-        ]
+
+        digest_props = [_make_prop(p) for p in props[:max_per_sport]]
 
         if not digest_picks and not digest_props:
             continue

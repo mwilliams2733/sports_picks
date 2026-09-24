@@ -97,7 +97,42 @@ def test_matchup_reads_away_at_home():
     d = date(2026, 11, 1)
     _mk(s, "nfl", 1, 1, 2, d, [(5, 9.0)])
     sections = select_digest(s, d, ["nfl"], SEASONS)
-    assert sections[0].picks[0].matchup == "A1 @ H1"
+    assert sections[0].picks[0].matchup == "A1 at H1"
+
+
+def test_digest_pick_carries_both_team_names():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk(s, "nfl", 1, 1, 2, d, [(5, 9.0)])
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    pick = sections[0].picks[0]
+    assert pick.home_team == "H1"
+    assert pick.away_team == "A1"
+
+
+def test_a_missing_team_row_falls_back_without_crashing():
+    # `games.home_team_id` has a foreign key to `teams`, so a persisted Game
+    # cannot actually reference a missing Team row -- the schema forbids it.
+    # But `_team_names` still has to be defensive: it is a lookup by id, and
+    # a lookup can always miss. Exercise the fallback directly rather than
+    # fighting the FK constraint to construct an impossible row.
+    from backend.digest.selector import _team_names
+
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk(s, "nfl", 1, 1, 2, d, [(5, 9.0)])
+    # A transient (never added/committed) Game object, so the FK constraint
+    # never gets a chance to fire.
+    game = Game(sport="nfl", season="2026", date=d,
+                home_team_id=999, away_team_id=2, status="scheduled")
+    away_name, home_name = _team_names(s, game)
+    assert home_name == "Home"
+    assert away_name == "A1"
+
+    # And the section still renders when a real digest is built for the
+    # (unmodified, DB-valid) game.
+    sections = select_digest(s, d, ["nfl"], SEASONS)
+    assert sections[0].picks[0].home_team == "H1"
 
 
 def test_prop_picks_never_rank_against_game_picks():
