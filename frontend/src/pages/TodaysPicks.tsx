@@ -140,6 +140,13 @@ export default function TodaysPicks() {
             {teams.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         )}
+        <button
+          className="btn btn-primary btn-sm"
+          disabled={refreshData.isPending}
+          onClick={() => refreshData.mutate(sport)}
+        >
+          {refreshData.isPending ? 'Refreshing…' : 'Refresh data'}
+        </button>
       </div>
 
       <SummaryBar record={recordData} pickCount={filteredPicks.length} strategyName="Ensemble" />
@@ -260,16 +267,7 @@ export default function TodaysPicks() {
         />
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-        <button
-          className="btn btn-primary btn-sm"
-          disabled={refreshData.isPending}
-          onClick={() => refreshData.mutate(sport)}
-        >
-          {refreshData.isPending ? 'Refreshing…' : 'Refresh data'}
-        </button>
-        <CreditUsage />
-      </div>
+      <CreditUsage />
     </div>
   );
 }
