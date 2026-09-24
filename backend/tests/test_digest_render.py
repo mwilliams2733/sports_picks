@@ -205,3 +205,117 @@ def test_section_without_record_has_no_record_text():
     )
     _, _, text = render_digest([section], date(2026, 9, 20))
     assert "last 30 days" not in text
+
+
+def test_home_moneyline_names_the_home_team():
+    section = DigestSection(
+        sport="mlb",
+        picks=[DigestPick(sport="mlb", matchup="St. Louis Cardinals at Pittsburgh Pirates",
+                          pick_value="HOME ML", odds=-137, confidence=5, edge_pct=8.1,
+                          rationale="", home_team="Pittsburgh Pirates",
+                          away_team="St. Louis Cardinals")],
+        props=[],
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "Pittsburgh Pirates to win" in html
+    assert "Pittsburgh Pirates to win" in text
+    assert "HOME ML" not in html
+    assert "HOME ML" not in text
+
+
+def test_away_moneyline_names_the_away_team():
+    section = DigestSection(
+        sport="mlb",
+        picks=[DigestPick(sport="mlb", matchup="Los Angeles Angels at Houston Astros",
+                          pick_value="AWAY ML", odds=120, confidence=5, edge_pct=8.1,
+                          rationale="", home_team="Houston Astros",
+                          away_team="Los Angeles Angels")],
+        props=[],
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "Los Angeles Angels to win" in html
+    assert "Los Angeles Angels to win" in text
+
+
+def test_a_spread_keeps_its_line_beside_the_team():
+    section = DigestSection(
+        sport="nfl",
+        picks=[DigestPick(sport="nfl", matchup="Bills at Chiefs",
+                          pick_value="HOME -1.5", odds=-110, confidence=5, edge_pct=8.1,
+                          rationale="", home_team="Pittsburgh Pirates")],
+        props=[],
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "Pittsburgh Pirates -1.5" in html
+    assert "Pittsburgh Pirates -1.5" in text
+
+
+def test_a_total_gains_its_sport_unit():
+    section = DigestSection(
+        sport="mlb",
+        picks=[DigestPick(sport="mlb", matchup="Bills at Chiefs",
+                          pick_value="Over 7.5", odds=-110, confidence=5, edge_pct=8.1,
+                          rationale="")],
+        props=[],
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "Over 7.5 runs" in html
+    assert "Over 7.5 runs" in text
+
+
+def test_a_total_in_an_unlisted_sport_keeps_its_bare_line():
+    section = DigestSection(
+        sport="boxing",
+        picks=[DigestPick(sport="boxing", matchup="Fighter A at Fighter B",
+                          pick_value="Over 7.5", odds=-110, confidence=5, edge_pct=8.1,
+                          rationale="")],
+        props=[],
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "Over 7.5" in html
+    assert "Over 7.5 runs" not in html
+    assert "Over 7.5 points" not in html
+    assert "Over 7.5" in text
+    assert "Over 7.5 runs" not in text
+    assert "Over 7.5 points" not in text
+
+
+def test_an_unrecognised_label_survives_unchanged():
+    section = DigestSection(
+        sport="mlb",
+        picks=[DigestPick(sport="mlb", matchup="Cardinals at Pirates",
+                          pick_value="SOMETHING ODD", odds=-110, confidence=5, edge_pct=8.1,
+                          rationale="", home_team="Pittsburgh Pirates",
+                          away_team="St. Louis Cardinals")],
+        props=[],
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "SOMETHING ODD" in html
+    assert "SOMETHING ODD" in text
+
+
+def test_a_pick_without_team_names_falls_back_to_the_stored_value():
+    section = DigestSection(
+        sport="mlb",
+        picks=[DigestPick(sport="mlb", matchup="Cardinals at Pirates",
+                          pick_value="HOME ML", odds=-110, confidence=5, edge_pct=8.1,
+                          rationale="", home_team=None, away_team=None)],
+        props=[],
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "HOME ML" in html
+    assert "HOME ML" in text
+
+
+def test_prop_labels_are_untouched():
+    section = DigestSection(
+        sport="nba",
+        picks=[],
+        props=[DigestPick(sport="nba", matchup="Rockets at Thunder",
+                          pick_value="James Harden Over 6.5 Assists",
+                          odds=-115, confidence=3, edge_pct=0.0, rationale="",
+                          home_team="Thunder", away_team="Rockets")],
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "James Harden Over 6.5 Assists" in html
+    assert "James Harden Over 6.5 Assists" in text

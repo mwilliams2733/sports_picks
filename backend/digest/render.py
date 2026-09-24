@@ -7,7 +7,7 @@ fonts, no JavaScript. A plain-text alternative is always produced.
 from datetime import date
 from html import escape as _escape
 
-from backend.digest.selector import DigestSection
+from backend.digest.selector import DigestPick, DigestSection
 
 SPORT_LABELS = {
     "nfl": "NFL", "ncaaf": "College Football", "nba": "NBA",
@@ -28,6 +28,44 @@ def _label(sport: str) -> str:
 
 def _pct(p: float | None) -> str:
     return "—" if p is None else f"{round(p * 100)}%"
+
+
+#: Words for what a totals line counts, by sport. Absent -> no unit word,
+#: which is correct for a sport nobody has checked rather than a guess.
+_TOTAL_UNITS = {
+    "mlb": "runs", "nfl": "points", "ncaaf": "points",
+    "nba": "points", "ncaab": "points",
+}
+
+
+def _selection_label(p: DigestPick) -> str:
+    """What the pick is, in words a reader does not have to decode.
+
+    `pick_value` is stored as the SIDE of the game -- "HOME ML", "AWAY +1.5"
+    -- which is the right thing to store and the wrong thing to email: the
+    reader has to work out which team is home. The team names travel on the
+    DigestPick for exactly this.
+
+    Anything unrecognised falls through to the stored value unchanged. A
+    label this function cannot parse is still information; swallowing it
+    would turn a readable oddity into a blank line.
+    """
+    value = p.pick_value
+    side, _, rest = value.partition(" ")
+    team = {"HOME": p.home_team, "AWAY": p.away_team}.get(side)
+
+    if team:
+        if rest == "ML":
+            return f"{team} to win"
+        if rest:
+            return f"{team} {rest}"       # spread: "Pirates -1.5"
+        return team
+
+    if side in ("Over", "Under") and rest:
+        unit = _TOTAL_UNITS.get(p.sport)
+        return f"{side} {rest} {unit}" if unit else value
+
+    return value
 
 
 def _record(section: DigestSection) -> str:
@@ -95,14 +133,14 @@ def render_digest(sections: list[DigestSection], target_date: date):
             rows.append(
                 f'<tr><td style="padding:10px 0;border-bottom:1px solid #e5e7eb;">'
                 f'<div style="{_FONT}font-size:15px;font-weight:600;color:#111827;">'
-                f'{_escape(p.pick_value)} <span style="font-weight:400;color:#6b7280;">({p.odds})</span></div>'
+                f'{_escape(_selection_label(p))} <span style="font-weight:400;color:#6b7280;">({p.odds})</span></div>'
                 f'<div style="{_FONT}font-size:13px;color:#374151;padding-top:2px;">'
                 f'{_escape(p.matchup)} &nbsp;·&nbsp; {_stars(p.confidence)} &nbsp;·&nbsp; '
                 f'Model {_pct(p.model_prob)} &nbsp;·&nbsp; Price {_pct(p.price_prob)}</div>'
                 f'{rationale_html}</td></tr>'
             )
             text_lines.append(
-                f"  {p.pick_value} ({p.odds}) — {p.matchup} — {_stars(p.confidence)} "
+                f"  {_selection_label(p)} ({p.odds}) — {p.matchup} — {_stars(p.confidence)} "
                 f"Model {_pct(p.model_prob)} / Price {_pct(p.price_prob)}"
             )
             if p.rationale:
