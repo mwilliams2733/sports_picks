@@ -44,7 +44,7 @@ clean, `vitest run` 14/14 passing, **`npx eslint .` red — 6 errors, 2 warnings
 | 022 | An unknown starter is not an average one | P1 | S | 018, 019, 021 — merged | **DONE 2026-09-23** on `sonnet`, reviewed: `d05aebf`. 8 new tests, mutation check confirmed, full suite 1480. Producer emits `None`; no consumer file changed. **Operator action outstanding:** run `backend.scripts.drop_unknown_pitcher_rows` with `--apply --i-have-a-backup` to remove the 4 ambiguous 0.5 rows (2 games, both-unknown) still in production. Dry run verified, nothing deleted. |
 | 023 | A daily check that the pitcher rows landed | P2 | S | 019, 021, 022 — merged | **DONE 2026-09-23** on `sonnet`, reviewed over one revision round: `537fa15` + `84ce33f`. 12 new tests, two mutation checks, full suite 1492. Digest check untouched; helpers imported not copied. Task `sports_picks pitcher check` registered by the reviewer post-merge. |
 | 024 | Name the team, not the side | P2 | S | 017, 020 — merged | **DONE 2026-09-23** on `sonnet`, reviewed: `93da3e3`. 10 new tests, mutation check confirmed, full suite 1502. Two honest flags from the executor: the plan's own `grep -c "p.pick_value" == 2` criterion was wrong (the label function's own body matches, so 3 is correct), and the missing-team test had to call `_team_names` directly because `PRAGMA foreign_keys=ON` forbids a persisted orphan row. Both accepted. |
-| 025 | A refresh button that actually refreshes | P2 | S | — | TODO — executor `sonnet` |
+| 025 | A refresh button that actually refreshes | P2 | S | — | **DONE 2026-09-23** on `sonnet`, reviewed over one revision round: `a6f22a2` + `ee71dfb`. 5 new tests, mutation check confirmed, vitest 25, tsc clean, eslint 0/0. Reviewer verified the toolbar placement at 414px and desktop. **Two plan-authoring errors, mine:** the plan claimed no UI caller (`Backtesting.tsx:81` has called `api.pipeline.run()` all along — I grepped `pipeline/run` with a slash), and it contradicted itself on placement, which put the button in the footer until the revision moved it. |
 
 > **2026-09-23 batch (017-020), planned against `84dc78c`.** A focused
 > audit of the pick logic and the digest, football and baseball first.
@@ -119,6 +119,13 @@ games. See `plans/HANDOFF.md`.
 > emit `None` per side upstream, which revives the guard and makes
 > `_persist_pitcher_scores` skip that side; it changes live MLB probabilities,
 > so it needs a before/after count of its own. **Planned as 022.**
+
+> **Open, small, found while executing 025.** There are now TWO controls that
+> spend Odds API credits: the new toolbar button on Today's Picks
+> (`useRefreshData`, disabled while pending) and a pre-existing "Run Pipeline"
+> button on Backtesting (`Backtesting.tsx:81`, a bare `await` whose guarding
+> has not been checked). They should share `useRefreshData` rather than having
+> two call sites with different protection. Not planned.
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) |
 REJECTED (one-line rationale).
