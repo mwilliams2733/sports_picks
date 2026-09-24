@@ -4,6 +4,7 @@ import { useAppStore } from '../stores/appStore';
 import { useTodaysPicks } from '../hooks/useTodaysPicks';
 import { useTopProps } from '../hooks/useTopProps';
 import { useHiddenGames } from '../hooks/useHiddenGames';
+import { useRefreshData } from '../hooks/useRefreshData';
 import { SPORTS } from '../constants/sports';
 import { EDGE_TOOLTIP, CONFIDENCE_TOOLTIP } from '../constants/tooltips';
 import { getGameLockState, lockStateLabel, lockStateTooltip } from '../lib/gameLock';
@@ -39,6 +40,7 @@ export default function TodaysPicks() {
   const { picks, record, games } = useTodaysPicks(sport);
   const topProps = useTopProps(sport);
   const { hidden: hiddenGames, hide: hideGame, showAll: showAllGames } = useHiddenGames();
+  const refreshData = useRefreshData();
   const [teamFilter, setTeamFilter] = useState('');
   const [betModalOpen, setBetModalOpen] = useState(false);
   const [betModalData, setBetModalData] = useState<{
@@ -138,6 +140,13 @@ export default function TodaysPicks() {
             {teams.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         )}
+        <button
+          className="btn btn-primary btn-sm"
+          disabled={refreshData.isPending}
+          onClick={() => refreshData.mutate(sport)}
+        >
+          {refreshData.isPending ? 'Refreshing…' : 'Refresh data'}
+        </button>
       </div>
 
       <SummaryBar record={recordData} pickCount={filteredPicks.length} strategyName="Ensemble" />
