@@ -43,10 +43,10 @@ def test_parses_a_whole_number_line_and_an_unlabelled_market():
 
 
 def test_an_unknown_trailing_label_resolves_to_nothing_rather_than_a_guess():
-    """The whole point of the script's caution. "Steals" is not a label any
-    market produces (player_steals falls through as its own key), so this must
-    not quietly become player_steals."""
-    assert parse_pick_value("Alex Caruso Over 1.5 Steals",
+    """The whole point of the script's caution. "Steals Allowed" is not a
+    label any market produces, so it must not quietly become player_steals.
+    ("Steals" itself became a real label on 2026-09-28.)"""
+    assert parse_pick_value("Alex Caruso Over 1.5 Steals Allowed",
                             build_label_to_market()) is None
 
 

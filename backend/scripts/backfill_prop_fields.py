@@ -64,12 +64,14 @@ def build_label_to_market() -> dict[str, str]:
     """
     reverse: dict[str, str] = {}
     for market in MARKET_STAT_MAP:
-        label = _market_label(market)
-        if label in reverse and reverse[label] != market:
-            raise ValueError(
-                f"display label {label!r} maps to both {reverse[label]!r} and "
-                f"{market!r}; the reverse mapping is ambiguous")
-        reverse[label] = market
+        # The raw key too: rows stored before a market had a label end in
+        # the key itself ("... Under 2 player_blocks"), and must still parse.
+        for label in {_market_label(market), market}:
+            if label in reverse and reverse[label] != market:
+                raise ValueError(
+                    f"display label {label!r} maps to both {reverse[label]!r} "
+                    f"and {market!r}; the reverse mapping is ambiguous")
+            reverse[label] = market
     return reverse
 
 

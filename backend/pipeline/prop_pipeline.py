@@ -9,6 +9,7 @@ from backend.collectors.player_stats.balldontlie_source import BallDontLieSource
 from backend.collectors.player_stats.mysportsfeeds_source import MySportsFeedsSource
 from backend.analysis.prop_analyzer import PropAnalyzer
 from backend.analysis.prop_confidence import get_prop_thresholds
+from backend.analysis.prop_markets import market_label
 from backend.analysis.odds_utils import calculate_payout, InvalidOddsError
 from backend.data_types import PropAnalysis
 from backend.time_utils import et_today
@@ -333,8 +334,8 @@ def _build_prop_pick(analysis, strategy_id: int) -> PickModel:
 
     ``prop_player`` and ``prop_market`` are written here, at generation time,
     because they cannot be recovered reliably afterwards: ``pick_value`` embeds
-    a *display label* and :func:`_market_label` covers only 7 of the 21 keys in
-    ``MARKET_STAT_MAP``, so the reverse mapping is not one-to-one. Grading
+    a *display label*, and :func:`_market_label` leaves the alias spellings in
+    ``MARKET_STAT_MAP`` unlabelled, so the reverse mapping is not one-to-one. Grading
     reads the market key, never the label.
     """
     return PickModel(
@@ -347,9 +348,6 @@ def _build_prop_pick(analysis, strategy_id: int) -> PickModel:
     )
 
 
-def _market_label(market: str) -> str:
-    labels = {"player_points": "Points", "player_rebounds": "Rebounds",
-              "player_assists": "Assists", "player_threes": "3-Pointers",
-              "player_points_rebounds_assists": "PRA",
-              "player_pass_yds": "Pass Yards", "player_rush_yds": "Rush Yards"}
-    return labels.get(market, market)
+#: Re-exported under its old name: backfill_prop_fields and its tests import
+#: it from here. The table lives in prop_markets so the digest shares it.
+_market_label = market_label
