@@ -30,6 +30,9 @@ class DigestPick:
     price_prob: float | None = None
     home_team: str | None = None
     away_team: str | None = None
+    #: The stored pick this was rendered from, so the send can be recorded
+    #: (EmailedPick). None only for a DigestPick built outside the selector.
+    pick_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -239,6 +242,7 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
                 price_prob=_price_prob(p.odds_at_pick),
                 home_team=home_name,
                 away_team=away_name,
+                pick_id=p.id,
             )
 
         digest_picks = [_make_pick(p) for p in picks[:max_per_sport]]
@@ -266,6 +270,7 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
                 rationale=_rationale_for(session, p, game),
                 home_team=home_name,
                 away_team=away_name,
+                pick_id=p.id,
             )
 
         digest_props = [_make_prop(p) for p in props[:max_per_sport]]

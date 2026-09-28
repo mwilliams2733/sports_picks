@@ -62,3 +62,33 @@ MARKET_STAT_MAP: dict[str, list[str]] = {
     # here; it is wrong for a quarterback and right for nobody else.
     "player_pass_tds": ["touchdowns"],
 }
+
+
+#: How a market reads in a pick and in the email. Keyed by the spellings The
+#: Odds API sends. The alias spellings above are deliberately absent: a
+#: label must map back to exactly one key (backfill_prop_fields reverses
+#: this and refuses an ambiguous label), and the feed never sends them.
+MARKET_LABELS: dict[str, str] = {
+    "player_points": "Points",
+    "player_rebounds": "Rebounds",
+    "player_assists": "Assists",
+    "player_threes": "3-Pointers",
+    "player_blocks": "Blocks",
+    "player_steals": "Steals",
+    "player_turnovers": "Turnovers",
+    "player_points_rebounds_assists": "PRA",
+    "player_points_rebounds": "Points + Rebounds",
+    "player_points_assists": "Points + Assists",
+    "player_rebounds_assists": "Rebounds + Assists",
+    "player_pass_yds": "Pass Yards",
+    "player_rush_yds": "Rush Yards",
+    "player_reception_yds": "Receiving Yards",
+    "player_receptions": "Receptions",
+    "player_anytime_td": "Anytime TD",
+    "player_pass_tds": "Pass TDs",
+}
+
+
+def market_label(market: str) -> str:
+    """The display name for a market key; an unknown key is returned as is."""
+    return MARKET_LABELS.get(market, market)

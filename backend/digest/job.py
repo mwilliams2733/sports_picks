@@ -12,6 +12,7 @@ from backend.database import get_session
 from backend.digest.selector import select_digest
 from backend.digest.render import render_digest
 from backend.digest.sender import send_email
+from backend.digest.record import record_emailed
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,15 @@ def send_daily_digest(config: dict, engine, target_date=None) -> dict:
             api_key=os.environ.get("RESEND_API_KEY"),
             dry_run_path=dry_run_path,
         )
+        # Only a real send is a record: a dry run reached nobody. Recorded
+        # after the send, and a failure here is logged, never raised -- the
+        # email has already gone and must not be reported as failed.
+        if result["sent"] and dry_run_path is None:
+            try:
+                result["recorded"] = record_emailed(session, sections, target_date)
+            except Exception:
+                logger.exception("Digest for %s sent but not recorded", target_date)
+                session.rollback()
         return result
     except Exception as e:
         logger.exception("Daily digest failed for %s", target_date)

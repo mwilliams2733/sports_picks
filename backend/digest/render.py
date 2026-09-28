@@ -7,6 +7,7 @@ fonts, no JavaScript. A plain-text alternative is always produced.
 from datetime import date
 from html import escape as _escape
 
+from backend.analysis.prop_markets import market_label
 from backend.digest.selector import DigestPick, DigestSection
 
 SPORT_LABELS = {
@@ -66,6 +67,18 @@ def _selection_label(p: DigestPick) -> str:
         return f"{side} {rest} {unit}" if unit else value
 
     return value
+
+
+def _prop_label(pick_value: str) -> str:
+    """A prop's stored value with a trailing raw market key made readable.
+
+    Picks stored before the label table was complete end in the API key --
+    "Zach Ertz Over 10.5 player_reception_yds" on 2026-09-28. Only a key
+    `market_label` knows is swapped; anything else passes through.
+    """
+    head, _, last = pick_value.rpartition(" ")
+    label = market_label(last)
+    return f"{head} {label}" if label != last else pick_value
 
 
 def _record(section: DigestSection) -> str:
@@ -162,12 +175,12 @@ def render_digest(sections: list[DigestSection], target_date: date):
                 rows.append(
                     f'<tr><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;">'
                     f'<div style="{_FONT}font-size:14px;color:#111827;">'
-                    f'{_escape(p.pick_value)} <span style="color:#6b7280;">({p.odds})</span></div>'
+                    f'{_escape(_prop_label(p.pick_value))} <span style="color:#6b7280;">({p.odds})</span></div>'
                     f'<div style="{_FONT}font-size:12px;color:#6b7280;padding-top:2px;">'
                     f'{_escape(p.matchup)} &nbsp;·&nbsp; {_stars(p.confidence)}</div></td></tr>'
                 )
                 text_lines.append(
-                    f"    {p.pick_value} ({p.odds}) — {p.matchup} — {_stars(p.confidence)}"
+                    f"    {_prop_label(p.pick_value)} ({p.odds}) — {p.matchup} — {_stars(p.confidence)}"
                 )
         text_lines.append("")
 

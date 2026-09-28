@@ -62,10 +62,21 @@ def _bankroll_state(session: Session) -> tuple[float, float]:
     A loss costs one unit because payout is recorded per unit staked; the
     historical stake was not persisted, so it cannot be weighted.
     """
-    balance = float(UNITS_PER_BANKROLL)
-    peak = balance
     rows = (session.query(PickResult.result, PickResult.payout)
             .order_by(PickResult.id.asc()).all())
+    return bankroll_from_results(rows)
+
+
+def bankroll_from_results(rows) -> tuple[float, float]:
+    """``(current, peak)`` from ``(result, payout)`` rows in settlement order.
+
+    The arithmetic of :func:`_bankroll_state`, separated so a caller can ask
+    what the bankroll WOULD be over a different set of results -- the prop
+    dedupe reports its effect before deleting anything -- without restating
+    the formula.
+    """
+    balance = float(UNITS_PER_BANKROLL)
+    peak = balance
     for result, payout in rows:
         if result == "win":
             balance += payout or 0.0

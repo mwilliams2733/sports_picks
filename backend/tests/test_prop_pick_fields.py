@@ -92,10 +92,10 @@ def test_a_generated_prop_pick_records_the_player_and_market_key():
 
 
 def test_the_stored_market_is_the_key_even_when_it_has_no_display_label():
-    """`_market_label` covers 7 of 16 markets; the rest fall through as
-    themselves. prop_market must be the key in both cases, so grading never
-    has to know which kind it got."""
-    pick = _build_prop_pick(_analysis(market="player_blocks"), strategy_id=7)
+    """The alias spellings have no label and fall through as themselves.
+    prop_market must be the key in both cases, so grading never has to know
+    which kind it got."""
+    pick = _build_prop_pick(_analysis(market="player_rec_yards"), strategy_id=7)
 
-    assert pick.prop_market == "player_blocks"
-    assert pick.pick_value.endswith("player_blocks")   # no label exists for it
+    assert pick.prop_market == "player_rec_yards"
+    assert pick.pick_value.endswith("player_rec_yards")   # no label for aliases
