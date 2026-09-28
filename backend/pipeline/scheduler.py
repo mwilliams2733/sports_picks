@@ -16,7 +16,8 @@ from backend.pipeline.pick_generator import generate_and_store_picks
 from backend.scripts.finalize_mma import finalize_stuck_bouts
 from backend.scripts.finalize_combat import COMBAT_SPORTS, finalize_from_scores
 from backend.pipeline.prop_pipeline import run_prop_pipeline
-from backend.pipeline.grader import grade_pick, grade_prop_pick, payout_for, capture_closing_odds, grade_completed_games
+from backend.pipeline.grader import (grade_pick, grade_prop_pick, payout_for, capture_closing_odds,
+                                     grade_completed_games, prop_box_score)
 from backend.collectors.espn_box_score import (POSSESSION_SPORTS,
                                                collect_box_scores_for_final_games,
                                                collect_team_box_scores)
@@ -629,12 +630,7 @@ def grade_pending_picks(session) -> dict:
                 # Props are graded against the player's box score, not the
                 # final score. Mirrors the PaperPick loop below, which has
                 # always branched this way.
-                player_stat = (
-                    session.query(PlayerStat)
-                    .filter_by(player_name=pick.prop_player,
-                               stat_type="game_log", game_date=game.date)
-                    .first()
-                )
+                player_stat = prop_box_score(session, pick.prop_player, game.date)
                 prop_outcome = grade_prop_pick(pick.pick_value, pick.prop_market,
                                                player_stat)
                 if prop_outcome is None:
@@ -679,11 +675,7 @@ def grade_pending_picks(session) -> dict:
             continue
 
         if pick.pick_type == "prop" and pick.prop_player and pick.prop_market:
-            player_stat = (
-                session.query(PlayerStat)
-                .filter_by(player_name=pick.prop_player, stat_type="game_log", game_date=game.date)
-                .first()
-            )
+            player_stat = prop_box_score(session, pick.prop_player, game.date)
             prop_result = grade_prop_pick(pick.pick_value, pick.prop_market, player_stat)
             if not prop_result:
                 continue

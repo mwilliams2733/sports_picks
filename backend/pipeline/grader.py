@@ -81,6 +81,20 @@ def grade_pick(pick_type: str, pick_value: str, home_score: int, away_score: int
     return result, payout_for(result, odds_at_pick)
 
 
+def prop_box_score(session, player_name: str, game_date):
+    """The player's game_log row for ``game_date``, or None if not collected.
+
+    The one lookup every prop grading path uses -- strategy picks, paper
+    picks and the emailed record -- so they cannot settle one prop against
+    different rows.
+    """
+    from backend.models import PlayerStat
+    return (session.query(PlayerStat)
+            .filter_by(player_name=player_name, stat_type="game_log",
+                       game_date=game_date)
+            .first())
+
+
 def grade_prop_pick(pick_value: str, market: str, player_stat) -> tuple[str, float] | None:
     """Grade a prop pick against actual player stats.
 

@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from sqlalchemy import (
     Column, Integer, String, Float, Date, DateTime, ForeignKey, Boolean, Text,
-    Index
+    Index, UniqueConstraint
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -256,6 +256,32 @@ class PickResult(Base):
     odds_at_close = Column(Integer, nullable=True)
     line_at_close = Column(Float, nullable=True)
     pick = relationship("PickModel")
+
+class EmailedPick(Base):
+    """A pick as it went out in the daily digest.
+
+    ``pick_value`` and ``odds`` are copies of what the email said, not a
+    pointer to them: a game pick is refreshed in place until kickoff, so the
+    stored pick's price -- or side -- can change after the email is sent.
+    The emailed record is graded from these columns
+    (``backend.digest.record``), never from the pick's current values.
+    """
+    __tablename__ = "emailed_picks"
+    __table_args__ = (UniqueConstraint("digest_date", "pick_id",
+                                       name="uq_emailed_pick_per_digest"),)
+    id = Column(Integer, primary_key=True)
+    digest_date = Column(Date, nullable=False, index=True)
+    pick_id = Column(Integer, ForeignKey("picks.id"), nullable=False)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
+    sport = Column(String, nullable=False)
+    pick_type = Column(String, nullable=False)
+    pick_value = Column(String, nullable=False)
+    odds = Column(Integer, nullable=False)
+    prop_player = Column(String, nullable=True)
+    prop_market = Column(String, nullable=True)
+    sent_at = Column(DateTime, nullable=False,
+                     default=lambda: datetime.now(tz=timezone.utc))
+
 
 class PlayerProp(Base):
     __tablename__ = "player_props"
