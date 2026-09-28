@@ -110,6 +110,25 @@ def test_empty_but_picks_exist_now_means_the_slate_landed_too_late():
     assert result.ok is False
 
 
+def test_empty_with_no_slate_line_is_a_missed_scout_not_a_quiet_day():
+    """2026-09-28: the machine slept through the 8am scout, the digest found
+    nothing, and no picks existed "even now" -- because nothing had run to
+    write them. This was reported as a quiet day with exit 0. A quiet day is
+    only quiet if the scout said so."""
+    result = classify([EMPTY], TODAY, picks_now=0)
+
+    assert result.outcome is Outcome.SCOUT_NEVER_RAN
+    assert result.ok is False
+    assert result.exit_code == 1
+
+
+def test_a_missed_scout_outranks_late_picks():
+    """Picks written later by a window job do not explain an absent slate."""
+    result = classify([EMPTY], TODAY, picks_now=5)
+
+    assert result.outcome is Outcome.SCOUT_NEVER_RAN
+
+
 def test_a_missing_slate_line_is_called_out_even_when_the_digest_sent():
     """The digest can send off yesterday's leftovers while this morning's
     scout never ran. The slate line is the upstream signal."""

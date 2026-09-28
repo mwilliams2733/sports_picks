@@ -20,6 +20,11 @@ an evening card produced its picks around 22:00 UTC while the digest had
 already given up at 15:00 UTC. If this fires again the morning slate is
 landing too late.
 
+**EMPTY, scout never ran** -- the digest ran and found nothing, and there
+is no `Morning slate` line for the day. No picks existing is then the
+consequence of the fault, not a quiet card. 2026-09-28: the machine slept
+through the 8am scout and this was reported OK.
+
 **NEVER RAN** -- no digest line for today at all. The scheduler was down, or
 the 8am scout failed before reaching the digest hour.
 
@@ -110,6 +115,7 @@ class Outcome(enum.Enum):
     TOO_EARLY = "too-early"
     EMPTY_QUIET = "empty-quiet-day"
     EMPTY_BUT_PICKS_EXIST = "empty-but-picks-exist"
+    SCOUT_NEVER_RAN = "empty-scout-never-ran"
     NEVER_RAN = "never-ran"
 
 
@@ -198,6 +204,18 @@ def classify(lines, target_date, *, picks_now: int,
     if any(_SENT_RE.search(x) for x in relevant):
         return Result(Outcome.SENT, True, slate, picks_now,
                       "; ".join(notes) or "digest sent")
+
+    # Before the picks test: with no scout, "no picks even now" is the
+    # CONSEQUENCE of the fault, not evidence of a quiet card. 2026-09-28
+    # passed as a quiet day with exit 0 while the machine had slept through
+    # the 8am scout on a Monday Night Football card.
+    if slate is None:
+        return Result(
+            Outcome.SCOUT_NEVER_RAN, False, slate, picks_now,
+            "; ".join(notes + [
+                "digest was empty and the scout never logged a slate: nothing "
+                "priced today's card -- check for sleep or a scheduler stall "
+                "around 08:00 ET"]))
 
     if picks_now > 0:
         return Result(
