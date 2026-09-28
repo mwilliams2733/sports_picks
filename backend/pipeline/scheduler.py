@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import threading
 import time
 from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -88,6 +89,30 @@ LOOKBACK_DAYS = 3
 #: `scheduled` rather than guessed at.
 ESPN_TEAM_SPORTS = ("nba", "nfl", "ncaab", "ncaaf", "mlb")
 
+#: How late a scout or digest may still run. APScheduler's default is ONE
+#: SECOND: on 2026-09-28 the machine slept through 08:00 ET and the scout was
+#: dropped as "missed by 2:48:27", so the 11:00 digest found nothing. A scout
+#: hours late still prices the evening slate; a digest hours late still beats
+#: none. The scheduler thread's own wait does not count sleep time on
+#: Windows, so a job can also run up to an hour after the machine wakes.
+SCOUT_MISFIRE_GRACE = 3 * 3600
+DIGEST_MISFIRE_GRACE = 6 * 3600
+
+#: The ET date of the last scout whose game fetch succeeded. The 9 and 10
+#: o'clock retries read it and skip themselves. They used to be DELETED with
+#: remove_job instead, and a cron job removed is removed for the life of the
+#: process: after the first success on 2026-09-23 there were no retries at
+#: all, and nothing covered 2026-09-28's missed scout.
+_last_scout_success: date | None = None
+
+#: One scout at a time. When the machine wakes with the 8, 9 and 10 o'clock
+#: jobs all overdue, APScheduler hands them to its thread pool together.
+_scout_lock = threading.Lock()
+
+#: How long the digest waits for a scout another thread is running. A
+#: forced ncaaf scout has taken 25+ minutes.
+SCOUT_WAIT_SECONDS = 45 * 60
+
 
 def configure_scheduler(config: dict, engine) -> BackgroundScheduler:
     """Build a BackgroundScheduler with the standard cron job set, but DO
@@ -98,17 +123,21 @@ def configure_scheduler(config: dict, engine) -> BackgroundScheduler:
     FastAPI lifespan in api/main.py (when ENABLE_SCHEDULER=1).
     """
     scheduler = BackgroundScheduler(timezone=ET)
+    late_ok = {"misfire_grace_time": SCOUT_MISFIRE_GRACE, "coalesce": True}
     scheduler.add_job(
         lambda: morning_scout(config, engine, scheduler),
         'cron', hour=8, minute=0, id='morning_scout', replace_existing=True,
+        **late_ok,
     )
     scheduler.add_job(
         lambda: morning_scout(config, engine, scheduler, is_retry=True),
         'cron', hour=9, minute=0, id='scout_retry_9', replace_existing=True,
+        **late_ok,
     )
     scheduler.add_job(
         lambda: morning_scout(config, engine, scheduler, is_retry=True),
         'cron', hour=10, minute=0, id='scout_retry_10', replace_existing=True,
+        **late_ok,
     )
     from backend.pipeline.recalibration_job import run_recalibration
     scheduler.add_job(
@@ -118,13 +147,30 @@ def configure_scheduler(config: dict, engine) -> BackgroundScheduler:
 
     digest_cfg = config.get("digest", {}) or {}
     if digest_cfg.get("enabled") or os.environ.get("DIGEST_DRY_RUN") == "1":
-        from backend.digest.job import send_daily_digest
         scheduler.add_job(
-            lambda: send_daily_digest(config, engine),
+            lambda: _digest_after_scout(config, engine, scheduler),
             'cron', hour=digest_cfg.get("send_hour_et", 11), minute=0,
             id='daily_digest', replace_existing=True,
+            misfire_grace_time=DIGEST_MISFIRE_GRACE, coalesce=True,
         )
     return scheduler
+
+
+def _digest_after_scout(config: dict, engine, scheduler) -> None:
+    """Send the digest, but never ahead of today's scout.
+
+    The digest selects from picks the scout writes. After a sleep, the
+    overdue scout and digest fall due together and race in the thread pool;
+    and if every scout was missed, a digest alone can only report "empty".
+    So: if no scout has succeeded today, run one now (or wait out the one in
+    progress) before selecting.
+    """
+    if _last_scout_success != et_today():
+        logger.warning("Digest hour reached with no successful scout today; "
+                       "running the scout first")
+        morning_scout(config, engine, scheduler, is_retry=True, wait=True)
+    from backend.digest.job import send_daily_digest
+    send_daily_digest(config, engine)
 
 
 def run_pipeline(config_path: str = "config.yaml"):
@@ -299,7 +345,29 @@ def fetch_odds_and_pick(config, engine, sports) -> None:
         session.close()
 
 
-def morning_scout(config, engine, scheduler, is_retry=False):
+def morning_scout(config, engine, scheduler, is_retry=False, wait=False):
+    """The 8am scout and its 9/10am retries.
+
+    A retry is a no-op once today's scout has succeeded. Only one scout runs
+    at a time: a caller that finds one in progress skips, unless ``wait``,
+    in which case it blocks until that one finishes and then re-checks
+    whether there is anything left to do.
+    """
+    if not _scout_lock.acquire(timeout=SCOUT_WAIT_SECONDS if wait else 0):
+        logger.info("Scout already in progress; this %s skipped",
+                    "retry" if is_retry else "run")
+        return
+    try:
+        if is_retry and _last_scout_success == et_today():
+            logger.info("Scout retry skipped: today's scout already succeeded")
+            return
+        _scout(config, engine, scheduler, is_retry)
+    finally:
+        _scout_lock.release()
+
+
+def _scout(config, engine, scheduler, is_retry):
+    global _last_scout_success
     session = get_session(engine)
     try:
         # Box scores first: grade_pending_picks can only grade a prop if the
@@ -368,6 +436,7 @@ def morning_scout(config, engine, scheduler, is_retry=False):
         scheduled_sports = [s for s in active_sports if s in ESPN_TEAM_SPORTS]
         if not scheduled_sports:
             logger.info("No auto-scheduled sports in season today")
+            _last_scout_success = et_today()
             return
         today = et_today()
         # Today's pass reconciles: a postponed game must drop out of Today's
@@ -397,12 +466,9 @@ def morning_scout(config, engine, scheduler, is_retry=False):
             logger.warning(f"Scout failed fetching games: {e}, will retry at 9/10 AM")
             return
 
-        # Scout succeeded — remove retry jobs
-        for retry_id in ("scout_retry_9", "scout_retry_10"):
-            try:
-                scheduler.remove_job(retry_id)
-            except Exception:
-                pass
+        # Scout succeeded: the retries read this and skip themselves. Never
+        # remove_job them -- that deletes a cron job for good, not for today.
+        _last_scout_success = today
 
         # Sports with no ESPN schedule never get a window, so this is the
         # only thing that fetches their odds at all.
