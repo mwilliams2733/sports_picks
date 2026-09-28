@@ -211,18 +211,103 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
         if analysis and analysis.confidence >= 1:
             winning.append(analysis)
 
-    # Collapse the same prop offered by multiple bookmakers into one pick
-    # (best price), then persist. Picks are only stored when a prop strategy
-    # is active (strategy_id set).
-    picks_generated = 0
+    # Picks are only stored when a prop strategy is active (strategy_id set).
+    picks_generated = picks_refreshed = 0
     if strategy_id:
-        for analysis in _dedup_prop_analyses(winning):
-            pick = _build_prop_pick(analysis, strategy_id)
-            session.add(pick)
-            picks_generated += 1
+        picks_generated, picks_refreshed = _store_prop_picks(
+            session, winning, strategy_id)
     session.commit()
     return {"games": len(games), "stats_fetched": stats_count,
-            "props_analyzed": props_analyzed, "picks_generated": picks_generated}
+            "props_analyzed": props_analyzed, "picks_generated": picks_generated,
+            "picks_refreshed": picks_refreshed}
+
+
+def _one_per_player_market(analyses: list[PropAnalysis]) -> list[PropAnalysis]:
+    """Keep one line per (game, player, market): alternate lines are one bet.
+
+    Over 204.5 / 205.5 / 207.5 / 211.5 pass yards for one quarterback resolve
+    on the same yards. Stored as four picks, they were graded as four
+    wagers. Only one is kept.
+
+    Ranked by edge, not price: across lines a better price usually means a
+    harder line, and edge is the only figure measured against the line.
+    Ties go to the better payout, then to the bookmaker name, so the choice
+    does not depend on input order.
+    """
+    groups: dict[tuple, list[PropAnalysis]] = {}
+    for a in analyses:
+        groups.setdefault((a.game_id, a.player_name, a.market), []).append(a)
+    return [min(g, key=lambda a: (-a.edge_pct, -calculate_payout(a.odds),
+                                  a.bookmaker))
+            for g in groups.values()]
+
+
+def _store_prop_picks(session: Session, analyses: list[PropAnalysis],
+                      strategy_id: int) -> tuple[int, int]:
+    """Persist prop picks, one per (game, player, market, strategy).
+
+    Returns ``(added, refreshed)``. Every window run re-analyses the whole
+    day, and this used to ``session.add`` every result each time: 18 runs on
+    2026-09-26 stored each prop 18 times, and grading counted every copy as
+    a wager. Now an existing pick is refreshed in place, on exactly the
+    terms game picks use (`pick_generator._refreshable`: never once graded,
+    never once its game has started), and a started game gets no new pick,
+    matching ``skip_started``.
+    """
+    from backend.pipeline.pick_generator import _refreshable
+    from backend.models import PickResult
+    from backend.time_utils import game_start_utc
+
+    chosen = _one_per_player_market(_dedup_prop_analyses(analyses))
+    if not chosen:
+        return 0, 0
+    game_ids = {a.game_id for a in chosen}
+    games = {g.id: g for g in
+             session.query(Game).filter(Game.id.in_(game_ids))}
+    already: dict[tuple, PickModel] = {}
+    # Ascending id, first wins: rows duplicated before this fix leave the
+    # oldest as the one refreshed, and the rest untouched.
+    for row in (session.query(PickModel)
+                .filter(PickModel.strategy_id == strategy_id,
+                        PickModel.pick_type == "prop",
+                        PickModel.game_id.in_(game_ids))
+                .order_by(PickModel.id.asc())):
+        already.setdefault((row.game_id, row.prop_player, row.prop_market), row)
+    graded = {pid for (pid,) in session.query(PickResult.pick_id).filter(
+        PickResult.pick_id.in_([p.id for p in already.values()] or [-1]))}
+
+    now = datetime.now(tz=timezone.utc)
+    added = refreshed = 0
+    for a in chosen:
+        game = games.get(a.game_id)
+        if game is None:
+            continue
+        existing = already.get((a.game_id, a.player_name, a.market))
+        if existing is not None:
+            if _refreshable(existing, game, graded):
+                _refresh_prop_pick(existing, a)
+                refreshed += 1
+            continue
+        start = game_start_utc(game)
+        if start is not None and start <= now:
+            continue
+        # No in-run registration needed: `chosen` is already one per key.
+        session.add(_build_prop_pick(a, strategy_id))
+        added += 1
+    session.flush()
+    return added, refreshed
+
+
+def _refresh_prop_pick(existing: PickModel, analysis: PropAnalysis) -> None:
+    """Overwrite an ungraded, unstarted prop pick with a fresh analysis.
+
+    Derived from `_build_prop_pick` so the two can never disagree about
+    what a prop pick contains.
+    """
+    fresh = _build_prop_pick(analysis, existing.strategy_id)
+    for field in ("pick_value", "confidence", "edge_pct", "odds_at_pick",
+                  "created_at"):
+        setattr(existing, field, getattr(fresh, field))
 
 def _recent_form(session: Session, player_name: str, *, before: date) -> list:
     """The player's last five game logs strictly BEFORE ``before``.
