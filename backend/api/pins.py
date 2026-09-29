@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import os
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
@@ -35,19 +36,33 @@ def pin_matches(pin: str, pin_hash: str, pin_salt: str) -> bool:
 
 
 class PinGuard:
-    """Counts wrong PINs per player; locks after MAX_FAILURES for LOCK_FOR."""
+    """Counts wrong PINs per player; locks after MAX_FAILURES for LOCK_FOR.
+
+    `reserve_attempt` and `release` are the only methods `require_player_pin`
+    calls around a PIN check, and both take `_lock` for their whole body.
+    That is deliberate: the lockout must be enforced BEFORE the slow PBKDF2
+    compare runs, in the same critical section as the "am I already locked"
+    read, or concurrent requests can each observe "not locked yet" and all
+    slip through -- a burst of 30 simultaneous wrong guesses against a
+    file-backed app once got 19 of them evaluated instead of at most
+    MAX_FAILURES. A plain `threading.Lock` (not re-entrant) is enough: no
+    method here ever calls another while holding it.
+    """
 
     def __init__(self, now: Callable[[], datetime] | None = None):
         self.now = now or (lambda: datetime.now(timezone.utc))
         self._failures: dict[int, int] = {}
         self._locked_until: dict[int, datetime] = {}
+        self._lock = threading.Lock()
 
     def reset(self) -> None:
-        self._failures.clear()
-        self._locked_until.clear()
+        with self._lock:
+            self._failures.clear()
+            self._locked_until.clear()
         self.now = lambda: datetime.now(timezone.utc)
 
-    def locked(self, user_id: int) -> bool:
+    def _locked_locked(self, user_id: int) -> bool:
+        """`locked()`'s body, callable only while `_lock` is already held."""
         until = self._locked_until.get(user_id)
         if until is None:
             return False
@@ -57,18 +72,43 @@ class PinGuard:
             return False
         return True
 
-    def fail(self, user_id: int) -> None:
-        count = self._failures.get(user_id, 0) + 1
-        self._failures[user_id] = count
-        if count >= MAX_FAILURES:
-            self._locked_until[user_id] = self.now() + LOCK_FOR
+    def locked(self, user_id: int) -> bool:
+        with self._lock:
+            return self._locked_locked(user_id)
 
-    def succeed(self, user_id: int) -> None:
-        self._failures.pop(user_id, None)
+    def reserve_attempt(self, user_id: int) -> bool:
+        """Call this BEFORE hashing the candidate PIN, never after.
+
+        In one critical section: if the player is already locked, returns
+        True and reserves nothing -- the caller must refuse without ever
+        touching the hash, so a flood of guesses made while locked can't
+        each sneak a "not locked yet" read in ahead of the write that would
+        have locked them. Otherwise counts this attempt as a provisional
+        failure (locking at MAX_FAILURES) and returns False -- the caller
+        may now hash and compare. If the PIN turns out right, call
+        `release`; if wrong, do nothing further -- the reservation already
+        counted it.
+        """
+        with self._lock:
+            if self._locked_locked(user_id):
+                return True
+            count = self._failures.get(user_id, 0) + 1
+            self._failures[user_id] = count
+            if count >= MAX_FAILURES:
+                self._locked_until[user_id] = self.now() + LOCK_FOR
+            return False
+
+    def release(self, user_id: int) -> None:
+        """The reserved attempt turned out to be the correct PIN: undo it
+        (and any lock that same reservation just set) and clear the count."""
+        with self._lock:
+            self._failures.pop(user_id, None)
+            self._locked_until.pop(user_id, None)
 
     def clear(self, user_id: int) -> None:
-        self._failures.pop(user_id, None)
-        self._locked_until.pop(user_id, None)
+        with self._lock:
+            self._failures.pop(user_id, None)
+            self._locked_until.pop(user_id, None)
 
 
 guard = PinGuard()
@@ -81,18 +121,22 @@ def require_player_pin(request: Request, user_id: int,
         user = session.get(UserProfile, user_id)
         if user is None:
             raise HTTPException(status_code=404, detail="User not found")
-        if guard.locked(user_id):
-            raise HTTPException(status_code=429,
-                                detail="Too many wrong PINs; try again in 15 minutes")
         if not x_player_pin or not PIN_PATTERN.match(x_player_pin):
             raise HTTPException(status_code=401, detail="PIN required (4-6 digits)")
         if user.pin_hash is None:
             user.pin_hash, user.pin_salt = hash_pin(x_player_pin)
             session.commit()
             return
+        # Reserve the attempt BEFORE hashing -- this is the atomic
+        # check-and-count that closes the concurrent-guess race. A locked
+        # player is refused here, before pin_matches ever runs, so a wrong
+        # and a right PIN get an identical 429 with no way to tell them
+        # apart from the response.
+        if guard.reserve_attempt(user_id):
+            raise HTTPException(status_code=429,
+                                detail="Too many wrong PINs; try again in 15 minutes")
         if not pin_matches(x_player_pin, user.pin_hash, user.pin_salt):
-            guard.fail(user_id)
             raise HTTPException(status_code=401, detail="Wrong PIN")
-        guard.succeed(user_id)
+        guard.release(user_id)
     finally:
         session.close()

@@ -54,7 +54,8 @@ def _flatten(routes, prefix=""):
             continue  # not an HTTP write route; nothing to guard here
         elif isinstance(route, Mount) and isinstance(route.app, StaticFiles):
             continue  # static assets, not a write route
-        elif isinstance(route, Route) and (route.methods or set()) <= {"GET", "HEAD"}:
+        elif (isinstance(route, Route) and route.methods is not None
+              and route.methods <= {"GET", "HEAD"}):
             continue  # a plain read route (e.g. the SPA catch-all)
         else:
             raise TypeError(
@@ -140,6 +141,27 @@ def test_flatten_raises_on_an_unrecognised_route_type():
         return None
 
     app.add_route("/raw", _handler, methods=["POST"])
+
+    with pytest.raises(TypeError):
+        list(_flatten(app.routes))
+
+
+def test_flatten_raises_on_a_class_based_endpoint_with_no_declared_methods():
+    """A starlette `Route` built from an `HTTPEndpoint` subclass (or any raw
+    ASGI endpoint) has `route.methods is None` -- it accepts every HTTP verb,
+    dispatched dynamically per-request, not just GET/HEAD. Treating
+    `methods is None` as "read-only" (e.g. `(route.methods or set()) <=
+    {"GET", "HEAD"}`, which is vacuously true for `None`) would silently wave
+    through a class-based route that defines `post`. The walk must raise
+    instead of skipping it."""
+    from starlette.endpoints import HTTPEndpoint
+
+    class Writer(HTTPEndpoint):
+        async def post(self, request):
+            return None
+
+    app = FastAPI()
+    app.add_route("/cls", Writer)
 
     with pytest.raises(TypeError):
         list(_flatten(app.routes))

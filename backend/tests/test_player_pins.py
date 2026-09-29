@@ -1,5 +1,6 @@
 """A player's bets need their PIN. Five wrong PINs lock the player for 15
 minutes; the lock is tested on an injected clock, not by waiting."""
+import concurrent.futures
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -14,8 +15,8 @@ from backend.time_utils import et_today
 BET = {"pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110, "stake": 10}
 
 
-def _setup(pin="1234"):
-    app = create_app(":memory:")
+def _setup(pin="1234", db_path=":memory:"):
+    app = create_app(db_path)
     client = TestClient(app)
     s = get_session(app.state.engine)
     s.add_all([Team(id=1, name="H", abbreviation="H", sport="nba"),
@@ -63,6 +64,52 @@ def test_five_wrong_pins_lock_even_the_right_one_until_15_minutes_pass():
     assert _bet(client, uid, "1234").status_code == 429
     clock[0] += timedelta(seconds=2)
     assert _bet(client, uid, "1234").status_code == 200
+
+
+def test_a_locked_player_gets_identical_responses_right_or_wrong_and_guesses_while_locked_do_not_extend_it():
+    """Fix round 1, item 2: the lock must be checked before the PIN is ever
+    compared, so a wrong and a right guess made while locked are
+    indistinguishable from the response alone (no oracle for "was that
+    close?"), and neither extends the lock -- only crossing MAX_FAILURES
+    from a fresh state should ever set a new lock-until time."""
+    clock = [datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)]
+    pins.guard.now = lambda: clock[0]
+    client, uid = _setup()
+    for _ in range(5):
+        assert _bet(client, uid, "9999").status_code == 401
+
+    wrong = _bet(client, uid, "0000")
+    right = _bet(client, uid, "1234")
+    assert wrong.status_code == 429
+    assert right.status_code == 429
+    assert wrong.json() == right.json()
+
+    clock[0] += timedelta(minutes=10)
+    assert _bet(client, uid, "9999").status_code == 429
+    assert _bet(client, uid, "8888").status_code == 429
+
+    clock[0] += timedelta(minutes=5, seconds=1)
+    assert _bet(client, uid, "1234").status_code == 200
+
+
+def test_a_concurrent_burst_of_wrong_pins_is_capped_at_max_failures(tmp_path):
+    """Fix round 1, item 1: 30 simultaneous wrong PINs against a
+    FILE-backed app (":memory:" SQLite was unreliable under this concurrent
+    load) must not all reach the slow PBKDF2 compare before the lockout is
+    recorded -- at most MAX_FAILURES may be evaluated at all (401); every
+    other concurrent guess must be refused outright (429), never let
+    through as an extra "free" guess."""
+    client, uid = _setup(db_path=str(tmp_path / "t.db"))
+
+    def _wrong_guess(_):
+        return _bet(client, uid, "9999").status_code
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as pool:
+        results = list(pool.map(_wrong_guess, range(30)))
+
+    assert results.count(401) <= pins.MAX_FAILURES, results
+    assert set(results) <= {401, 429}
+    assert len(results) == 30
 
 
 def test_the_pin_is_never_stored():

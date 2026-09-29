@@ -2,7 +2,7 @@
 is configured at all (fail closed). DELETE /users/999 answers 404 once past
 the guard, which proves the guard let the request through."""
 import pytest
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.testclient import TestClient
 
 from backend.api.auth import require_owner
@@ -62,19 +62,27 @@ def test_assert_owner_guarded_catches_a_guard_that_does_not_refuse():
     """Proof the helper isn't vacuous: never edits backend/api/auth.py or any
     real route, builds a synthetic app with a deliberately lenient dependency
     instead -- one that returns without checking anything, header or not.
-    assert_owner_guarded must fail loudly against it, not pass.
+    assert_owner_guarded must fail loudly against it, not pass -- on the
+    "no key" branch specifically, since this fake never refuses at all.
+
+    `x_owner_key` is declared with `Header(alias="X-Owner-Key")` so the fake
+    actually reads the header FastAPI would bind for a real dependency
+    (a bare `str | None = None` parameter binds to a QUERY parameter
+    instead, which this test never sends -- that mismatch is exactly the
+    bug Fix round 1 corrected here).
     """
     app = FastAPI()
 
-    def lenient(x_owner_key: str | None = None):
+    def lenient(x_owner_key: str | None = Header(default=None, alias="X-Owner-Key")):
         return None  # never refuses, regardless of the header
 
     @app.delete("/lenient/{item_id}")
     def _lenient_route(item_id: int, _: None = Depends(lenient)):
         return {"ok": True}
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError) as excinfo:
         assert_owner_guarded(TestClient(app), "DELETE", "/lenient/1")
+    assert str(excinfo.value).startswith("no key:"), str(excinfo.value)
 
 
 def test_assert_owner_guarded_catches_a_guard_that_ignores_the_key_value():
@@ -83,10 +91,16 @@ def test_assert_owner_guarded_catches_a_guard_that_ignores_the_key_value():
     checks the key is right. assert_owner_guarded's "wrong key" branch must
     catch this: a wrong key must still be refused, not merely "some header
     present". Proof the helper isn't vacuous on that branch specifically.
+
+    `x_owner_key` is declared with `Header(alias="X-Owner-Key")` -- see the
+    note on the previous test. Without it this fake reads a query parameter
+    that is never sent, so it is always None and the fake refuses every
+    request including the right key, tripping the helper's "right key"
+    assertion instead of the "wrong key" one this test means to exercise.
     """
     app = FastAPI()
 
-    def checks_presence_only(x_owner_key: str | None = None):
+    def checks_presence_only(x_owner_key: str | None = Header(default=None, alias="X-Owner-Key")):
         if x_owner_key is None:
             raise HTTPException(status_code=403, detail="no key")
         return None  # any non-None value is accepted, right or wrong
@@ -95,8 +109,9 @@ def test_assert_owner_guarded_catches_a_guard_that_ignores_the_key_value():
     def _route(item_id: int, _: None = Depends(checks_presence_only)):
         return {"ok": True}
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError) as excinfo:
         assert_owner_guarded(TestClient(app), "DELETE", "/present-only/1")
+    assert str(excinfo.value).startswith("wrong key:"), str(excinfo.value)
 
 
 def test_require_owner_fails_closed_on_a_fake_route(monkeypatch, tmp_path):
