@@ -50,6 +50,20 @@ def _make_user(client, name="tester"):
     return response.json()["id"]
 
 
+def _finish(client, game_id, home=110, away=100):
+    session = get_session(client.app.state.engine)
+    game = session.get(Game, game_id)
+    game.status, game.home_score, game.away_score = "final", home, away
+    session.commit()
+    session.close()
+
+
+def _grade(client):
+    response = client.post("/users/grade")
+    assert response.status_code == 200
+    return response.json()
+
+
 # --- Step 2: User CRUD tests -------------------------------------------
 
 
@@ -84,7 +98,7 @@ def test_get_unknown_user_404():
 def test_delete_user_removes_picks():
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)
-    game_ids = _seed_games(client, [{"status": "final", "home_score": 110, "away_score": 100}])
+    game_ids = _seed_games(client, [{"status": "scheduled"}])
     user_id = _make_user(client, "alice")
     pick_response = client.post(f"/users/{user_id}/picks", json={
         "game_id": game_ids[0],
@@ -94,6 +108,8 @@ def test_delete_user_removes_picks():
         "stake": 100,
     })
     assert pick_response.status_code == 200
+    _finish(client, game_ids[0])
+    _grade(client)
 
     delete_response = client.delete(f"/users/{user_id}")
     assert delete_response.status_code == 200
@@ -105,7 +121,7 @@ def test_delete_user_removes_picks():
 def test_list_users_sorted_by_balance_desc():
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)
-    game_ids = _seed_games(client, [{"status": "final", "home_score": 110, "away_score": 100}])
+    game_ids = _seed_games(client, [{"status": "scheduled"}])
     loser_id = _make_user(client, "loser")
     winner_id = _make_user(client, "winner")
 
@@ -117,7 +133,14 @@ def test_list_users_sorted_by_balance_desc():
         "stake": 100,
     })
     assert winner_pick.status_code == 200
-    assert winner_pick.json()["result"] == "win"
+    assert winner_pick.json()["result"] is None
+    _finish(client, game_ids[0])
+    _grade(client)
+
+    session = get_session(client.app.state.engine)
+    pick = session.get(PaperPick, winner_pick.json()["id"])
+    assert pick.result == "win"
+    session.close()
 
     response = client.get("/users/")
     assert response.status_code == 200
@@ -147,23 +170,47 @@ def test_place_pick_on_scheduled_game_is_pending():
     assert body["payout"] is None
 
 
-def test_place_pick_on_final_game_grades_immediately_win():
+def test_a_bet_on_a_finished_game_is_refused():
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "final", "home_score": 110, "away_score": 100}])
     user_id = _make_user(client)
     response = client.post(f"/users/{user_id}/picks", json={
-        "game_id": game_ids[0],
-        "pick_type": "moneyline",
-        "pick_value": "HOME ML",
-        "odds": -110,
-        "stake": 100,
-    })
-    assert response.status_code == 200
-    body = response.json()
-    assert body["result"] == "win"
-    # calculate_payout(-110) == 100/110, so a $100 win pays ~90.909.
-    assert body["payout"] == pytest.approx(90.909, rel=1e-3)
+        "game_id": game_ids[0], "pick_type": "moneyline",
+        "pick_value": "HOME ML", "odds": -110, "stake": 100})
+    assert response.status_code == 400
+
+
+def test_a_bet_on_a_started_game_is_refused():
+    from datetime import datetime, timedelta, timezone
+    app = create_app(":memory:")
+    client = TestClient(app, headers=ALL_HEADERS)
+    game_ids = _seed_games(client, [{"status": "scheduled"}])
+    session = get_session(app.state.engine)
+    session.get(Game, game_ids[0]).start_time = (
+        datetime.now(timezone.utc) - timedelta(minutes=5)).replace(tzinfo=None)
+    session.commit()
+    session.close()
+    user_id = _make_user(client)
+    response = client.post(f"/users/{user_id}/picks", json={
+        "game_id": game_ids[0], "pick_type": "moneyline",
+        "pick_value": "HOME ML", "odds": -110, "stake": 100})
+    assert response.status_code == 400
+
+
+def test_a_settled_win_pays_at_the_price():
+    app = create_app(":memory:")
+    client = TestClient(app, headers=ALL_HEADERS)
+    game_ids = _seed_games(client, [{"status": "scheduled"}])
+    user_id = _make_user(client)
+    pick = client.post(f"/users/{user_id}/picks", json={
+        "game_id": game_ids[0], "pick_type": "moneyline",
+        "pick_value": "HOME ML", "odds": -110, "stake": 100}).json()
+    assert pick["result"] is None
+    _finish(client, game_ids[0])
+    _grade(client)
+    body = client.get(f"/users/{user_id}").json()
+    assert body["profit"] == pytest.approx(90.91, abs=0.01)
 
 
 def test_place_pick_zero_stake_rejected():
@@ -263,8 +310,8 @@ def test_parlay_combined_odds_two_minus_110_legs():
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [
-        {"status": "final", "home_score": 110, "away_score": 100},
-        {"status": "final", "home_score": 110, "away_score": 100},
+        {"status": "scheduled"},
+        {"status": "scheduled"},
     ])
     user_id = _make_user(client)
     response = client.post(f"/users/{user_id}/parlay", json={
@@ -283,19 +330,13 @@ def test_parlay_combined_odds_two_minus_110_legs():
     assert body["potential_payout"] == 1322.31
 
 
-def test_parlay_payout_missing_from_balance():
-    # CHARACTERIZATION (known bug, see plans/README.md): the balance formula
-    # (users.py:150-151 in get_user) sums PaperPick.payout only. Parlay legs
-    # are stored with payout=0 (users.py:408) and the real payout lives on
-    # Parlay.payout, which is never summed into current_balance/profit. So a
-    # winning parlay's profit is invisible from GET /users/{id}. After the
-    # fix, current_balance must become 11322.31 and profit must become
-    # 1322.31.
+def test_a_winning_parlay_reaches_the_balance():
+    # Was a pinned bug (plan 001): parlay payouts never reached the balance.
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [
-        {"status": "final", "home_score": 110, "away_score": 100},
-        {"status": "final", "home_score": 110, "away_score": 100},
+        {"status": "scheduled"},
+        {"status": "scheduled"},
     ])
     user_id = _make_user(client)
     parlay_response = client.post(f"/users/{user_id}/parlay", json={
@@ -306,27 +347,25 @@ def test_parlay_payout_missing_from_balance():
         ],
     })
     assert parlay_response.status_code == 200
-    assert parlay_response.json()["result"] == "win"
+    assert parlay_response.json()["result"] is None
+    _finish(client, game_ids[0])
+    _finish(client, game_ids[1])
+    _grade(client)
 
     get_response = client.get(f"/users/{user_id}")
     assert get_response.status_code == 200
     body = get_response.json()
-    assert body["current_balance"] == 10000.0
-    assert body["profit"] == 0
+    assert body["current_balance"] == pytest.approx(11322.31, abs=0.01)
+    assert body["profit"] == pytest.approx(1322.31, abs=0.01)
 
 
-def test_parlay_on_scheduled_games_never_settles():
-    # CHARACTERIZATION (known bug, see plans/README.md): place_parlay only
-    # grades the parlay when all legs are already final at placement time
-    # (users.py:418, all_graded). POST /users/grade only iterates PaperPick
-    # rows, never re-checking Parlay rows once their legs later become final.
-    # So a parlay with a leg that was scheduled at placement never settles,
-    # even after the game finishes and /users/grade runs. After the fix, the
-    # parlay's result must become "win".
+def test_a_parlay_settles_when_its_last_leg_finishes():
+    # Was a pinned bug (plan 001): a parlay placed before its games never
+    # settled.
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [
-        {"status": "final", "home_score": 110, "away_score": 100},
+        {"status": "scheduled"},
         {"status": "scheduled"},
     ])
     user_id = _make_user(client)
@@ -340,22 +379,14 @@ def test_parlay_on_scheduled_games_never_settles():
     assert parlay_response.status_code == 200
     assert parlay_response.json()["result"] is None
 
-    # Mark the second game final with a winning score, then run bulk grading.
     engine = client.app.state.engine
-    session = get_session(engine)
-    game = session.get(Game, game_ids[1])
-    game.status = "final"
-    game.home_score = 110
-    game.away_score = 100
-    session.commit()
-    session.close()
-
-    grade_response = client.post("/users/grade")
-    assert grade_response.status_code == 200
+    _finish(client, game_ids[0])
+    _finish(client, game_ids[1])
+    _grade(client)
 
     session = get_session(engine)
     parlay = session.get(Parlay, parlay_response.json()["id"])
-    assert parlay.result is None
+    assert parlay.result == "win"
     session.close()
 
 
@@ -363,8 +394,8 @@ def test_parlay_legs_stored_with_zero_stake():
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [
-        {"status": "final", "home_score": 110, "away_score": 100},
-        {"status": "final", "home_score": 110, "away_score": 100},
+        {"status": "scheduled"},
+        {"status": "scheduled"},
     ])
     user_id = _make_user(client)
     parlay_response = client.post(f"/users/{user_id}/parlay", json={
@@ -414,7 +445,7 @@ def test_grade_endpoint_grades_pending_picks():
 
     grade_response = client.post("/users/grade")
     assert grade_response.status_code == 200
-    assert grade_response.json() == {"graded": 1}
+    assert grade_response.json() == {"graded": 1, "parlays_settled": 0}
 
     session = get_session(engine)
     pick = session.get(PaperPick, pick_response.json()["id"])
@@ -446,16 +477,16 @@ def test_grade_endpoint_skips_games_without_scores():
 
     grade_response = client.post("/users/grade")
     assert grade_response.status_code == 200
-    assert grade_response.json() == {"graded": 0}
+    assert grade_response.json() == {"graded": 0, "parlays_settled": 0}
 
 
 def test_win_streak_counted():
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [
-        {"status": "final", "home_score": 110, "away_score": 100},
-        {"status": "final", "home_score": 110, "away_score": 100},
-        {"status": "final", "home_score": 110, "away_score": 100},
+        {"status": "scheduled"},
+        {"status": "scheduled"},
+        {"status": "scheduled"},
     ])
     user_id = _make_user(client)
     for game_id in game_ids:
@@ -467,7 +498,9 @@ def test_win_streak_counted():
             "stake": 100,
         })
         assert response.status_code == 200
-        assert response.json()["result"] == "win"
+        assert response.json()["result"] is None
+        _finish(client, game_id)
+    _grade(client)
 
     response = client.get("/users/")
     assert response.status_code == 200

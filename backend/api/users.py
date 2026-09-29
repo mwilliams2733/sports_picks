@@ -7,11 +7,12 @@ from backend.api.pins import PIN_PATTERN, guard as pin_guard, hash_pin, require_
 from backend.database import get_session
 from backend.models import UserProfile, PaperPick, Game, PlayerStat, ActivityFeed, Parlay
 from backend.pipeline.grader import grade_pick, grade_prop_pick
+from backend.pipeline.paper_settlement import settle_parlays
 from backend.analysis.odds_utils import calculate_payout
 import json
 import asyncio
 import logging
-from backend.time_utils import et_today
+from backend.time_utils import et_today, game_start_utc
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,29 @@ class PlaceParlayRequest(BaseModel):
     stake: float
 
 
+def balance_of(session, user) -> float:
+    """Starting balance plus every settled straight bet and parlay.
+
+    Parlay legs are excluded (stake 0, payout 0); the parlay's own payout
+    is on its Parlay row, which this used to leave out entirely.
+    """
+    straight = (session.query(func.coalesce(func.sum(PaperPick.payout), 0.0))
+                .filter(PaperPick.user_id == user.id, PaperPick.parlay_id.is_(None))
+                .scalar())
+    parlays = (session.query(func.coalesce(func.sum(Parlay.payout), 0.0))
+               .filter(Parlay.user_id == user.id).scalar())
+    return user.starting_balance + straight + parlays
+
+
+def _open_for_betting(game) -> bool:
+    """Only games that have not started. Unknown start time is not past
+    (the project-wide convention), but a status past 'scheduled' is."""
+    if game.status != "scheduled":
+        return False
+    start = game_start_utc(game)
+    return start is None or start > datetime.now(timezone.utc)
+
+
 @router.get("/")
 def list_users(request: Request):
     """List all user profiles with current balance and record."""
@@ -109,8 +133,8 @@ def list_users(request: Request):
             pushes = sum(1 for p in picks if p.result == "push")
             pending = sum(1 for p in picks if p.result is None)
             total_wagered = sum(p.stake for p in picks)
-            total_payout = sum(p.payout or 0 for p in picks)
-            current_balance = u.starting_balance + total_payout
+            current_balance = balance_of(session, u)
+            profit = round(current_balance - u.starting_balance, 2)
             total_picks = wins + losses + pushes
             result.append({
                 "id": u.id,
@@ -118,8 +142,8 @@ def list_users(request: Request):
                 "starting_balance": u.starting_balance,
                 "current_balance": round(current_balance, 2),
                 "total_wagered": round(total_wagered, 2),
-                "profit": round(total_payout, 2),
-                "roi": round((total_payout / total_wagered * 100) if total_wagered > 0 else 0, 2),
+                "profit": profit,
+                "roi": round((profit / total_wagered * 100) if total_wagered > 0 else 0, 2),
                 "wins": wins,
                 "losses": losses,
                 "pushes": pushes,
@@ -230,8 +254,8 @@ def get_user(request: Request, user_id: int):
         pushes = sum(1 for p in picks if p.result == "push")
         pending = sum(1 for p in picks if p.result is None)
         total_wagered = sum(p.stake for p in picks)
-        total_payout = sum(p.payout or 0 for p in picks)
-        current_balance = user.starting_balance + total_payout
+        current_balance = balance_of(session, user)
+        profit = round(current_balance - user.starting_balance, 2)
         total_picks = wins + losses + pushes
         return {
             "id": user.id,
@@ -239,8 +263,8 @@ def get_user(request: Request, user_id: int):
             "starting_balance": user.starting_balance,
             "current_balance": round(current_balance, 2),
             "total_wagered": round(total_wagered, 2),
-            "profit": round(total_payout, 2),
-            "roi": round((total_payout / total_wagered * 100) if total_wagered > 0 else 0, 2),
+            "profit": profit,
+            "roi": round((profit / total_wagered * 100) if total_wagered > 0 else 0, 2),
             "wins": wins,
             "losses": losses,
             "pushes": pushes,
@@ -262,8 +286,7 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
 
         # Calculate current balance
         picks = session.query(PaperPick).filter(PaperPick.user_id == user_id).all()
-        total_payout = sum(p.payout or 0 for p in picks)
-        current_balance = user.starting_balance + total_payout
+        current_balance = balance_of(session, user)
 
         if body.stake > current_balance:
             raise HTTPException(status_code=400, detail="Insufficient balance")
@@ -275,41 +298,12 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
         if not game:
             raise HTTPException(status_code=404, detail="Game not found")
 
-        # If game is already final, grade immediately
+        if not _open_for_betting(game):
+            raise HTTPException(status_code=400,
+                                 detail="Betting has closed: this game has already started")
+
         result = None
         payout = None
-        if game.status == "final" and game.home_score is not None and game.away_score is not None:
-            if body.pick_type == "prop" and body.prop_player and body.prop_market:
-                # Grade prop pick using player stats
-                player_stat = (
-                    session.query(PlayerStat)
-                    .filter_by(player_name=body.prop_player, stat_type="game_log", game_date=game.date)
-                    .first()
-                )
-                prop_result = grade_prop_pick(body.pick_value, body.prop_market, player_stat)
-                if prop_result:
-                    result = prop_result[0]
-                    if result == "win":
-                        payout = body.stake * calculate_payout(body.odds)
-                    elif result == "push":
-                        payout = 0.0
-                    else:
-                        payout = -body.stake
-            else:
-                grade_outcome = grade_pick(
-                    body.pick_type, body.pick_value,
-                    game.home_score, game.away_score, body.odds
-                )
-                # None means grade_pick has no branch for this pick type. Leave
-                # the pick pending rather than invent a result for it.
-                grade_result = grade_outcome[0] if grade_outcome else None
-                result = grade_result
-                if grade_result == "win":
-                    payout = body.stake * calculate_payout(body.odds)
-                elif grade_result == "push":
-                    payout = 0.0
-                else:
-                    payout = -body.stake
 
         pick = PaperPick(
             user_id=user_id,
@@ -338,16 +332,6 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
             "odds": body.odds,
             "stake": body.stake,
         })
-
-        if result:
-            event_type = "pick_won" if result == "win" else "pick_lost"
-            _log_feed_event(session, loop, user_id, event_type, {
-                "user_name": user_name,
-                "message": f"{user_name} {'won' if result == 'win' else 'lost'} {body.pick_value} — {'+'  if (payout or 0) > 0 else ''}${payout or 0:,.0f}",
-                "result": result,
-                "payout": payout,
-            })
-            _update_streaks(session, loop, user_id)
 
         return {
             "id": pick.id,
@@ -416,9 +400,7 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
             raise HTTPException(status_code=400, detail="Stake must be positive")
 
         # Check balance
-        picks = session.query(PaperPick).filter(PaperPick.user_id == user_id).all()
-        total_payout = sum(p.payout or 0 for p in picks)
-        current_balance = user.starting_balance + total_payout
+        current_balance = balance_of(session, user)
         if body.stake > current_balance:
             raise HTTPException(status_code=400, detail="Insufficient balance")
 
@@ -446,9 +428,6 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
         session.flush()
 
         # Create individual legs as PaperPick entries linked to this parlay
-        all_graded = True
-        all_won = True
-        has_push = False
         leg_results = []
 
         for leg in body.legs:
@@ -456,36 +435,12 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
             if not game:
                 raise HTTPException(status_code=404, detail=f"Game {leg.game_id} not found")
 
-            result = None
-            if game.status == "final" and game.home_score is not None and game.away_score is not None:
-                if leg.pick_type == "prop" and leg.prop_player and leg.prop_market:
-                    player_stat = (
-                        session.query(PlayerStat)
-                        .filter_by(player_name=leg.prop_player, stat_type="game_log", game_date=game.date)
-                        .first()
-                    )
-                    prop_result = grade_prop_pick(leg.pick_value, leg.prop_market, player_stat)
-                    if prop_result:
-                        result = prop_result[0]
-                else:
-                    grade_outcome = grade_pick(
-                        leg.pick_type, leg.pick_value,
-                        game.home_score, game.away_score, leg.odds
-                    )
-                    if grade_outcome is None:
-                        all_graded = False
-                    else:
-                        result = grade_outcome[0]
-            else:
-                all_graded = False
+            if not _open_for_betting(game):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Betting has closed: game {leg.game_id} has already started")
 
-            if result == "loss":
-                all_won = False
-            elif result == "push":
-                has_push = True
-            elif result is None:
-                all_graded = False
-                all_won = False
+            result = None
 
             pick = PaperPick(
                 user_id=user_id,
@@ -503,21 +458,7 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
             session.add(pick)
             leg_results.append({"pick_value": leg.pick_value, "odds": leg.odds, "result": result})
 
-        # Grade parlay if all legs are graded
         parlay_payout = None
-        if all_graded:
-            if all_won and not has_push:
-                parlay.result = "win"
-                parlay.payout = body.stake * (combined_decimal - 1)
-                parlay_payout = parlay.payout
-            elif has_push and all_won:
-                parlay.result = "push"
-                parlay.payout = 0
-                parlay_payout = 0
-            else:
-                parlay.result = "loss"
-                parlay.payout = -body.stake
-                parlay_payout = -body.stake
 
         session.commit()
 
@@ -617,7 +558,8 @@ def grade_paper_picks(request: Request):
             _update_streaks(session, loop, uid)
 
         session.commit()
-        return {"graded": graded}
+        parlays_settled = settle_parlays(session)
+        return {"graded": graded, "parlays_settled": parlays_settled}
     finally:
         session.close()
 

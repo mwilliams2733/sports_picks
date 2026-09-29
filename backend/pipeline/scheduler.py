@@ -701,8 +701,13 @@ def grade_pending_picks(session) -> dict:
 
     session.commit()
     logger.info(f"Auto-graded {paper_graded} paper picks")
+
+    from backend.pipeline.paper_settlement import settle_parlays
+    parlays = settle_parlays(session)
+    logger.info("Settled %d paper parlays", parlays)
+
     return {"strategy": len(ungraded) - skipped, "skipped": skipped,
-            "paper": paper_graded}
+            "paper": paper_graded, "parlays": parlays}
 
 
 async def fetch_pitcher_scores_for_date(target_date) -> dict[tuple[str, str], dict[str, float | None]]:
