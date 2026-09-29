@@ -21,11 +21,16 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Iterable
 
-from backend.analysis.odds_utils import InvalidOddsError, american_to_implied_prob
+from backend.analysis.odds_utils import (InvalidOddsError, american_to_implied_prob,
+                                         calculate_payout)
 
 logger = logging.getLogger(__name__)
 
 Z90 = 1.645
+
+#: The payout multiplier of a flat -110 bet: the reference unit effective_bets
+#: measures other bets against.
+B_REF = 100 / 110
 
 
 @dataclass(frozen=True)
@@ -126,6 +131,40 @@ def summarize(bets: Iterable[Bet], label: str = "all") -> Summary:
         profit=profit, staked=staked,
         roi=profit / staked if staked else None,
     )
+
+
+def effective_bets(bets: Iterable[Bet]) -> float:
+    """The number of flat -110 bets carrying the same information as these
+    settled bets: an effective sample size weighted by return variance, not
+    by raw count.
+
+    Per-unit profit variance at a fair price equals that price's payout
+    multiplier, so one $5,000 win at +200 (payout 2.0) is as volatile as
+    2.0 / (100/110) flat -110 bets of the same stake -- and a stake ten or
+    a hundred times the rest of a record swings that variance further still.
+    ``n_eff = B_REF * (sum stake)^2 / sum(stake^2 * payout_i)`` discounts for
+    both: it equals the settled bet count exactly for flat-stake -110
+    bettors, and shrinks toward zero as a record concentrates into a few
+    large, long-odds bets. Bets with unusable odds are treated as -110
+    (``B_REF``) rather than excluded, so one bad price can't inflate this.
+    Returns 0.0 with no settled bets or zero total stake.
+    """
+    settled = [b for b in bets if b.result is not None]
+    if not settled:
+        return 0.0
+    total_stake = sum(b.stake for b in settled)
+    if total_stake == 0:
+        return 0.0
+    weighted = 0.0
+    for b in settled:
+        try:
+            payout_i = calculate_payout(b.odds)
+        except InvalidOddsError:
+            payout_i = B_REF
+        weighted += (b.stake ** 2) * payout_i
+    if weighted == 0:
+        return 0.0
+    return B_REF * (total_stake ** 2) / weighted
 
 
 def _week(d: date) -> str:

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.api.main import create_app
 from backend.database import get_session
+from backend.analysis.odds_utils import calculate_payout
 from backend.models import (EmailedPick, Game, PaperPick, Parlay, PickModel,
                             StrategyModel, Team, UserProfile)
 
@@ -40,6 +41,24 @@ def _player(s, name, results, stake=100.0, odds=-110):
         payout = {"win": stake * 100 / 110, "loss": -stake, "push": 0.0, None: None}[r]
         s.add(PaperPick(user_id=u.id, game_id=g.id, pick_type="moneyline",
                         pick_value="HOME ML", odds=odds, stake=stake, result=r,
+                        payout=payout))
+    s.commit()
+    return u.id
+
+
+def _player_custom(s, name, bets):
+    """A player from explicit (result, stake, odds) tuples, one game each,
+    with payouts computed the same way the real settlement path does:
+    win = stake * calculate_payout(odds), loss = -stake, push = 0."""
+    u = UserProfile(name=name)
+    s.add(u)
+    s.flush()
+    for result, stake, odds in bets:
+        g = _game(s)
+        payout = {"win": stake * calculate_payout(odds), "loss": -stake,
+                  "push": 0.0, None: None}[result]
+        s.add(PaperPick(user_id=u.id, game_id=g.id, pick_type="moneyline",
+                        pick_value="HOME ML", odds=odds, stake=stake, result=result,
                         payout=payout))
     s.commit()
     return u.id
@@ -115,6 +134,42 @@ def test_seven_and_three_does_not_outrank_forty_and_thirty():
     assert board["long"]["shrunk_roi"] == pytest.approx(0.0341, abs=1e-4)
 
 
+def test_whale_bet_does_not_outrank_a_steady_record():
+    """Round 1 fix: shrinkage must count information (effective bets), not
+    the raw bet count. One $5,000 win at +200 plus nine $10 losses at +200
+    (n=10, same as a 60-40 -110 record) has shrunk ROI 0.2866 by raw count
+    -- enough to top the board -- but only -0.0269 by effective bets."""
+    app = _app()
+    s = get_session(app.state.engine)
+    whale_bets = [("win", 5000.0, 200)] + [("loss", 10.0, 200)] * 9
+    _player_custom(s, "whale", whale_bets)
+    steady_bets = [("win", 10.0, -110)] * 60 + [("loss", 10.0, -110)] * 40
+    _player_custom(s, "steady60", steady_bets)
+    s.close()
+    board = _board(app)
+    assert board["whale"]["n_eff"] == pytest.approx(0.471, abs=1e-2)
+    assert board["whale"]["shrunk_roi"] == pytest.approx(-0.0269, abs=1e-3)
+    assert board["steady60"]["shrunk_roi"] == pytest.approx(0.0818, abs=1e-3)
+    names = [r["name"] for r in TestClient(app).get("/users/leaderboard").json()]
+    assert names.index("steady60") < names.index("whale")
+
+
+def test_longshot_streak_does_not_outrank_a_flat_record():
+    """Same fix, a lower-variance version: 3 wins of 7 at +500 (n=10) still
+    shrinks below a flat 60-40 -110 record once weighted by information."""
+    app = _app()
+    s = get_session(app.state.engine)
+    longshot_bets = [("win", 10.0, 500)] * 3 + [("loss", 10.0, 500)] * 7
+    _player_custom(s, "longshot", longshot_bets)
+    steady_bets = [("win", 10.0, -110)] * 60 + [("loss", 10.0, -110)] * 40
+    _player_custom(s, "steady60b", steady_bets)
+    s.close()
+    board = _board(app)
+    assert board["longshot"]["shrunk_roi"] == pytest.approx(-0.0158, abs=1e-3)
+    names = [r["name"] for r in TestClient(app).get("/users/leaderboard").json()]
+    assert names.index("steady60b") < names.index("longshot")
+
+
 def test_parlays_are_off_the_board_but_in_personal_stats():
     app = _app()
     s = get_session(app.state.engine)
@@ -139,22 +194,59 @@ def test_parlays_are_off_the_board_but_in_personal_stats():
     assert stats["profit"] == pytest.approx(264.46)
 
 
+def _model_with_push_and_pending(s, results):
+    """Like _model, but "push" (a tied final) and "pending" (an unfinished
+    game) are also valid entries -- round 1 fix: the "one definition" test
+    needs a push and a pending bet in the mix, or W/(W+L) and W/(W+L+P)
+    (and profit/settled-stake vs. profit/all-stake) agree by coincidence."""
+    for r in results:
+        if r == "pending":
+            g = Game(sport="nfl", season="2026", date=D, home_team_id=1, away_team_id=2,
+                     status="scheduled", home_score=None, away_score=None)
+            s.add(g)
+            s.flush()
+        elif r == "push":
+            g = _game(s, home=17, away=17)
+        else:
+            g = _game(s, home=24 if r == "win" else 10)
+        p = PickModel(game_id=g.id, strategy_id=1, pick_type="moneyline",
+                      pick_value="HOME ML", confidence=4, edge_pct=5.0, odds_at_pick=-110)
+        s.add(p)
+        s.flush()
+        s.add(EmailedPick(digest_date=D, pick_id=p.id, game_id=g.id, sport="nfl",
+                          pick_type="moneyline", pick_value="HOME ML", odds=-110,
+                          confidence=4))
+    s.commit()
+
+
 def test_one_definition_of_win_rate_and_roi_everywhere():
-    """The same record through three routes. All call backend.analysis.
+    """The same record -- including a push and a pending bet, so a route
+    computing win_rate as W/(W+L+P) or ROI over all stake (not just settled)
+    would disagree -- through six routes. All call backend.analysis.
     scorecard; this checks the wiring, not a second formula."""
     app = _app()
     s = get_session(app.state.engine)
-    _model(s, ["win", "win", "loss"])
-    uid = _player(s, "mirror", ["win", "win", "loss"])      # same odds, 100x stake
+    record = ["win", "win", "loss", "push", "pending"]
+    _model_with_push_and_pending(s, record)
+    uid = _player_custom(s, "mirror", [
+        ("win", 100.0, -110), ("win", 100.0, -110), ("loss", 100.0, -110),
+        ("push", 100.0, -110), (None, 100.0, -110),
+    ])
     s.close()
     c = TestClient(app)
     board = _board(app)
     emailed = c.get("/stats/emailed?kind=game&by=week").json()["total"]
     stats = c.get(f"/users/{uid}/stats").json()["all_time"]
+    listed = next(x for x in c.get("/users/").json() if x["id"] == uid)
+    got = c.get(f"/users/{uid}").json()
+
     assert board["Model"]["win_rate"] == emailed["win_rate"] == board["mirror"]["win_rate"]
     assert board["Model"]["roi"] == pytest.approx(board["mirror"]["roi"], abs=1e-4)
     assert stats["win_rate"] == pytest.approx(board["mirror"]["win_rate"] * 100, abs=0.1)
     assert stats["roi"] == pytest.approx(board["mirror"]["roi"] * 100, abs=0.01)
+    for row in (listed, got):
+        assert row["win_rate"] == pytest.approx(board["mirror"]["win_rate"] * 100, abs=0.1)
+        assert row["roi"] == pytest.approx(board["mirror"]["roi"] * 100, abs=0.01)
 
 
 def test_player_stats_win_rate_excludes_pushes():

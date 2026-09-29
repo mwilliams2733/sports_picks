@@ -10,7 +10,7 @@ from backend.pipeline.grader import grade_pick, grade_prop_pick
 from backend.pipeline.paper_settlement import settle_parlays
 from backend.analysis.odds_utils import calculate_payout
 from backend.analysis.paper_bets import player_bets
-from backend.analysis.scorecard import summarize
+from backend.analysis.scorecard import summarize, effective_bets
 from backend.digest.record import emailed_bets
 import json
 import asyncio
@@ -167,26 +167,34 @@ def list_users(request: Request):
 
 
 MIN_RANKED_BETS = 10
-#: Shrinkage toward the prior, in bets: a record of n bets gets weight
-#: n / (n + SHRINK_BETS). Chosen 2026-09-28 so a 7-3 start at -110 ranks
-#: below a 40-30 record (brief G.2); revisit only with a dated note.
+#: Shrinkage toward the prior, in EFFECTIVE bets (backend.analysis.scorecard.
+#: effective_bets), not raw count: a record of n_eff effective bets gets
+#: weight n_eff / (n_eff + SHRINK_BETS). Chosen 2026-09-28 so a 7-3 start at
+#: -110 ranks below a 40-30 record (brief G.2); revisit only with a dated note.
+#:
+#: Fix round 1 (2026-09-28): the raw bet count let one huge, volatile bet
+#: (e.g. a $5,000 win at +200 among nine $10 losses) buy an outsized shrunk
+#: ROI just by being one of ten "bets" -- effective_bets discounts it by how
+#: much information it actually carries.
 SHRINK_BETS = 50
 #: The prior: ROI of picking sides at random at -110 (win half, pay the vig).
 PRIOR_ROI = 0.5 * (100 / 110) - 0.5
 
 
-def shrunk_roi(roi: float | None, n: int) -> float | None:
-    """ROI pulled toward PRIOR_ROI by SHRINK_BETS pseudo-bets."""
+def shrunk_roi(roi: float | None, n_eff: float) -> float | None:
+    """ROI pulled toward PRIOR_ROI by SHRINK_BETS pseudo-bets, weighted by
+    effective (not raw) bet count -- see effective_bets and SHRINK_BETS."""
     if roi is None:
         return None
-    return (n * roi + SHRINK_BETS * PRIOR_ROI) / (n + SHRINK_BETS)
+    return (n_eff * roi + SHRINK_BETS * PRIOR_ROI) / (n_eff + SHRINK_BETS)
 
 
-def _board_row(user_id, name, is_model, s) -> dict:
-    shrunk = shrunk_roi(s.roi, s.n)
+def _board_row(user_id, name, is_model, s, bets) -> dict:
+    n_eff = effective_bets(bets)
+    shrunk = shrunk_roi(s.roi, n_eff)
     return {"id": user_id, "name": name, "is_model": is_model,
             "wins": s.wins, "losses": s.losses, "pushes": s.pushes,
-            "pending": s.pending, "n": s.n,
+            "pending": s.pending, "n": s.n, "n_eff": round(n_eff, 2),
             "win_rate": None if s.win_rate is None else round(s.win_rate, 4),
             "roi": None if s.roi is None else round(s.roi, 4),
             "shrunk_roi": None if shrunk is None else round(shrunk, 4),
@@ -204,15 +212,20 @@ def leaderboard(request: Request):
     """Every player plus the Model (emailed picks, 1u each), ranked by shrunk ROI.
 
     ROI is profit / stake, so a $1,000 bettor and a 1u model compare fairly;
-    shrinking it toward PRIOR_ROI keeps a hot start from topping the board.
-    Straight bets only. Fewer than MIN_RANKED_BETS settled bets: shown, not ranked.
+    shrinking it toward PRIOR_ROI (weighted by effective, not raw, bet count)
+    keeps both a hot start and a single lucky whale bet from topping the
+    board. Straight bets only. Fewer than MIN_RANKED_BETS settled bets:
+    shown, not ranked -- ranking still uses the raw count, since a record
+    needs enough bets shown at all before its effective size matters.
     """
     session = get_session(request.app.state.engine)
     try:
-        rows = [_board_row(u.id, u.name, False,
-                           summarize(player_bets(session, u.id, include_parlays=False)))
-                for u in session.query(UserProfile).all()]
-        rows.append(_board_row(None, "Model", True, summarize(emailed_bets(session, None))))
+        rows = []
+        for u in session.query(UserProfile).all():
+            bets = player_bets(session, u.id, include_parlays=False)
+            rows.append(_board_row(u.id, u.name, False, summarize(bets), bets))
+        model_bets = emailed_bets(session, None)
+        rows.append(_board_row(None, "Model", True, summarize(model_bets), model_bets))
         rows.sort(key=_board_order)
         return rows
     finally:
