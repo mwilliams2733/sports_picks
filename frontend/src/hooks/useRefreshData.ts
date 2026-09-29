@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '../api/client'
 import { useToast } from './useToast'
+import { rememberRefreshCost } from '../components/SpendConfirmButton'
 
 /**
  * Wires the refresh button to POST /pipeline/run.
@@ -21,6 +22,8 @@ export function useRefreshData() {
       queryClient.invalidateQueries({ queryKey: ['games'] })
       queryClient.invalidateQueries({ queryKey: ['props'] })
       queryClient.invalidateQueries({ queryKey: ['record'] })
+      queryClient.invalidateQueries({ queryKey: ['credits'] })
+      rememberRefreshCost(data.credits_used)
       toast(`Refreshed: ${data.picks_generated} picks generated, ${data.credits_used} credits used`, 'success')
     },
     onError: (error: unknown) => {

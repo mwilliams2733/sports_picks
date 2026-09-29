@@ -190,3 +190,6 @@
 
 .verdict-above { color: var(--green); font-weight: 600; }
 .verdict-below { color: var(--red); font-weight: 600; }
+
+.spend-confirm { display: inline-flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.spend-confirm-text { font-size: 0.8rem; color: var(--text-muted); }
