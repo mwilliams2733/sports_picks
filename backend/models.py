@@ -279,6 +279,9 @@ class EmailedPick(Base):
     odds = Column(Integer, nullable=False)
     prop_player = Column(String, nullable=True)
     prop_market = Column(String, nullable=True)
+    #: Stars as emailed, copied at send time like the price. Nullable: rows
+    #: recorded before 2026-09-29 carry it only where it was verifiable.
+    confidence = Column(Integer, nullable=True)
     sent_at = Column(DateTime, nullable=False,
                      default=lambda: datetime.now(tz=timezone.utc))
 

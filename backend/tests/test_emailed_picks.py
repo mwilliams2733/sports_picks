@@ -88,6 +88,12 @@ def test_a_sent_digest_records_every_pick_as_emailed(engine, monkeypatch):
         (DAY, 10, "moneyline", "HOME ML", -120),
         (DAY, 11, "prop", "Q Back Over 220.5 Pass Yards", -110),
     ]
+    s = get_session(engine)
+    try:
+        stars = {r.pick_id: r.confidence for r in s.query(EmailedPick)}
+    finally:
+        s.close()
+    assert stars == {10: 4, 11: 5}     # as emailed (the DigestPicks' confidence)
 
 
 def test_a_failed_send_records_nothing(engine, monkeypatch):
