@@ -8,7 +8,7 @@ import logging
 
 import pytest
 
-from backend.analysis.scorecard import Bet, group, summarize, trend, wilson
+from backend.analysis.scorecard import Bet, effective_bets, group, summarize, trend, wilson
 
 D = date(2026, 9, 28)
 
@@ -60,6 +60,26 @@ def test_break_even_is_the_mean_implied_probability_of_decided_prices():
 def test_roi_counts_a_push_as_staked_and_returned():
     s = summarize([_b("win"), _b("loss"), _b("push")])
     assert s.roi == pytest.approx(-0.030303, abs=1e-6)
+
+
+def test_effective_bets_of_flat_minus_110_bets_equals_the_count():
+    """Round 1 fix: effective_bets must reduce to the raw count for the
+    common case (flat stake, one price) or a shrinkage fix would move
+    every existing -110 record's shrunk_roi."""
+    bets = [_b("win", odds=-110)] * 6 + [_b("loss", odds=-110)] * 4
+    assert effective_bets(bets) == pytest.approx(10.0)
+
+
+def test_effective_bets_discounts_a_volatile_whale_bet():
+    """One $5,000 win at +200 plus nine $10 losses at +200 is far less
+    information than ten flat -110 bets, even though it's still ten bets."""
+    bets = [_b("win", odds=200, stake=5000.0)] + [_b("loss", odds=200, stake=10.0)] * 9
+    assert effective_bets(bets) == pytest.approx(0.471, abs=1e-2)
+
+
+def test_effective_bets_of_no_settled_bets_is_zero():
+    assert effective_bets([_b(None)]) == 0.0
+    assert effective_bets([]) == 0.0
 
 
 def test_verdict_only_when_the_whole_range_clears_break_even():

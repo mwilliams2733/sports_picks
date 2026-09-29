@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from backend.api.main import create_app
 from backend.models import Base
 from backend.collectors.budget import BudgetStatus
+from backend.tests.auth_helpers import OWNER_HEADERS
 import backend.pipeline.full_pipeline as full_pipeline
 import backend.api.pipeline_api as pipeline_api
 
@@ -19,7 +20,7 @@ def test_pipeline_run_returns_429_when_budget_exhausted(monkeypatch):
 
     app = create_app(":memory:")
     Base.metadata.create_all(app.state.engine)
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     resp = client.post("/pipeline/run")
     assert resp.status_code == 429
     data = resp.json()
@@ -80,7 +81,7 @@ def test_pipeline_500_response_has_no_key_and_has_error_id(monkeypatch):
 
     app = create_app(":memory:")
     Base.metadata.create_all(app.state.engine)
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     resp = client.post("/pipeline/run")
     assert resp.status_code == 500
     data = resp.json()

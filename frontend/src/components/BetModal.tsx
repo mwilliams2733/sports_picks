@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useUserStore } from '../stores/userStore'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import { useQueryClient } from '@tanstack/react-query'
 import { useToast } from '../hooks/useToast'
 import type { UserProfile } from '../types'
+import { getPin, setPin as storePin } from '../lib/secrets'
 
 interface BetModalProps {
   open: boolean
@@ -28,6 +29,7 @@ export default function BetModal({
   const [stake, setStake] = useState(suggestedStake)
   const [userName, setUserName] = useState('')
   const [userId, setUserId] = useState<number | null>(null)
+  const [pin, setPinInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<{ result: string | null; payout: number | null } | null>(null)
 
@@ -44,12 +46,22 @@ export default function BetModal({
     }
   }, [open, currentUserName, suggestedStake])
 
+  // Prefill the remembered PIN once we know who the user is.
+  useEffect(() => {
+    if (userId != null) setPinInput(getPin(userId) ?? '')
+  }, [userId])
+
   if (!open) return null
 
   const handleCreateUser = async () => {
     if (!userName.trim()) return
+    if (!/^\d{4,6}$/.test(pin)) {
+      toast('PIN must be 4–6 digits', 'error')
+      return
+    }
     try {
-      const res = await api.users.create(userName.trim())
+      const res = await api.users.create(userName.trim(), pin)
+      storePin(res.id, pin)
       setUserId(res.id)
       setCurrentUserName(userName.trim())
       toast(`Welcome, ${userName.trim()}!`, 'success')
@@ -70,11 +82,16 @@ export default function BetModal({
         stake,
         prop_market: propMarket,
         prop_player: propPlayer,
-      })
+      }, pin)
       setResult(res)
+      storePin(userId, pin)
       queryClient.invalidateQueries({ queryKey: ['users'] })
       toast('Bet placed', 'success')
     } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 401) {
+        storePin(userId, null)
+        setPinInput('')
+      }
       toast(e instanceof Error ? e.message : 'Failed to place bet', 'error')
     } finally {
       setSubmitting(false)
@@ -102,6 +119,18 @@ export default function BetModal({
                 placeholder="Your name"
                 value={userName}
                 onChange={(e) => setUserName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateUser()}
+              />
+              <input
+                aria-label="PIN"
+                className="input"
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={6}
+                placeholder={'PIN (4–6 digits)'}
+                value={pin}
+                onChange={(e) => setPinInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleCreateUser()}
               />
               <button className="btn btn-primary" onClick={handleCreateUser}>
@@ -161,6 +190,20 @@ export default function BetModal({
                     step={500}
                   />
                 </div>
+              </div>
+              <div className="bet-detail-row">
+                <label className="bet-detail-label" htmlFor="bet-modal-pin">PIN</label>
+                <input
+                  id="bet-modal-pin"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  maxLength={6}
+                  className="input"
+                  placeholder={'PIN (4–6 digits)'}
+                  value={pin}
+                  onChange={(e) => setPinInput(e.target.value)}
+                />
               </div>
             </div>
             <button

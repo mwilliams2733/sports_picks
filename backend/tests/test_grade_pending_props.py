@@ -111,11 +111,11 @@ def test_grade_pending_picks_returns_what_it_graded(db_session):
     """
     _seed(db_session, stat_value=2.0)
     assert grade_pending_picks(db_session) == {
-        "strategy": 1, "skipped": 0, "paper": 0}
+        "strategy": 1, "skipped": 0, "paper": 0, "parlays": 0}
 
 
 def test_an_ungradeable_pick_is_counted_as_skipped_not_graded(db_session):
     """A pick with no box score is skipped, and the two counts must differ."""
     _seed(db_session, stat_value=None)
     assert grade_pending_picks(db_session) == {
-        "strategy": 0, "skipped": 1, "paper": 0}
+        "strategy": 0, "skipped": 1, "paper": 0, "parlays": 0}

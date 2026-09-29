@@ -15,6 +15,8 @@ import PicksTable from '../components/PicksTable';
 import ConfidenceStars from '../components/ConfidenceStars';
 import BetModal from '../components/BetModal';
 import CreditUsage from '../components/CreditUsage';
+import SpendConfirmButton from '../components/SpendConfirmButton';
+import { getOwnerKey } from '../lib/secrets';
 
 export default function TodaysPicks() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -140,13 +142,18 @@ export default function TodaysPicks() {
             {teams.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         )}
-        <button
-          className="btn btn-primary btn-sm"
-          disabled={refreshData.isPending}
-          onClick={() => refreshData.mutate(sport)}
-        >
-          {refreshData.isPending ? 'Refreshing…' : 'Refresh data'}
-        </button>
+        {/* Refreshing is owner-only on the server; a friend without the key
+            would confirm the spend and get a 403. Read at render, so setting
+            the key in Admin shows it on the next visit to this page. */}
+        {getOwnerKey() && (
+          <SpendConfirmButton
+            label="Refresh data"
+            pendingLabel="Refreshing…"
+            pending={refreshData.isPending}
+            onConfirm={() => refreshData.mutate(sport)}
+            className="btn btn-primary btn-sm"
+          />
+        )}
       </div>
 
       <SummaryBar record={recordData} pickCount={filteredPicks.length} strategyName="Ensemble" />

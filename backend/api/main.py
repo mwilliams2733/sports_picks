@@ -1,9 +1,13 @@
 import asyncio
 import logging
+import math
 import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from backend.database import get_engine, get_session
 
@@ -65,6 +69,21 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
         allow_headers=["*"],
         allow_credentials=False,
     )
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(request, exc):
+        # FastAPI's default handler echoes each error's input. A NaN or
+        # Infinity stake is refused correctly, but that input cannot be
+        # JSON-encoded, so the refusal surfaced as a 500. Echo it as text.
+        errors = []
+        for err in exc.errors():
+            value = err.get("input")
+            if isinstance(value, float) and not math.isfinite(value):
+                err = {**err, "input": str(value)}
+            errors.append(err)
+        return JSONResponse(status_code=422,
+                            content={"detail": jsonable_encoder(errors)})
+
     app.state.loop = None
     engine = get_engine(db_path)
     from backend.database import run_migrations

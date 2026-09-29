@@ -6,6 +6,7 @@ from backend.api import pipeline_api
 from backend.api.main import create_app
 from backend.models import Base, ApiUsage
 from backend.database import get_session
+from backend.tests.auth_helpers import OWNER_HEADERS
 
 _CONFIG = {
     "database_path": ":memory:",
@@ -40,7 +41,7 @@ def offline_pipeline(monkeypatch):
 def test_full_pipeline_with_credits(offline_pipeline):
     app = create_app(":memory:")
     Base.metadata.create_all(app.state.engine)
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     resp = client.post("/pipeline/run")
     assert resp.status_code == 200
     data = resp.json()
@@ -54,7 +55,7 @@ def test_full_pipeline_with_credits(offline_pipeline):
 def test_pipeline_with_sport_filter(offline_pipeline):
     app = create_app(":memory:")
     Base.metadata.create_all(app.state.engine)
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     resp = client.post("/pipeline/run?sport=nba")
     assert resp.status_code == 200
     data = resp.json()

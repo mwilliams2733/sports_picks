@@ -1,4 +1,5 @@
-import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult, CalibrationData } from '../types';
+import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult, CalibrationData, LeaderboardRow, EmailedGroups, EmailedTrend } from '../types';
+import { getOwnerKey } from '../lib/secrets';
 
 const BASE = '';
 
@@ -7,9 +8,16 @@ export class ApiError extends Error {
   body: unknown;
 
   constructor(status: number, body: unknown) {
-    const detail = typeof body === 'object' && body !== null && 'detail' in body
-      ? String((body as { detail: unknown }).detail)
+    const rawDetail = typeof body === 'object' && body !== null && 'detail' in body
+      ? (body as { detail: unknown }).detail
       : undefined;
+    // FastAPI/pydantic validation errors send `detail` as a list of
+    // { msg, ... } objects rather than a string; use the first message.
+    const detail = Array.isArray(rawDetail)
+      ? (typeof rawDetail[0] === 'object' && rawDetail[0] !== null && 'msg' in rawDetail[0]
+          ? String((rawDetail[0] as { msg: unknown }).msg)
+          : undefined)
+      : rawDetail != null ? String(rawDetail) : undefined;
     super(detail || `API error: ${status}`);
     this.name = 'ApiError';
     this.status = status;
@@ -31,16 +39,23 @@ async function throwApiError(res: Response): Promise<never> {
   throw new ApiError(res.status, body);
 }
 
+function writeHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...extra };
+  const owner = getOwnerKey();
+  if (owner) headers['X-Owner-Key'] = owner;
+  return headers;
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) return throwApiError(res);
   return res.json();
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function post<T>(path: string, body: unknown, extra: Record<string, string> = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: writeHeaders(extra),
     body: JSON.stringify(body),
   });
   if (!res.ok) return throwApiError(res);
@@ -50,7 +65,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 async function put<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: writeHeaders(),
     body: JSON.stringify(body),
   });
   if (!res.ok) return throwApiError(res);
@@ -58,13 +73,13 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function patch<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: 'PATCH' });
+  const res = await fetch(`${BASE}${path}`, { method: 'PATCH', headers: writeHeaders() });
   if (!res.ok) return throwApiError(res);
   return res.json();
 }
 
 async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: 'DELETE' });
+  const res = await fetch(`${BASE}${path}`, { method: 'DELETE', headers: writeHeaders() });
   if (!res.ok) return throwApiError(res);
   return res.json();
 }
@@ -78,6 +93,8 @@ export const api = {
     record: (sport?: string) => get<RecordData>(`/stats/record${sport ? `?sport=${sport}` : ''}`),
     daily: () => get<DailyData[]>('/stats/daily'),
     calibration: (sport?: string) => get<CalibrationData>(`/stats/calibration${sport ? `?sport=${sport}` : ''}`),
+    emailed: (kind: 'game' | 'prop', by: 'week' | 'month' | 'stars') => get<EmailedGroups>(`/stats/emailed?kind=${kind}&by=${by}`),
+    emailedTrend: (kind: 'game' | 'prop') => get<EmailedTrend>(`/stats/emailed/trend?kind=${kind}`),
   },
   backtest: {
     strategies: () => get<StrategyData[]>('/backtest/strategies'),
@@ -111,23 +128,25 @@ export const api = {
   },
   users: {
     list: () => get<UserProfile[]>('/users/'),
-    create: (name: string) => post<{ id: number; name: string }>('/users/', { name }),
+    create: (name: string, pin: string) => post<{ id: number; name: string }>('/users/', { name, pin }),
     get: (id: number) => get<UserProfile>(`/users/${id}`),
     picks: (id: number) => get<PaperPickData[]>(`/users/${id}/picks`),
-    placePick: (userId: number, data: { game_id: number; pick_type: string; pick_value: string; odds: number; stake: number; prop_market?: string; prop_player?: string }) =>
-      post<{ id: number; result: string | null; payout: number | null; new_balance: number }>(`/users/${userId}/picks`, data),
+    placePick: (userId: number, data: { game_id: number; pick_type: string; pick_value: string; odds: number; stake: number; prop_market?: string; prop_player?: string }, pin: string) =>
+      post<{ id: number; result: string | null; payout: number | null; new_balance: number }>(`/users/${userId}/picks`, data, { 'X-Player-Pin': pin }),
     grade: () => post<{ graded: number }>('/users/grade', {}),
     stats: (id: number) => get<UserStats>(`/users/${id}/stats`),
     feed: (limit?: number) => get<{ id: number; user_id: number; event_type: string; payload: Record<string, string>; created_at: string }[]>(`/users/feed${limit ? `?limit=${limit}` : ''}`),
     delete: (id: number) => del<{ deleted: boolean; id: number }>(`/users/${id}`),
+    setPin: (id: number, pin: string) => put<{ id: number; pin_set: boolean }>(`/users/${id}/pin`, { pin }),
+    leaderboard: () => get<LeaderboardRow[]>('/users/leaderboard'),
     placeParlay: (userId: number, data: {
       legs: Array<{ game_id: number; pick_type: string; pick_value: string; odds: number; prop_market?: string; prop_player?: string }>;
       stake: number;
-    }) => post<{
+    }, pin: string) => post<{
       id: number; legs: Array<{ pick_value: string; odds: number; result: string | null }>;
       combined_odds: number; potential_payout: number;
       result: string | null; payout: number | null; new_balance: number;
-    }>(`/users/${userId}/parlay`, data),
+    }>(`/users/${userId}/parlay`, data, { 'X-Player-Pin': pin }),
   },
   pipeline: {
     run: (sport?: string) => post<{

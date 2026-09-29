@@ -1,16 +1,20 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { api, getErrorMessage } from '../api/client';
+import { api, getErrorMessage, ApiError } from '../api/client';
 import { useLeaderboard } from '../hooks/useLeaderboard';
+import { useRankings } from '../hooks/useRankings';
 import { usePaperTradingData, useUserDetail } from '../hooks/usePaperTrading';
 import { useUserStore } from '../stores/userStore';
 import { useFeedStore } from '../stores/feedStore';
 import type { PropData, UserProfile } from '../types';
 import { useToast } from '../hooks/useToast';
+import { getPin, setPin } from '../lib/secrets';
+import LeaderboardBar from '../components/LeaderboardBar';
 
 export default function PaperTrading() {
   const queryClient = useQueryClient();
   const { data: users = [], isLoading: usersLoading } = useLeaderboard();
+  const { data: rankings = [] } = useRankings();
   const { selectedUser, setSelectedUser } = useUserStore();
   const { events: wsEvents } = useFeedStore();
   const { games: gamesQuery, props: propsQuery, feed: feedQuery } = usePaperTradingData();
@@ -21,7 +25,19 @@ export default function PaperTrading() {
   const userPicks = userPicksQuery.data ?? [];
   const userStats = userStatsQuery.data ?? null;
   const [newName, setNewName] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [betPin, setBetPin] = useState('');
   const { toast } = useToast();
+
+  // Prefills the (editable) PIN field when the selected user's id changes,
+  // derived during render rather than in an effect so re-selecting the same
+  // user (e.g. a new object identity after a leaderboard refetch) doesn't
+  // clobber a PIN the player is mid-typing.
+  const [pinFor, setPinFor] = useState<number | undefined>(selectedUser?.id);
+  if (selectedUser?.id !== pinFor) {
+    setPinFor(selectedUser?.id);
+    setBetPin(selectedUser ? getPin(selectedUser.id) ?? '' : '');
+  }
 
   // Place pick form state
   const [selectedGame, setSelectedGame] = useState<number | ''>('');
@@ -48,9 +64,15 @@ export default function PaperTrading() {
 
   const handleCreateUser = async () => {
     if (!newName.trim()) return;
+    if (!/^\d{4,6}$/.test(newPin)) {
+      toast('PIN must be 4–6 digits', 'error');
+      return;
+    }
     try {
-      await api.users.create(newName.trim());
+      const res = await api.users.create(newName.trim(), newPin);
+      setPin(res.id, newPin);
       setNewName('');
+      setNewPin('');
       toast('User created!', 'success');
       queryClient.invalidateQueries({ queryKey: ['users'] });
     } catch (e) {
@@ -75,15 +97,17 @@ export default function PaperTrading() {
           stake: stake,
           prop_market: prop.market,
           prop_player: prop.player_name,
-        });
-        const msg = result.result
-          ? `Pick graded: ${result.result}! Balance: $${result.new_balance.toLocaleString()}`
-          : `Pick placed! Balance: $${result.new_balance.toLocaleString()}`;
-        toast(msg, result.result === 'loss' ? 'error' : 'success');
+        }, betPin);
+        setPin(selectedUser.id, betPin);
+        toast(`Pick placed! Balance: $${result.new_balance.toLocaleString()}`, 'success');
         queryClient.invalidateQueries({ queryKey: ['users'] });
         setSelectedPropId('');
         setPropSearch('');
       } catch (e) {
+        if (e instanceof ApiError && e.status === 401) {
+          setPin(selectedUser.id, null);
+          setBetPin('');
+        }
         toast(getErrorMessage(e), 'error');
       }
     } else {
@@ -96,14 +120,16 @@ export default function PaperTrading() {
           pick_value: pickValue,
           odds: pickOdds,
           stake: stake,
-        });
-        const msg = result.result
-          ? `Pick graded: ${result.result}! Balance: $${result.new_balance.toLocaleString()}`
-          : `Pick placed! Balance: $${result.new_balance.toLocaleString()}`;
-        toast(msg, result.result === 'loss' ? 'error' : 'success');
+        }, betPin);
+        setPin(selectedUser.id, betPin);
+        toast(`Pick placed! Balance: $${result.new_balance.toLocaleString()}`, 'success');
         queryClient.invalidateQueries({ queryKey: ['users'] });
         setPickValue('');
       } catch (e) {
+        if (e instanceof ApiError && e.status === 401) {
+          setPin(selectedUser.id, null);
+          setBetPin('');
+        }
         toast(getErrorMessage(e), 'error');
       }
     }
@@ -163,15 +189,17 @@ export default function PaperTrading() {
           odds: l.odds, prop_market: l.prop_market, prop_player: l.prop_player,
         })),
         stake: parlayStake,
-      });
+      }, betPin);
       setParlayResult(res);
-      const msg = res.result
-        ? `Parlay ${res.result}! ${res.result === 'win' ? '+' : ''}$${(res.payout || 0).toLocaleString()}`
-        : `${parlayLegs.length}-leg parlay placed! Potential: $${res.potential_payout.toLocaleString()}`;
-      toast(msg, res.result === 'loss' ? 'error' : 'success');
+      setPin(selectedUser.id, betPin);
+      toast(`${parlayLegs.length}-leg parlay placed! Potential: $${res.potential_payout.toLocaleString()}`, 'success');
       queryClient.invalidateQueries({ queryKey: ['users'] });
       setParlayLegs([]);
     } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        setPin(selectedUser.id, null);
+        setBetPin('');
+      }
       toast(getErrorMessage(e), 'error');
     }
   };
@@ -260,12 +288,6 @@ export default function PaperTrading() {
     }
   };
 
-  const getStreakIndicator = (user: UserProfile) => {
-    if (user.current_streak >= 3 && user.streak_type === 'win') return '\u{1F525}';
-    if (user.current_streak >= 3 && user.streak_type === 'loss') return '\u{2744}\u{FE0F}';
-    return null;
-  };
-
   // Merge WS events + initial API events for the feed
   const allFeedEvents = [
     ...wsEvents.map(e => ({ message: e.message, timestamp: e.timestamp })),
@@ -295,40 +317,34 @@ export default function PaperTrading() {
           onKeyDown={e => e.key === 'Enter' && handleCreateUser()}
           style={{ flex: 1, minWidth: '200px' }}
         />
+        <input
+          aria-label="PIN"
+          className="input"
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          maxLength={6}
+          placeholder={'PIN (4–6 digits)'}
+          value={newPin}
+          onChange={e => setNewPin(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleCreateUser()}
+          style={{ maxWidth: '140px' }}
+        />
         <button className="btn btn-primary" onClick={handleCreateUser}>Join</button>
       </div>
 
       {/* Compact Leaderboard Bar */}
       <div className="section-header">Leaderboard <span className="section-divider" /></div>
-      <div className="leaderboard-bar">
-        {users.map((u, i) => (
-          <div
-            key={u.id}
-            className={`leaderboard-entry${selectedUser?.id === u.id ? ' selected' : ''}`}
-            onClick={() => selectUser(u)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectUser(u); } }}
-            role="button"
-            tabIndex={0}
-            aria-label={`Select ${u.name}`}
-            aria-pressed={selectedUser?.id === u.id}
-          >
-            <span className="leaderboard-rank">#{i + 1}</span>
-            <span className="leaderboard-name">{u.name}</span>
-            <span className="leaderboard-roi" style={{ color: u.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>
-              {u.roi >= 0 ? '+' : ''}{u.roi}%
-            </span>
-            <span className="leaderboard-roi">{formatMoney(u.current_balance)}</span>
-            {getStreakIndicator(u) && (
-              <span className="leaderboard-streak">{getStreakIndicator(u)}</span>
-            )}
-          </div>
-        ))}
-        {users.length === 0 && (
-          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '0.5rem' }}>
-            No users yet. Create one above!
-          </div>
-        )}
-      </div>
+      <LeaderboardBar
+        rows={rankings}
+        selectedId={selectedUser?.id ?? null}
+        onSelect={id => { const u = users.find(x => x.id === id); if (u) selectUser(u); }}
+      />
+      {users.length === 0 && (
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '0.5rem' }}>
+          No players yet. Join above!
+        </div>
+      )}
 
       {/* Activity Feed */}
       <div className="activity-feed">
@@ -515,6 +531,23 @@ export default function PaperTrading() {
                 )}
 
                 {selectedProp && (
+                  <div style={{ minWidth: '120px' }}>
+                    <div className="input-label">PIN</div>
+                    <input
+                      aria-label="PIN"
+                      className="input"
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={6}
+                      placeholder={'PIN (4–6 digits)'}
+                      value={betPin}
+                      onChange={e => setBetPin(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {selectedProp && (
                   <button className="btn btn-primary" onClick={handlePlacePick} style={{ alignSelf: 'end' }}>
                     Place Prop
                   </button>
@@ -545,6 +578,20 @@ export default function PaperTrading() {
                 <div style={{ minWidth: '120px' }}>
                   <div className="input-label">Stake ($)</div>
                   <input className="input" type="number" value={stake} onChange={e => setStake(Number(e.target.value))} min={1} />
+                </div>
+                <div style={{ minWidth: '120px' }}>
+                  <div className="input-label">PIN</div>
+                  <input
+                    aria-label="PIN"
+                    className="input"
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    maxLength={6}
+                    placeholder={'PIN (4–6 digits)'}
+                    value={betPin}
+                    onChange={e => setBetPin(e.target.value)}
+                  />
                 </div>
                 <button className="btn btn-primary" onClick={handlePlacePick} style={{ alignSelf: 'end' }}>
                   Place Pick
@@ -639,6 +686,21 @@ export default function PaperTrading() {
                     <input className="input" type="number" value={parlayStake}
                       onChange={e => setParlayStake(Number(e.target.value))} min={1}
                       style={{ padding: '0.25rem 0.5rem', fontSize: '0.85rem' }} />
+                  </div>
+                  <div style={{ minWidth: '100px' }}>
+                    <div className="text-muted" style={{ fontSize: '0.7rem' }}>PIN</div>
+                    <input
+                      aria-label="PIN"
+                      className="input"
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={6}
+                      placeholder={'PIN (4–6 digits)'}
+                      value={betPin}
+                      onChange={e => setBetPin(e.target.value)}
+                      style={{ padding: '0.25rem 0.5rem', fontSize: '0.85rem' }}
+                    />
                   </div>
                   <button className="btn btn-success" onClick={handlePlaceParlay}
                     disabled={parlayLegs.length < 2}

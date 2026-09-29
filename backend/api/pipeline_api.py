@@ -1,8 +1,9 @@
 import logging
 import uuid
 from datetime import date
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
+from backend.api.auth import require_owner
 from backend.config import load_config, is_sport_in_season
 from backend.database import get_session
 from backend.pipeline.full_pipeline import (
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/run")
+@router.post("/run", dependencies=[Depends(require_owner)])
 async def trigger_pipeline(
     request: Request,
     sport: str | None = None,

@@ -4,6 +4,7 @@ import CalendarHeatmap from '../components/CalendarHeatmap';
 import PerformanceChart from '../components/PerformanceChart';
 import CalibrationChart from '../components/CalibrationChart';
 import ConfidenceStars from '../components/ConfidenceStars';
+import EmailedRecord from '../components/EmailedRecord';
 import { SPORTS } from '../constants/sports';
 import { CONFIDENCE_TOOLTIP } from '../constants/tooltips';
 
@@ -16,18 +17,19 @@ function daysFromRange(range: string): number | null {
 
 export default function TrackRecord() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const source = searchParams.get('source') === 'all' ? 'all' : 'emailed';
   const sport = searchParams.get('sport') || 'all';
   const range = searchParams.get('range') || '30d';
 
   const setSport = (s: string) => {
-    const next: Record<string, string> = {};
+    const next: Record<string, string> = { source: 'all' };
     if (s !== 'all') next.sport = s;
     if (range !== '30d') next.range = range;
     setSearchParams(next);
   };
 
   const setRange = (r: string) => {
-    const next: Record<string, string> = {};
+    const next: Record<string, string> = { source: 'all' };
     if (sport !== 'all') next.sport = sport;
     if (r !== '30d') next.range = r;
     setSearchParams(next);
@@ -37,6 +39,20 @@ export default function TrackRecord() {
 
   const loading = record.isLoading || daily.isLoading || history.isLoading;
   const error = record.error || daily.error || history.error;
+
+  const sourceSwitch = (
+    <div className="tab-group" style={{ marginBottom: '1rem' }}>
+      {(['emailed', 'all'] as const).map(s => (
+        <button key={s} className={`tab${source === s ? ' active' : ''}`} aria-pressed={source === s}
+          onClick={() => setSearchParams(s === 'all' ? { source: 'all' } : {})}>
+          {s === 'emailed' ? 'Emailed picks' : 'Research: all picks'}
+        </button>
+      ))}
+    </div>
+  )
+  if (source === 'emailed') {
+    return <div><div className="page-header"><h2 className="page-title">Track Record</h2></div>{sourceSwitch}<EmailedRecord /></div>
+  }
 
   if (error) return <div className="empty-state"><div className="empty-state-title text-red">Error: {(error as Error).message}</div></div>;
   if (loading) return <div className="loading"><div className="spinner" /> Loading...</div>;
@@ -68,6 +84,7 @@ export default function TrackRecord() {
       <div className="page-header">
         <h2 className="page-title">Track Record</h2>
       </div>
+      {sourceSwitch}
 
       <div className="toolbar" style={{ marginBottom: '1rem' }}>
         <div className="tab-group">

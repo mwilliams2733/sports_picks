@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 from backend.api.main import create_app
 from backend.models import Base, StrategyModel
+from backend.tests.auth_helpers import OWNER_HEADERS
 
 def _seed(client):
     engine = client.app.state.engine
@@ -14,7 +15,7 @@ def _seed(client):
 
 def test_list_strategies():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     _seed(client)
     resp = client.get("/backtest/strategies")
     assert resp.status_code == 200
@@ -22,7 +23,7 @@ def test_list_strategies():
 
 def test_create_strategy():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     Base.metadata.create_all(client.app.state.engine)
     resp = client.post("/backtest/strategies", json={"name": "new_strat", "description": "desc", "config": {"min_edge": 7}})
     assert resp.status_code == 201
@@ -30,7 +31,7 @@ def test_create_strategy():
 
 def test_promote_strategy():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     _seed(client)
     resp = client.patch("/backtest/strategies/2/promote")
     assert resp.status_code == 200

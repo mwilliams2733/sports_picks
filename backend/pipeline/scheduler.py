@@ -26,7 +26,6 @@ from backend.models import (
     Base, Game, PickModel, PickResult, StrategyModel,
     PaperPick, PlayerStat,
 )
-from backend.analysis.odds_utils import calculate_payout
 
 logger = logging.getLogger(__name__)
 from backend.time_utils import ET, et_today  # noqa: F401  (ET re-exported)
@@ -431,7 +430,13 @@ def _scout(config, engine, scheduler, is_retry):
                 logger.exception(
                     "%s odds-feed finalization failed; grading with what is "
                     "present", combat_sport)
-        grade_pending_picks(session)
+        # Guarded like the collectors above: a bad stored row used to raise
+        # out of here and abort the scout before it priced today's slate.
+        try:
+            grade_pending_picks(session)
+        except Exception:
+            logger.exception("grading failed; continuing the scout")
+            session.rollback()
         grade_completed_games(session)
         active_sports = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]
         scheduled_sports = [s for s in active_sports if s in ESPN_TEAM_SPORTS]
@@ -661,48 +666,16 @@ def grade_pending_picks(session) -> dict:
     logger.info("Graded %d strategy picks (%d skipped as ungradeable here)",
                 len(ungraded) - skipped, skipped)
 
-    # Also grade pending PaperPicks
-    pending_paper = (
-        session.query(PaperPick, Game)
-        .join(Game, PaperPick.game_id == Game.id)
-        .filter(PaperPick.result.is_(None))
-        .filter(Game.status == "final")
-        .all()
-    )
-    paper_graded = 0
-    for pick, game in pending_paper:
-        if game.home_score is None or game.away_score is None:
-            continue
+    # Also grade pending PaperPicks -- the same code /users/grade runs.
+    from backend.pipeline import paper_settlement
+    paper_graded = len(paper_settlement.grade_paper_picks(session))
+    logger.info("Auto-graded %d paper picks", paper_graded)
 
-        if pick.pick_type == "prop" and pick.prop_player and pick.prop_market:
-            player_stat = prop_box_score(session, pick.prop_player, game.date)
-            prop_result = grade_prop_pick(pick.pick_value, pick.prop_market, player_stat)
-            if not prop_result:
-                continue
-            pick.result = prop_result[0]
-        else:
-            grade_outcome = grade_pick(
-                pick.pick_type, pick.pick_value,
-                game.home_score, game.away_score, pick.odds
-            )
-            if grade_outcome is None:
-                continue
-            pick.result = grade_outcome[0]
+    parlays = paper_settlement.settle_parlays(session)
+    logger.info("Settled %d paper parlays", parlays)
 
-        if pick.result == "win":
-            pick.payout = pick.stake * calculate_payout(pick.odds)
-        elif pick.result == "push":
-            pick.payout = 0.0
-        else:
-            pick.payout = -pick.stake
-
-        pick.graded_at = datetime.now(timezone.utc) if hasattr(pick, 'graded_at') else None
-        paper_graded += 1
-
-    session.commit()
-    logger.info(f"Auto-graded {paper_graded} paper picks")
     return {"strategy": len(ungraded) - skipped, "skipped": skipped,
-            "paper": paper_graded}
+            "paper": paper_graded, "parlays": parlays}
 
 
 async def fetch_pitcher_scores_for_date(target_date) -> dict[tuple[str, str], dict[str, float | None]]:

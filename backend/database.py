@@ -387,6 +387,20 @@ def migrate_emailed_pick_confidence(engine):
             "WHERE digest_date <= '2026-09-28'"))
 
 
+def migrate_user_pin(engine):
+    """Add user_profiles.pin_hash and pin_salt. Nullable: existing players
+    have no PIN until their next bet sets one."""
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "user_profiles" not in inspector.get_table_names():
+        return
+    columns = [c["name"] for c in inspector.get_columns("user_profiles")]
+    with engine.begin() as conn:
+        for col in ("pin_hash", "pin_salt"):
+            if col not in columns:
+                conn.execute(text(f"ALTER TABLE user_profiles ADD COLUMN {col} VARCHAR"))
+
+
 MIGRATIONS = (
     migrate_api_usage,
     migrate_game_start_time,
@@ -406,6 +420,7 @@ MIGRATIONS = (
     migrate_odds_spread_total_prices,
     migrate_team_box_scores,
     migrate_emailed_pick_confidence,
+    migrate_user_pin,
 )
 
 #: Migrations that can destroy data. run_migrations passes each of these an
