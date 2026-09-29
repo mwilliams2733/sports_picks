@@ -182,14 +182,3 @@
     border-right-color: var(--border);
   }
 }
-
-.leaderboard-entry.model { border-style: dashed; }
-.leaderboard-entry.model .leaderboard-name { font-style: italic; }
-.leaderboard-record, .leaderboard-winrate, .leaderboard-pending, .leaderboard-raw { font-size: 0.8rem; color: var(--text-muted); }
-.leaderboard-caption { font-size: 0.75rem; color: var(--text-muted); width: 100%; padding: 0.25rem 0.5rem; }
-
-.verdict-above { color: var(--green); font-weight: 600; }
-.verdict-below { color: var(--red); font-weight: 600; }
-
-.spend-confirm { display: inline-flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
-.spend-confirm-text { font-size: 0.8rem; color: var(--text-muted); }

@@ -42,8 +42,10 @@ describe('LeaderboardBar', () => {
     expect(screen.getByText('raw —')).toBeInTheDocument()
   })
 
-  it('renders the ranking caption', () => {
+  it('renders the ranking caption outside the scrollable bar', () => {
     render(<LeaderboardBar selectedId={null} onSelect={vi.fn()} rows={[]} />)
-    expect(screen.getByText('Ranked by adjusted ROI · single bets only · 10 settled bets to be ranked')).toBeInTheDocument()
+    const caption = screen.getByText('Ranked by adjusted ROI · single bets only · 10 settled bets to be ranked')
+    expect(caption).toBeInTheDocument()
+    expect(caption.closest('.leaderboard-bar')).toBeNull()
   })
 })
