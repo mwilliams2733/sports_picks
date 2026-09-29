@@ -1,8 +1,12 @@
+from typing import Literal
+
 from fastapi import APIRouter, Request
 from backend.database import get_session
 from backend.models import PickModel, PickResult, Game
 from backend.analysis.odds_utils import compute_pick_clv
 from backend.analysis.recalibrator import EXPECTED_WIN_RATES
+from backend.analysis.scorecard import group, summarize, trend
+from backend.digest.record import emailed_bets
 
 router = APIRouter()
 
@@ -101,6 +105,34 @@ def get_calibration(request: Request, sport: str | None = None):
             "total_graded": len(squared_errors),
             "brier_score": brier,
         }
+    finally:
+        session.close()
+
+
+@router.get("/emailed")
+def get_emailed(request: Request, kind: Literal["game", "prop"] = "game",
+                by: Literal["week", "month", "stars"] = "week"):
+    """The emailed picks' record, graded as sent. Rates are fractions 0-1."""
+    session = get_session(request.app.state.engine)
+    try:
+        bets = emailed_bets(session, kind)
+        return {"kind": kind, "by": by,
+                "groups": [s.to_dict() for s in group(bets, by)],
+                "total": summarize(bets).to_dict()}
+    finally:
+        session.close()
+
+
+@router.get("/emailed/trend")
+def get_emailed_trend(request: Request, kind: Literal["game", "prop"] = "game"):
+    """Cumulative units by digest date, max drawdown, longest losing streak."""
+    session = get_session(request.app.state.engine)
+    try:
+        t = trend(emailed_bets(session, kind))
+        return {"kind": kind,
+                "points": [{"date": d.isoformat(), "units": round(u, 4)} for d, u in t.points],
+                "max_drawdown": round(t.max_drawdown, 4),
+                "longest_losing_streak": t.longest_losing_streak}
     finally:
         session.close()
 
