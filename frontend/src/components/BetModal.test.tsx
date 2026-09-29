@@ -25,6 +25,14 @@ vi.mock('../api/client', () => ({
       placePick: vi.fn(),
     },
   },
+  ApiError: class ApiError extends Error {
+    status: number
+    constructor(status: number, message?: string) {
+      super(message)
+      this.name = 'ApiError'
+      this.status = status
+    }
+  },
 }))
 
 function renderModal(props: Partial<React.ComponentProps<typeof BetModal>> = {}) {
@@ -58,6 +66,19 @@ describe('BetModal', () => {
     expect(screen.getByLabelText(/Enter your name/i)).toBeInTheDocument()
   })
 
+  it('joins with a PIN', async () => {
+    vi.mocked(api.users.create).mockResolvedValue({ id: 7, name: 'Sam' })
+    vi.mocked(api.users.list).mockResolvedValue([])
+    const user = userEvent.setup()
+    renderModal()
+
+    await user.type(screen.getByPlaceholderText('Your name'), 'Sam')
+    await user.type(screen.getByLabelText('PIN'), '4321')
+    await user.click(screen.getByRole('button', { name: 'Start Trading' }))
+
+    expect(api.users.create).toHaveBeenCalledWith('Sam', '4321')
+  })
+
   it('shows the bet details and stake input once a user exists', async () => {
     useUserStore.setState({ currentUserName: 'Marcus' })
     vi.mocked(api.users.list).mockResolvedValue([makeUser()])
@@ -81,10 +102,16 @@ describe('BetModal', () => {
     const user = userEvent.setup()
     renderModal()
 
+    await user.type(await screen.findByLabelText('PIN'), '1234')
     const confirmButton = await screen.findByRole('button', { name: /Confirm/ })
     await user.click(confirmButton)
 
     expect(screen.getByRole('button', { name: /Placing/ })).toBeDisabled()
+    expect(api.users.placePick).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ pick_value: 'HOME ML' }),
+      '1234'
+    )
 
     resolvePlacePick({ id: 1, result: null, payout: null, new_balance: 9900 })
     await waitFor(() => expect(screen.getByText(/pending result/i)).toBeInTheDocument())

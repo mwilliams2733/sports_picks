@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { api, getErrorMessage } from '../api/client';
+import { api, getErrorMessage, ApiError } from '../api/client';
 import { useLeaderboard } from '../hooks/useLeaderboard';
 import { usePaperTradingData, useUserDetail } from '../hooks/usePaperTrading';
 import { useUserStore } from '../stores/userStore';
 import { useFeedStore } from '../stores/feedStore';
 import type { PropData, UserProfile } from '../types';
 import { useToast } from '../hooks/useToast';
+import { getPin, setPin } from '../lib/secrets';
 
 export default function PaperTrading() {
   const queryClient = useQueryClient();
@@ -21,7 +22,16 @@ export default function PaperTrading() {
   const userPicks = userPicksQuery.data ?? [];
   const userStats = userStatsQuery.data ?? null;
   const [newName, setNewName] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [betPin, setBetPin] = useState('');
   const { toast } = useToast();
+
+  useEffect(() => {
+    // Prefills the (editable) PIN field when the selected user changes; this
+    // is a one-time seed of local form state, not state synced from props.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBetPin(selectedUser ? getPin(selectedUser.id) ?? '' : '');
+  }, [selectedUser]);
 
   // Place pick form state
   const [selectedGame, setSelectedGame] = useState<number | ''>('');
@@ -48,9 +58,14 @@ export default function PaperTrading() {
 
   const handleCreateUser = async () => {
     if (!newName.trim()) return;
+    if (!/^\d{4,6}$/.test(newPin)) {
+      toast('PIN must be 4–6 digits', 'error');
+      return;
+    }
     try {
-      await api.users.create(newName.trim());
+      await api.users.create(newName.trim(), newPin);
       setNewName('');
+      setNewPin('');
       toast('User created!', 'success');
       queryClient.invalidateQueries({ queryKey: ['users'] });
     } catch (e) {
@@ -75,15 +90,17 @@ export default function PaperTrading() {
           stake: stake,
           prop_market: prop.market,
           prop_player: prop.player_name,
-        });
-        const msg = result.result
-          ? `Pick graded: ${result.result}! Balance: $${result.new_balance.toLocaleString()}`
-          : `Pick placed! Balance: $${result.new_balance.toLocaleString()}`;
-        toast(msg, result.result === 'loss' ? 'error' : 'success');
+        }, betPin);
+        setPin(selectedUser.id, betPin);
+        toast(`Pick placed! Balance: $${result.new_balance.toLocaleString()}`, 'success');
         queryClient.invalidateQueries({ queryKey: ['users'] });
         setSelectedPropId('');
         setPropSearch('');
       } catch (e) {
+        if (e instanceof ApiError && e.status === 401) {
+          setPin(selectedUser.id, null);
+          setBetPin('');
+        }
         toast(getErrorMessage(e), 'error');
       }
     } else {
@@ -96,14 +113,16 @@ export default function PaperTrading() {
           pick_value: pickValue,
           odds: pickOdds,
           stake: stake,
-        });
-        const msg = result.result
-          ? `Pick graded: ${result.result}! Balance: $${result.new_balance.toLocaleString()}`
-          : `Pick placed! Balance: $${result.new_balance.toLocaleString()}`;
-        toast(msg, result.result === 'loss' ? 'error' : 'success');
+        }, betPin);
+        setPin(selectedUser.id, betPin);
+        toast(`Pick placed! Balance: $${result.new_balance.toLocaleString()}`, 'success');
         queryClient.invalidateQueries({ queryKey: ['users'] });
         setPickValue('');
       } catch (e) {
+        if (e instanceof ApiError && e.status === 401) {
+          setPin(selectedUser.id, null);
+          setBetPin('');
+        }
         toast(getErrorMessage(e), 'error');
       }
     }
@@ -163,15 +182,17 @@ export default function PaperTrading() {
           odds: l.odds, prop_market: l.prop_market, prop_player: l.prop_player,
         })),
         stake: parlayStake,
-      });
+      }, betPin);
       setParlayResult(res);
-      const msg = res.result
-        ? `Parlay ${res.result}! ${res.result === 'win' ? '+' : ''}$${(res.payout || 0).toLocaleString()}`
-        : `${parlayLegs.length}-leg parlay placed! Potential: $${res.potential_payout.toLocaleString()}`;
-      toast(msg, res.result === 'loss' ? 'error' : 'success');
+      setPin(selectedUser.id, betPin);
+      toast(`${parlayLegs.length}-leg parlay placed! Potential: $${res.potential_payout.toLocaleString()}`, 'success');
       queryClient.invalidateQueries({ queryKey: ['users'] });
       setParlayLegs([]);
     } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        setPin(selectedUser.id, null);
+        setBetPin('');
+      }
       toast(getErrorMessage(e), 'error');
     }
   };
@@ -294,6 +315,18 @@ export default function PaperTrading() {
           onChange={e => setNewName(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleCreateUser()}
           style={{ flex: 1, minWidth: '200px' }}
+        />
+        <input
+          className="input"
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          maxLength={6}
+          placeholder={'PIN (4–6 digits)'}
+          value={newPin}
+          onChange={e => setNewPin(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleCreateUser()}
+          style={{ maxWidth: '140px' }}
         />
         <button className="btn btn-primary" onClick={handleCreateUser}>Join</button>
       </div>
@@ -515,6 +548,22 @@ export default function PaperTrading() {
                 )}
 
                 {selectedProp && (
+                  <div style={{ minWidth: '120px' }}>
+                    <div className="input-label">PIN</div>
+                    <input
+                      className="input"
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={6}
+                      placeholder={'PIN (4–6 digits)'}
+                      value={betPin}
+                      onChange={e => setBetPin(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {selectedProp && (
                   <button className="btn btn-primary" onClick={handlePlacePick} style={{ alignSelf: 'end' }}>
                     Place Prop
                   </button>
@@ -545,6 +594,19 @@ export default function PaperTrading() {
                 <div style={{ minWidth: '120px' }}>
                   <div className="input-label">Stake ($)</div>
                   <input className="input" type="number" value={stake} onChange={e => setStake(Number(e.target.value))} min={1} />
+                </div>
+                <div style={{ minWidth: '120px' }}>
+                  <div className="input-label">PIN</div>
+                  <input
+                    className="input"
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    maxLength={6}
+                    placeholder={'PIN (4–6 digits)'}
+                    value={betPin}
+                    onChange={e => setBetPin(e.target.value)}
+                  />
                 </div>
                 <button className="btn btn-primary" onClick={handlePlacePick} style={{ alignSelf: 'end' }}>
                   Place Pick
@@ -639,6 +701,20 @@ export default function PaperTrading() {
                     <input className="input" type="number" value={parlayStake}
                       onChange={e => setParlayStake(Number(e.target.value))} min={1}
                       style={{ padding: '0.25rem 0.5rem', fontSize: '0.85rem' }} />
+                  </div>
+                  <div style={{ minWidth: '100px' }}>
+                    <div className="text-muted" style={{ fontSize: '0.7rem' }}>PIN</div>
+                    <input
+                      className="input"
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={6}
+                      placeholder={'PIN (4–6 digits)'}
+                      value={betPin}
+                      onChange={e => setBetPin(e.target.value)}
+                      style={{ padding: '0.25rem 0.5rem', fontSize: '0.85rem' }}
+                    />
                   </div>
                   <button className="btn btn-success" onClick={handlePlaceParlay}
                     disabled={parlayLegs.length < 2}

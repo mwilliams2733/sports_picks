@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react';
-import { api, getErrorMessage } from '../api/client';
+import { api, getErrorMessage, ApiError } from '../api/client';
 import type { UserProfile } from '../types';
 import { useToast } from '../hooks/useToast';
+import { getOwnerKey, setOwnerKey } from '../lib/secrets';
 
 export default function Admin() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [ownerKeyInput, setOwnerKeyInput] = useState('');
+  const [hasOwnerKey, setHasOwnerKey] = useState(() => !!getOwnerKey());
   const { toast } = useToast();
 
   const appUrl = window.location.origin;
@@ -25,8 +28,24 @@ export default function Admin() {
       setConfirmDelete(null);
       toast(`Removed ${userName}`, 'success');
     } catch (e) {
-      toast(`Error: ${getErrorMessage(e)}`, 'error');
+      if (e instanceof ApiError && e.status === 403) {
+        toast('Owner key required — add it above', 'error');
+      } else {
+        toast(`Error: ${getErrorMessage(e)}`, 'error');
+      }
     }
+  };
+
+  const handleSaveOwnerKey = () => {
+    setOwnerKey(ownerKeyInput.trim() || null);
+    setHasOwnerKey(!!getOwnerKey());
+    setOwnerKeyInput('');
+  };
+
+  const handleForgetOwnerKey = () => {
+    setOwnerKey(null);
+    setHasOwnerKey(false);
+    setOwnerKeyInput('');
   };
 
   const inviteMessage = `Join our Sports Picks group! We use AI-powered analysis to find high-value bets across NBA, NFL, NCAAB, and more.\n\nSign up here: ${appUrl}/paper-trading`;
@@ -49,6 +68,29 @@ export default function Admin() {
     <div>
       <div className="page-header">
         <h2 className="page-title">Admin</h2>
+      </div>
+
+      {/* Owner Key */}
+      <div className="section-header">Owner key <span className="section-divider" /></div>
+      <div className="card" style={{ marginBottom: '1.5rem', padding: '1.25rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.5rem' }}>
+          <input
+            className="input"
+            type="password"
+            autoComplete="off"
+            placeholder="Owner key"
+            value={ownerKeyInput}
+            onChange={e => setOwnerKeyInput(e.target.value)}
+            style={{ flex: 1, minWidth: '200px' }}
+          />
+          <button className="btn btn-primary" onClick={handleSaveOwnerKey}>Save</button>
+          <button className="btn btn-ghost" onClick={handleForgetOwnerKey}>Forget</button>
+        </div>
+        <div className="text-muted" style={{ fontSize: '0.85rem' }}>
+          {hasOwnerKey
+            ? 'Owner key saved in this browser'
+            : 'No owner key in this browser — admin actions will be refused'}
+        </div>
       </div>
 
       {/* Invite Friends */}

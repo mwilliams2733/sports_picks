@@ -271,12 +271,12 @@ const SECTIONS: FAQSection[] = [
       {
         question: 'How do I join?',
         answer:
-          'Go to the Paper Trading page, type your name in the input field, and click "Join" (or press Enter). Each name must be unique. Once created, your profile appears on the leaderboard with a $10,000 starting balance.',
+          'Go to the Paper Trading page, type your name and choose a 4–6 digit PIN, and click "Join". Names are unique (ignoring capitals). Your PIN is needed for every bet; five wrong tries lock betting for 15 minutes. You start with $10,000.',
       },
       {
         question: 'How do I place a pick?',
         answer:
-          'Click your name on the leaderboard to open your profile. In the "Place a Pick" form, select a game, choose your bet type (Moneyline, Spread, or Over/Under), and set your stake. The odds auto-fill based on the game and bet type, but you can adjust them. Click "Place Pick" to submit. Your balance is reduced by the stake amount until the pick is graded.',
+          'Click your name on the leaderboard to open your profile. In the "Place a Pick" form, select a game, choose your bet type (Moneyline, Spread, or Over/Under), and set your stake. The odds auto-fill based on the game and bet type, but you can adjust them. Click "Place Pick" to submit. Your balance is reduced by the stake amount. Bets close when the game starts.',
       },
       {
         question: 'How does grading work?',
@@ -286,7 +286,7 @@ const SECTIONS: FAQSection[] = [
       {
         question: 'How is the leaderboard ranked?',
         answer:
-          'The leaderboard ranks users by current balance (highest first). It also shows each user\u2019s profit, ROI, win-loss record, win percentage, and number of pending picks. Click any user to see their full stats and pick history.',
+          'The leaderboard ranks everyone by adjusted ROI: profit divided by amount staked, pulled toward the return of picking sides at random (about \u22124.5%) until you have a long record, so a hot week does not top the board. Raw ROI is shown beside it. Only single bets count; parlays stay in your own stats. "Model" is the daily email\u2019s picks at 1 unit each. You need 10 settled bets to be ranked; until then you are listed but unranked.',
       },
       {
         question: 'What are the period stats (Today, This Week, This Month)?',

@@ -241,3 +241,28 @@ export interface CalibrationData {
   total_graded: number;
   brier_score: number | null;
 }
+
+export interface LeaderboardRow {
+  id: number | null; name: string; is_model: boolean;
+  wins: number; losses: number; pushes: number; pending: number; n: number; n_eff: number;
+  win_rate: number | null; roi: number | null; shrunk_roi: number | null;
+  profit: number; ranked: boolean;
+}
+
+export interface EmailedSummary {
+  label: string; wins: number; losses: number; pushes: number; pending: number; n: number;
+  win_rate: number | null; range_low: number | null; range_high: number | null;
+  break_even: number | null; profit: number; staked: number; roi: number | null;
+  verdict: 'above' | 'below' | null;
+}
+
+export interface EmailedGroups {
+  kind: 'game' | 'prop'; by: 'week' | 'month' | 'stars';
+  groups: EmailedSummary[]; total: EmailedSummary;
+}
+
+export interface EmailedTrend {
+  kind: 'game' | 'prop';
+  points: { date: string; units: number }[];
+  max_drawdown: number; longest_losing_streak: number;
+}
