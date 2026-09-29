@@ -57,6 +57,15 @@ def _test_owner_key(monkeypatch):
     monkeypatch.setenv("SPORTS_PICKS_OWNER_KEY", TEST_OWNER_KEY)
 
 
+@pytest.fixture(autouse=True)
+def _reset_pin_guard():
+    """PIN lockouts are process-wide; no test may inherit another's."""
+    from backend.api.pins import guard
+    guard.reset()
+    yield
+    guard.reset()
+
+
 class RealNetworkAccess(RuntimeError):
     """A test tried to open a socket to the outside world."""
 

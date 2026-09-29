@@ -1,8 +1,9 @@
 from datetime import datetime, timezone, date, timedelta
 from fastapi import APIRouter, Request, HTTPException, Query, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import func
 from backend.api.auth import require_owner
+from backend.api.pins import PIN_PATTERN, guard as pin_guard, hash_pin, require_player_pin
 from backend.database import get_session
 from backend.models import UserProfile, PaperPick, Game, PlayerStat, ActivityFeed, Parlay
 from backend.pipeline.grader import grade_pick, grade_prop_pick
@@ -45,8 +46,29 @@ def _log_feed_event(session, loop, user_id: int | None, event_type: str, payload
         logger.warning("Feed broadcast failed", exc_info=True)
 
 
+def _check_pin(value: str) -> str:
+    if not PIN_PATTERN.match(value):
+        raise ValueError("PIN must be 4-6 digits")
+    return value
+
+
 class CreateUserRequest(BaseModel):
     name: str
+    pin: str
+
+    @field_validator("pin")
+    @classmethod
+    def _pin(cls, v: str) -> str:
+        return _check_pin(v)
+
+
+class SetPinRequest(BaseModel):
+    pin: str
+
+    @field_validator("pin")
+    @classmethod
+    def _pin(cls, v: str) -> str:
+        return _check_pin(v)
 
 
 class PlacePickRequest(BaseModel):
@@ -120,10 +142,15 @@ def create_user(request: Request, body: CreateUserRequest):
     """Create a new user profile."""
     session = get_session(request.app.state.engine)
     try:
-        existing = session.query(UserProfile).filter(UserProfile.name == body.name).first()
-        if existing:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Name required")
+        taken = session.query(UserProfile).filter(
+            func.lower(func.trim(UserProfile.name)) == name.lower()).first()
+        if taken:
             raise HTTPException(status_code=400, detail="Username already taken")
-        user = UserProfile(name=body.name)
+        pin_hash, pin_salt = hash_pin(body.pin)
+        user = UserProfile(name=name, pin_hash=pin_hash, pin_salt=pin_salt)
         session.add(user)
         session.commit()
         return {"id": user.id, "name": user.name, "starting_balance": user.starting_balance}
@@ -173,6 +200,22 @@ def delete_user(request: Request, user_id: int):
         session.close()
 
 
+@router.put("/{user_id}/pin", dependencies=[Depends(require_owner)])
+def reset_pin(request: Request, user_id: int, body: SetPinRequest):
+    """Owner-only: set a player's PIN (a friend forgot theirs)."""
+    session = get_session(request.app.state.engine)
+    try:
+        user = session.get(UserProfile, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        user.pin_hash, user.pin_salt = hash_pin(body.pin)
+        session.commit()
+        pin_guard.clear(user_id)
+        return {"id": user_id, "pin_set": True}
+    finally:
+        session.close()
+
+
 @router.get("/{user_id}")
 def get_user(request: Request, user_id: int):
     """Get a user profile with full stats."""
@@ -208,7 +251,7 @@ def get_user(request: Request, user_id: int):
         session.close()
 
 
-@router.post("/{user_id}/picks")
+@router.post("/{user_id}/picks", dependencies=[Depends(require_player_pin)])
 def place_pick(request: Request, user_id: int, body: PlacePickRequest):
     """Place a paper pick for a user."""
     session = get_session(request.app.state.engine)
@@ -359,7 +402,7 @@ def get_user_picks(request: Request, user_id: int):
         session.close()
 
 
-@router.post("/{user_id}/parlay")
+@router.post("/{user_id}/parlay", dependencies=[Depends(require_player_pin)])
 def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
     """Place a parlay bet with multiple legs across any sports."""
     session = get_session(request.app.state.engine)

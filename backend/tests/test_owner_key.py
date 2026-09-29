@@ -2,7 +2,7 @@
 is configured at all (fail closed). DELETE /users/999 answers 404 once past
 the guard, which proves the guard let the request through."""
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from backend.api.auth import require_owner
@@ -75,6 +75,28 @@ def test_assert_owner_guarded_catches_a_guard_that_does_not_refuse():
 
     with pytest.raises(AssertionError):
         assert_owner_guarded(TestClient(app), "DELETE", "/lenient/1")
+
+
+def test_assert_owner_guarded_catches_a_guard_that_ignores_the_key_value():
+    """A second lenient dependency: this one DOES refuse a missing header
+    (unlike the one above), but accepts any value at all for it -- it never
+    checks the key is right. assert_owner_guarded's "wrong key" branch must
+    catch this: a wrong key must still be refused, not merely "some header
+    present". Proof the helper isn't vacuous on that branch specifically.
+    """
+    app = FastAPI()
+
+    def checks_presence_only(x_owner_key: str | None = None):
+        if x_owner_key is None:
+            raise HTTPException(status_code=403, detail="no key")
+        return None  # any non-None value is accepted, right or wrong
+
+    @app.delete("/present-only/{item_id}")
+    def _route(item_id: int, _: None = Depends(checks_presence_only)):
+        return {"ok": True}
+
+    with pytest.raises(AssertionError):
+        assert_owner_guarded(TestClient(app), "DELETE", "/present-only/1")
 
 
 def test_require_owner_fails_closed_on_a_fake_route(monkeypatch, tmp_path):

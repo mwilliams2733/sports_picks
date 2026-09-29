@@ -4,8 +4,11 @@ Walks the real app's routes, so a write route added later without a guard
 fails here. ALLOWED_UNPROTECTED is the only escape hatch; adding to it is a
 security decision, not a fix for a failing test.
 """
+import pytest
 from fastapi import APIRouter, Depends, FastAPI
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, APIWebSocketRoute
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 
 try:
     # FastAPI 0.141.x wraps an included router lazily instead of copying its
@@ -18,22 +21,20 @@ try:
 except ImportError:
     _IncludedRouter = ()
 
-from backend.api.auth import require_owner
 from backend.api.main import create_app
 
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 #: POST /users/ is open by design (spec §6: anyone with the link may join).
-#: Task 5 removes the two PIN routes from this set when it guards them.
 ALLOWED_UNPROTECTED = {
     ("POST", "/users/"),
-    ("POST", "/users/{user_id}/picks"),
-    ("POST", "/users/{user_id}/parlay"),
 }
 
 
 def _guards():
-    return {require_owner}
+    from backend.api.auth import require_owner
+    from backend.api.pins import require_player_pin
+    return {require_owner, require_player_pin}
 
 
 def _calls(dependant):
@@ -49,6 +50,18 @@ def _flatten(routes, prefix=""):
         elif isinstance(route, _IncludedRouter):
             yield from _flatten(route.original_router.routes,
                                  prefix + route.include_context.prefix)
+        elif isinstance(route, APIWebSocketRoute):
+            continue  # not an HTTP write route; nothing to guard here
+        elif isinstance(route, Mount) and isinstance(route.app, StaticFiles):
+            continue  # static assets, not a write route
+        elif isinstance(route, Route) and (route.methods or set()) <= {"GET", "HEAD"}:
+            continue  # a plain read route (e.g. the SPA catch-all)
+        else:
+            raise TypeError(
+                f"_flatten does not know how to walk route type {type(route)!r} "
+                f"({route!r}); it may hide an unguarded write route. Teach "
+                f"_flatten about it explicitly instead of letting it fall through."
+            )
 
 
 def _write_routes(app):
@@ -81,15 +94,23 @@ def test_unguarded_write_routes_catches_a_missing_guard():
     a real route, builds a synthetic app instead.
 
     One POST route carries `Depends(require_owner)`, one POST route carries
-    no guard at all, mounted through `app.include_router(..., prefix=...)` so
+    no guard at all mounted through `app.include_router(..., prefix=...)` so
     the `_IncludedRouter`/`_flatten` path is actually exercised (not just a
-    bare route on `app` directly), and one GET route is present as a
-    distractor that must never show up (it isn't a write method at all).
+    bare route on `app` directly), a second unguarded POST sits directly on
+    `app` (top level, not via include_router) to prove top-level routes are
+    walked too, and one GET route is present as a distractor that must never
+    show up (it isn't a write method at all).
     """
+    from backend.api.auth import require_owner
+
     app = FastAPI()
 
     @app.post("/guarded")
     def _guarded(_: None = Depends(require_owner)):
+        return {"ok": True}
+
+    @app.post("/top-level-unguarded")
+    def _top_level_unguarded():
         return {"ok": True}
 
     @app.get("/read")
@@ -105,4 +126,20 @@ def test_unguarded_write_routes_catches_a_missing_guard():
     app.include_router(sub, prefix="/sub")
 
     result = unguarded_write_routes(app, _guards(), allowed=set())
-    assert result == ["POST /sub/thing"]
+    assert sorted(result) == sorted(["POST /sub/thing", "POST /top-level-unguarded"])
+
+
+def test_flatten_raises_on_an_unrecognised_route_type():
+    """`_flatten` must not silently drop a route type it doesn't recognise --
+    that would hide an unguarded write route rather than report it. A raw
+    starlette `Route` added via `app.add_route` with a non-GET/HEAD method is
+    exactly such a route; the walk must fail loudly naming its type."""
+    app = FastAPI()
+
+    def _handler(request):
+        return None
+
+    app.add_route("/raw", _handler, methods=["POST"])
+
+    with pytest.raises(TypeError):
+        list(_flatten(app.routes))

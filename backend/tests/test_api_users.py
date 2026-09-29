@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from backend.api.main import create_app
 from backend.database import get_session
 from backend.models import Base, Team, Game, Parlay, PaperPick
-from backend.tests.auth_helpers import ALL_HEADERS
+from backend.tests.auth_helpers import ALL_HEADERS, TEST_PIN
 from backend.time_utils import et_today
 
 
@@ -45,7 +45,7 @@ def _seed_games(client, specs):
 
 
 def _make_user(client, name="tester"):
-    response = client.post("/users/", json={"name": name})
+    response = client.post("/users/", json={"name": name, "pin": TEST_PIN})
     assert response.status_code == 200
     return response.json()["id"]
 
@@ -57,7 +57,7 @@ def test_create_user_returns_starting_balance():
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)
     Base.metadata.create_all(client.app.state.engine)
-    response = client.post("/users/", json={"name": "alice"})
+    response = client.post("/users/", json={"name": "alice", "pin": TEST_PIN})
     assert response.status_code == 200
     assert response.json()["starting_balance"] == 10000.0
 
@@ -66,9 +66,9 @@ def test_create_duplicate_user_rejected():
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)
     Base.metadata.create_all(client.app.state.engine)
-    first = client.post("/users/", json={"name": "alice"})
+    first = client.post("/users/", json={"name": "alice", "pin": TEST_PIN})
     assert first.status_code == 200
-    second = client.post("/users/", json={"name": "alice"})
+    second = client.post("/users/", json={"name": "alice", "pin": TEST_PIN})
     assert second.status_code == 400
     assert second.json()["detail"] == "Username already taken"
 

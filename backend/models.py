@@ -347,6 +347,11 @@ class UserProfile(Base):
     best_streak = Column(Integer, default=0)
     streak_type = Column(String, default="none")
 
+    #: Salted PBKDF2 of the player's PIN (backend.api.pins). NULL for players
+    #: created before PINs existed; they set one on their next bet.
+    pin_hash = Column(String, nullable=True)
+    pin_salt = Column(String, nullable=True)
+
 
 class PaperPick(Base):
     __tablename__ = "paper_picks"
