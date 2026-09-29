@@ -19,6 +19,7 @@ $Cloudflared = 'C:\Program Files (x86)\cloudflared\cloudflared.exe'
 $AppLog = Join-Path $Repo 'app.log'
 $TunnelLog = Join-Path $Repo 'tunnel.log'
 $BuildLog = Join-Path $Repo 'frontend-build.log'
+$Db = Join-Path $Repo 'sports_picks.db'
 
 # Match an existing quick tunnel for this app: a cloudflared "tunnel" process
 # pointed at :8000 under any loopback spelling.
@@ -81,12 +82,22 @@ if (-not $app) {
     # enabled would run every cron job twice. Set to '0' rather than
     # unsetting: backend/config.py calls load_dotenv(override=False), so an
     # unset variable could still be re-enabled by a .env file; '0' cannot be.
+    # The child inherits these at launch; restore the caller's values right
+    # after, so running this script does not change the caller's session.
+    $prevScheduler = $env:ENABLE_SCHEDULER
+    $prevDatabase = $env:DATABASE_PATH
     $env:ENABLE_SCHEDULER = '0'
-    $env:DATABASE_PATH = Join-Path $Repo 'sports_picks.db'
-
-    $proc = Start-Process -FilePath $Python -ArgumentList '-m', 'uvicorn', 'backend.api.main:app',
-        '--host', '127.0.0.1', '--port', '8000' -WorkingDirectory $Repo -WindowStyle Hidden `
-        -RedirectStandardError $AppLog -RedirectStandardOutput "$AppLog.out" -PassThru
+    $env:DATABASE_PATH = $Db
+    try {
+        $proc = Start-Process -FilePath $Python -ArgumentList '-m', 'uvicorn', 'backend.api.main:app',
+            '--host', '127.0.0.1', '--port', '8000' -WorkingDirectory $Repo -WindowStyle Hidden `
+            -RedirectStandardError $AppLog -RedirectStandardOutput "$AppLog.out" -PassThru
+    } finally {
+        if ($null -eq $prevScheduler) { Remove-Item Env:ENABLE_SCHEDULER -ErrorAction SilentlyContinue }
+        else { $env:ENABLE_SCHEDULER = $prevScheduler }
+        if ($null -eq $prevDatabase) { Remove-Item Env:DATABASE_PATH -ErrorAction SilentlyContinue }
+        else { $env:DATABASE_PATH = $prevDatabase }
+    }
 
     $healthy = $false
     for ($i = 0; $i -lt 30 -and -not $healthy; $i++) {
@@ -146,7 +157,24 @@ if (-not $app) {
     }
 }
 
-# 3. One tunnel at a time.
+# 3. No link while any player can be claimed. A player with no PIN (the
+#    legacy ones predate PINs) sets one on their next bet -- so whoever
+#    bets first as them owns them. Read-only; no pin_hash column yet means
+#    the migration has not run, so every player lacks a PIN.
+$pinCheck = "import sqlite3,sys; c=sqlite3.connect('file:'+sys.argv[1].replace(chr(92),'/')+'?mode=ro',uri=True); " +
+    "cols=[r[1] for r in c.execute('PRAGMA table_info(user_profiles)')]; " +
+    "print(c.execute('SELECT COUNT(*) FROM user_profiles'+(' WHERE pin_hash IS NULL' if 'pin_hash' in cols else '')).fetchone()[0])"
+$noPin = & $Python -c $pinCheck $Db
+if ($LASTEXITCODE -ne 0 -or -not ("$noPin" -match '^\d+$')) {
+    Write-Error "Could not check player PINs in $Db"
+    exit 1
+}
+if ([int]$noPin -gt 0) {
+    Write-Error "$noPin player(s) have no PIN. Set them first: PUT /users/<id>/pin with the owner key (see Admin), then re-run."
+    exit 1
+}
+
+# 4. One tunnel at a time.
 $tunnels | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 if (Test-Path $TunnelLog) { Remove-Item $TunnelLog -Force }
 $tunnelProc = Start-Process -FilePath $Cloudflared -ArgumentList 'tunnel', '--url', 'http://127.0.0.1:8000', '--logfile', $TunnelLog `
