@@ -364,6 +364,29 @@ def migrate_team_box_scores(engine):
         TeamBoxScore.__table__.create(engine)
 
 
+def migrate_emailed_pick_confidence(engine):
+    """Add emailed_picks.confidence; backfill the 2026-09-28 rows only.
+
+    The five picks emailed on 2026-09-28 were verified unchanged since the
+    send when they were recorded, so their stored stars ARE the emailed
+    stars. For any later row that is not guaranteed -- a pick is refreshed
+    in place until kickoff -- so those stay NULL rather than guessed.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "emailed_picks" not in inspector.get_table_names():
+        return
+    columns = [c["name"] for c in inspector.get_columns("emailed_picks")]
+    if "confidence" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE emailed_picks ADD COLUMN confidence INTEGER"))
+        conn.execute(text(
+            "UPDATE emailed_picks SET confidence = "
+            "(SELECT p.confidence FROM picks p WHERE p.id = emailed_picks.pick_id) "
+            "WHERE digest_date <= '2026-09-28'"))
+
+
 MIGRATIONS = (
     migrate_api_usage,
     migrate_game_start_time,
@@ -382,6 +405,7 @@ MIGRATIONS = (
     migrate_pick_suggested_unit_size,
     migrate_odds_spread_total_prices,
     migrate_team_box_scores,
+    migrate_emailed_pick_confidence,
 )
 
 #: Migrations that can destroy data. run_migrations passes each of these an

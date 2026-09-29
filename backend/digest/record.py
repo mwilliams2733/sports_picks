@@ -21,6 +21,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
+from backend.analysis.scorecard import Bet, summarize
 from backend.models import EmailedPick, Game, PickModel
 from backend.pipeline.grader import (grade_pick, grade_prop_pick, payout_for,
                                      prop_box_score)
@@ -52,7 +53,8 @@ def record_emailed(session: Session, sections, digest_date: date) -> int:
             sport=item.sport, pick_type=pick.pick_type,
             # As emailed, not as stored: see EmailedPick.
             pick_value=item.pick_value, odds=item.odds,
-            prop_player=pick.prop_player, prop_market=pick.prop_market))
+            prop_player=pick.prop_player, prop_market=pick.prop_market,
+            confidence=item.confidence))
         already.add(item.pick_id)
         added += 1
     session.commit()
@@ -82,46 +84,53 @@ def grade_emailed(session: Session, row: EmailedPick, game: Game):
     return result, payout_for(result, row.odds)
 
 
+def _as_bet(session: Session, row: EmailedPick, game: Game) -> Bet:
+    graded = grade_emailed(session, row, game)
+    result, units = graded if graded is not None else (None, 0.0)
+    return Bet(result=result, stake=1.0, profit=units, odds=row.odds,
+               day=row.digest_date, stars=row.confidence)
+
+
+def emailed_bets(session: Session, kind: str | None = None) -> list[Bet]:
+    """Every emailed pick as a 1u Bet, oldest first. kind: "game", "prop" or None."""
+    q = (session.query(EmailedPick, Game).join(Game, Game.id == EmailedPick.game_id)
+         .order_by(EmailedPick.digest_date.asc(), EmailedPick.id.asc()))
+    if kind == "game":
+        q = q.filter(EmailedPick.pick_type != "prop")
+    elif kind == "prop":
+        q = q.filter(EmailedPick.pick_type == "prop")
+    return [_as_bet(session, row, game) for row, game in q.all()]
+
+
 @dataclass
 class RecordRow:
     sport: str
     kind: str          # "game" or "prop"
-    wins: int = 0
-    losses: int = 0
-    pushes: int = 0
-    pending: int = 0
-    units: float = 0.0
-
-    @property
-    def win_pct(self) -> float | None:
-        """Wins over decided results. None with nothing decided yet."""
-        decided = self.wins + self.losses
-        return self.wins / decided if decided else None
+    wins: int
+    losses: int
+    pushes: int
+    pending: int
+    units: float
+    win_pct: float | None
 
 
 def emailed_record(session: Session, since: date | None = None,
                    until: date | None = None) -> list[RecordRow]:
     """The record of everything the digest sent, by sport and game/prop."""
-    q = session.query(EmailedPick, Game).join(Game, Game.id == EmailedPick.game_id)
+    q = (session.query(EmailedPick, Game).join(Game, Game.id == EmailedPick.game_id)
+         .order_by(EmailedPick.digest_date.asc(), EmailedPick.id.asc()))
     if since is not None:
         q = q.filter(EmailedPick.digest_date >= since)
     if until is not None:
         q = q.filter(EmailedPick.digest_date <= until)
-    rows: dict[tuple[str, str], RecordRow] = {}
-    for emailed, game in q.all():
-        kind = "prop" if emailed.pick_type == "prop" else "game"
-        rec = rows.setdefault((emailed.sport, kind),
-                              RecordRow(sport=emailed.sport, kind=kind))
-        graded = grade_emailed(session, emailed, game)
-        if graded is None:
-            rec.pending += 1
-            continue
-        result, units = graded
-        if result == "win":
-            rec.wins += 1
-        elif result == "loss":
-            rec.losses += 1
-        else:
-            rec.pushes += 1
-        rec.units += units
-    return sorted(rows.values(), key=lambda r: (r.sport, r.kind))
+    buckets: dict[tuple[str, str], list[Bet]] = {}
+    for row, game in q.all():
+        kind = "prop" if row.pick_type == "prop" else "game"
+        buckets.setdefault((row.sport, kind), []).append(_as_bet(session, row, game))
+    rows = []
+    for (sport, kind), bets in sorted(buckets.items()):
+        s = summarize(bets)
+        rows.append(RecordRow(sport=sport, kind=kind, wins=s.wins, losses=s.losses,
+                              pushes=s.pushes, pending=s.pending, units=s.profit,
+                              win_pct=s.win_rate))
+    return rows
