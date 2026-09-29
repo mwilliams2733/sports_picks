@@ -99,6 +99,27 @@ def test_real_prices_are_still_accepted(odds):
     assert r.status_code == 200, r.text
 
 
+# --- 6. stake must be a finite positive number -----------------------------
+
+@pytest.mark.parametrize("stake", ["NaN", "Infinity", "-Infinity"])
+def test_a_non_finite_stake_is_refused(stake):
+    client = _client()
+    g1, g2 = _scheduled_games(client, 2)
+    uid = _user(client)
+    single = ('{"game_id": %d, "pick_type": "moneyline", "pick_value": "HOME ML",'
+              ' "odds": -110, "stake": %s}' % (g1, stake))
+    r = client.post(f"/users/{uid}/picks", content=single,
+                    headers={"Content-Type": "application/json"})
+    assert r.status_code == 422, r.text
+    parlay = ('{"stake": %s, "legs": ['
+              '{"game_id": %d, "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110},'
+              '{"game_id": %d, "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110}]}'
+              % (stake, g1, g2))
+    r = client.post(f"/users/{uid}/parlay", content=parlay,
+                    headers={"Content-Type": "application/json"})
+    assert r.status_code == 422, r.text
+
+
 # --- 2. grading never raises on stored odds --------------------------------
 
 def _legacy(session, *, odds=0, parlay=False):
@@ -210,3 +231,26 @@ def test_the_scheduler_delegates_to_the_shared_paper_grader(db_session, monkeypa
     grade_pending_picks(db_session)
 
     assert calls == [db_session]
+
+
+# --- 5. deleting a player who has a parlay ---------------------------------
+
+def test_owner_can_delete_a_player_with_a_settled_parlay():
+    client = _client()
+    session = get_session(client.app.state.engine)
+    _legacy(session, odds=-110, parlay=True)
+    session.add(ActivityFeed(user_id=1, event_type="pick_won", payload="{}"))
+    session.commit()
+    session.close()
+    assert client.post("/users/grade", headers=OWNER_HEADERS).json()[
+        "parlays_settled"] == 1
+
+    r = client.delete("/users/1", headers=OWNER_HEADERS)
+
+    assert r.status_code == 200, r.text
+    session = get_session(client.app.state.engine)
+    assert session.query(PaperPick).count() == 0
+    assert session.query(Parlay).count() == 0
+    assert session.query(ActivityFeed).filter_by(user_id=1).count() == 0
+    assert session.get(UserProfile, 1) is None
+    session.close()

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone, date, timedelta
 from fastapi import APIRouter, Request, HTTPException, Query, Depends
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
 from backend.api.auth import require_owner
 from backend.api.pins import PIN_PATTERN, guard as pin_guard, hash_pin, require_player_pin
@@ -101,7 +101,9 @@ class PlacePickRequest(BaseModel):
     pick_type: str
     pick_value: str
     odds: int
-    stake: float
+    # Non-positive stakes are refused in the route (400, a readable detail);
+    # NaN/Infinity parse as valid JSON floats and must be refused here.
+    stake: float = Field(allow_inf_nan=False)
     prop_market: str | None = None
     prop_player: str | None = None
 
@@ -127,7 +129,7 @@ class ParlayLeg(BaseModel):
 
 class PlaceParlayRequest(BaseModel):
     legs: list[ParlayLeg]
-    stake: float
+    stake: float = Field(allow_inf_nan=False)
 
 
 def balance_of(session, user) -> float:
@@ -317,7 +319,9 @@ def delete_user(request: Request, user_id: int):
         user = session.get(UserProfile, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+        # Order matters: foreign_keys=ON, and parlay legs reference Parlay.
         session.query(PaperPick).filter(PaperPick.user_id == user_id).delete()
+        session.query(Parlay).filter(Parlay.user_id == user_id).delete()
         session.query(ActivityFeed).filter(ActivityFeed.user_id == user_id).delete()
         session.delete(user)
         session.commit()
