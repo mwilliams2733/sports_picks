@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '../api/client'
 import { useToast } from './useToast'
-import { rememberRefreshCost } from '../components/SpendConfirmButton'
+import { rememberRefreshCost } from '../lib/refreshCost'
 
 /**
  * Wires the refresh button to POST /pipeline/run.

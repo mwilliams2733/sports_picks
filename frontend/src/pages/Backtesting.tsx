@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import type { DailyData, RunAllResult, VariantResult } from '../types';
 import PerformanceChart from '../components/PerformanceChart';
-import SpendConfirmButton, { rememberRefreshCost } from '../components/SpendConfirmButton';
+import SpendConfirmButton from '../components/SpendConfirmButton';
+import { rememberRefreshCost } from '../lib/refreshCost';
 import { useToast } from '../hooks/useToast';
 
 const SPORTS = ['nba', 'nfl', 'ncaab', 'ncaaf', 'mlb'] as const;
@@ -164,6 +165,7 @@ export default function Backtesting() {
             pendingLabel="Running…"
             pending={pipelineRunning}
             onConfirm={handleRunPipeline}
+            showSpinner
           />
         </div>
       </div>

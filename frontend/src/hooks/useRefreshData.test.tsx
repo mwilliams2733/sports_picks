@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 import { useRefreshData } from './useRefreshData'
 import { api, ApiError } from '../api/client'
 import { ToastContext } from './useToast'
+import { LAST_REFRESH_KEY } from '../lib/refreshCost'
 
 function wrapper(client: QueryClient, toast: (message: string, type?: 'success' | 'error' | 'info') => void) {
   return ({ children }: { children: ReactNode }) => (
@@ -23,6 +24,7 @@ function newClient() {
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  localStorage.clear()
 })
 
 describe('useRefreshData', () => {
@@ -69,12 +71,12 @@ describe('useRefreshData', () => {
   // This is the test that stops it becoming another dead wire: it proves the
   // hook actually reaches into the query cache on success rather than just
   // calling the endpoint and discarding the result.
-  it('invalidates the picks, props and record queries on success', async () => {
+  it('invalidates the picks, props, record and credits queries on success, and remembers the cost', async () => {
     vi.spyOn(api.pipeline, 'run').mockResolvedValue({
       status: 'ok', active_sports: [],
       games_stored: 0, odds_stored: 0, props_stored: 0,
       props_analyzed: 0, picks_generated: 0,
-      credits_used: 0, credits_remaining_today: 600, credits_remaining_month: 20000,
+      credits_used: 7, credits_remaining_today: 593, credits_remaining_month: 19993,
     })
     const toast = vi.fn()
     const client = newClient()
@@ -91,6 +93,8 @@ describe('useRefreshData', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['games'] })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['props'] })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['credits'] })
+    expect(localStorage.getItem(LAST_REFRESH_KEY)).toBe('7')
   })
 
   it('a budget-exhausted response reads as budget exhausted', async () => {

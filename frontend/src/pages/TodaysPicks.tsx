@@ -146,6 +146,7 @@ export default function TodaysPicks() {
           pendingLabel="Refreshing…"
           pending={refreshData.isPending}
           onConfirm={() => refreshData.mutate(sport)}
+          className="btn btn-primary btn-sm"
         />
       </div>
 
