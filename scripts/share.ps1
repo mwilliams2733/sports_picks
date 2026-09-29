@@ -18,9 +18,12 @@ $Python = Join-Path $Repo '.venv\Scripts\python.exe'
 $Cloudflared = 'C:\Program Files (x86)\cloudflared\cloudflared.exe'
 $AppLog = Join-Path $Repo 'app.log'
 $TunnelLog = Join-Path $Repo 'tunnel.log'
+$BuildLog = Join-Path $Repo 'frontend-build.log'
 
+# Match an existing quick tunnel for this app: a cloudflared "tunnel" process
+# pointed at :8000 under any loopback spelling.
 $tunnels = Get-CimInstance Win32_Process -Filter "Name = 'cloudflared.exe'" |
-    Where-Object { $_.CommandLine -like '*127.0.0.1:8000*' }
+    Where-Object { $_.CommandLine -match 'tunnel' -and $_.CommandLine -match '(127\.0\.0\.1|localhost|\[::1\]):8000' }
 if ($Stop) {
     $tunnels | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
     Write-Output "Tunnel stopped ($($tunnels.Count) process(es))."
@@ -32,43 +35,120 @@ Set-Location $Repo
 # 1. The built frontend must be at least as new as HEAD.
 $headTime = [DateTimeOffset]::FromUnixTimeSeconds([int64](git log -1 --format=%ct)).LocalDateTime
 $index = Join-Path $Repo 'frontend\dist\index.html'
+$rebuilt = $false
 if (-not (Test-Path $index) -or (Get-Item $index).LastWriteTime -lt $headTime) {
     Write-Output 'Building the frontend...'
-    Push-Location (Join-Path $Repo 'frontend'); npm run build | Out-Null; Pop-Location
+    Push-Location (Join-Path $Repo 'frontend')
+    npm run build *>> $BuildLog
+    $buildExit = $LASTEXITCODE
+    Pop-Location
+    if ($buildExit -ne 0) {
+        Write-Error 'Frontend build failed; see frontend-build.log'
+        exit 1
+    }
+    $rebuilt = $true
 }
 
-# 2. The app server must be running, and started after HEAD.
+# 2. The app server must be running, started after HEAD, and be this app on :8000.
 $app = Get-CimInstance Win32_Process -Filter "Name like '%python%'" |
-    Where-Object { $_.CommandLine -like '*uvicorn*backend.api.main:app*' }
+    Where-Object { $_.CommandLine -like '*uvicorn*backend.api.main:app*' -and $_.CommandLine -like '*--port 8000*' }
+$restartNeeded = $false
 if ($app -and ($app | Where-Object { $_.CreationDate -lt $headTime })) {
-    Write-Output 'App server predates HEAD; restarting it.'
+    $restartNeeded = $true
+}
+if ($rebuilt) {
+    # A build just ran in this invocation: treat it like "predates HEAD" so
+    # the server always serves what was just built.
+    $restartNeeded = $true
+}
+if ($restartNeeded -and $app) {
+    Write-Output 'App server predates HEAD or a rebuild just ran; restarting it.'
     $app | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
     Start-Sleep -Seconds 2
     $app = $null
 }
+
 if (-not $app) {
     if (Test-Path $AppLog) { Move-Item $AppLog "$AppLog.prev" -Force }
-    Start-Process -FilePath $Python -ArgumentList '-m', 'uvicorn', 'backend.api.main:app',
+
+    # Pin the server's environment: the real scheduler already runs as its
+    # own separate process, so a second server process with the scheduler
+    # enabled would run every cron job twice.
+    Remove-Item Env:ENABLE_SCHEDULER -ErrorAction SilentlyContinue
+    $env:DATABASE_PATH = Join-Path $Repo 'sports_picks.db'
+
+    $proc = Start-Process -FilePath $Python -ArgumentList '-m', 'uvicorn', 'backend.api.main:app',
         '--host', '127.0.0.1', '--port', '8000' -WorkingDirectory $Repo -WindowStyle Hidden `
-        -RedirectStandardError $AppLog -RedirectStandardOutput "$AppLog.out" | Out-Null
-    Start-Sleep -Seconds 5
+        -RedirectStandardError $AppLog -RedirectStandardOutput "$AppLog.out" -PassThru
+
+    $healthy = $false
+    for ($i = 0; $i -lt 30 -and -not $healthy; $i++) {
+        if ($proc.HasExited) {
+            Write-Error 'App server is not healthy; see app.log'
+            exit 1
+        }
+        try {
+            $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/health' -TimeoutSec 2
+            if ($health.status -eq 'ok') { $healthy = $true }
+        } catch {
+            Start-Sleep -Seconds 1
+        }
+    }
+    if (-not $healthy) {
+        Write-Error 'App server is not healthy; see app.log'
+        exit 1
+    }
+
+    # Confirm the process actually listening on :8000 is the one we just
+    # started (or a child of it), not something else that beat us to the port.
+    $owners = (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue).OwningProcess
+    $ownerOk = $false
+    foreach ($ownerId in $owners) {
+        if ($ownerId -eq $proc.Id) {
+            $ownerOk = $true
+        } else {
+            $ownerProc = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerId" -ErrorAction SilentlyContinue
+            if ($ownerProc -and $ownerProc.ParentProcessId -eq $proc.Id) { $ownerOk = $true }
+        }
+    }
+    if (-not $ownerOk) {
+        $badPid = $owners | Select-Object -First 1
+        Write-Error "Something else is serving :8000 (PID $badPid); stop it and re-run."
+        exit 1
+    }
+} else {
+    try {
+        $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/health' -TimeoutSec 10
+        if ($health.status -ne 'ok') {
+            Write-Error 'App server is not healthy; see app.log'
+            exit 1
+        }
+    } catch {
+        Write-Error 'App server is not healthy; see app.log'
+        exit 1
+    }
 }
-$health = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/health' -TimeoutSec 10
-if ($health.status -ne 'ok') { Write-Error 'App server is not healthy; see app.log'; exit 1 }
 
 # 3. One tunnel at a time.
 $tunnels | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 if (Test-Path $TunnelLog) { Remove-Item $TunnelLog -Force }
-Start-Process -FilePath $Cloudflared -ArgumentList 'tunnel', '--url', 'http://127.0.0.1:8000', '--logfile', $TunnelLog `
-    -WindowStyle Hidden | Out-Null
+$tunnelProc = Start-Process -FilePath $Cloudflared -ArgumentList 'tunnel', '--url', 'http://127.0.0.1:8000', '--logfile', $TunnelLog `
+    -WindowStyle Hidden -PassThru
 
 $url = $null
 for ($i = 0; $i -lt 60 -and -not $url; $i++) {
     Start-Sleep -Seconds 1
     if (Test-Path $TunnelLog) {
-        $m = Select-String -Path $TunnelLog -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' | Select-Object -First 1
+        # Cloudflared's own failure/diagnostic messages reference
+        # https://api.trycloudflare.com -- exclude it so a dead tunnel is
+        # never reported as a working share link.
+        $m = Select-String -Path $TunnelLog -Pattern 'https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com' | Select-Object -First 1
         if ($m) { $url = $m.Matches[0].Value }
     }
 }
-if (-not $url) { Write-Error "No tunnel URL after 60s; see $TunnelLog"; exit 1 }
+if (-not $url) {
+    Stop-Process -Id $tunnelProc.Id -Force -ErrorAction SilentlyContinue
+    Write-Error "No tunnel URL after 60s; see $TunnelLog"
+    exit 1
+}
 Write-Output "Share this link: $url/paper-trading"
