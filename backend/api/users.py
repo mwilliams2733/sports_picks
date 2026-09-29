@@ -5,10 +5,10 @@ from sqlalchemy import func
 from backend.api.auth import require_owner
 from backend.api.pins import PIN_PATTERN, guard as pin_guard, hash_pin, require_player_pin
 from backend.database import get_session
-from backend.models import UserProfile, PaperPick, Game, PlayerStat, ActivityFeed, Parlay
-from backend.pipeline.grader import grade_pick, grade_prop_pick
+from backend.models import UserProfile, PaperPick, Game, ActivityFeed, Parlay
+from backend.pipeline import paper_settlement
 from backend.pipeline.paper_settlement import settle_parlays
-from backend.analysis.odds_utils import calculate_payout
+from backend.analysis.odds_utils import InvalidOddsError, _validate_american_odds
 from backend.analysis.paper_bets import player_bets
 from backend.analysis.scorecard import summarize, effective_bets
 from backend.digest.record import emailed_bets
@@ -75,6 +75,27 @@ class SetPinRequest(BaseModel):
         return _check_pin(v)
 
 
+#: The largest |American odds| a paper bet may carry. Real books do not
+#: quote past this; anything beyond it is a typo, not a price.
+MAX_ABS_ODDS = 10000
+
+
+def _check_odds(value: int) -> int:
+    """Refuse a price grading could not pay out.
+
+    A cleared Odds box arrives as 0. Stored, that row raised out of grading
+    when it won and took the morning scout (and the digest) down with it.
+    The validity rule is odds_utils', not restated here.
+    """
+    try:
+        _validate_american_odds(value)
+    except InvalidOddsError as e:
+        raise ValueError(str(e)) from None
+    if abs(value) > MAX_ABS_ODDS:
+        raise ValueError(f"Odds must be within +/-{MAX_ABS_ODDS}")
+    return value
+
+
 class PlacePickRequest(BaseModel):
     game_id: int
     pick_type: str
@@ -84,6 +105,11 @@ class PlacePickRequest(BaseModel):
     prop_market: str | None = None
     prop_player: str | None = None
 
+    @field_validator("odds")
+    @classmethod
+    def _odds(cls, v: int) -> int:
+        return _check_odds(v)
+
 
 class ParlayLeg(BaseModel):
     game_id: int
@@ -92,6 +118,11 @@ class ParlayLeg(BaseModel):
     odds: int
     prop_market: str | None = None
     prop_player: str | None = None
+
+    @field_validator("odds")
+    @classmethod
+    def _odds(cls, v: int) -> int:
+        return _check_odds(v)
 
 
 class PlaceParlayRequest(BaseModel):
@@ -558,55 +589,11 @@ def grade_paper_picks(request: Request):
     session = get_session(request.app.state.engine)
     loop = request.app.state.loop
     try:
-        pending = (
-            session.query(PaperPick, Game)
-            .join(Game, PaperPick.game_id == Game.id)
-            .filter(PaperPick.result.is_(None))
-            .filter(Game.status == "final")
-            .all()
-        )
-        graded = 0
-        for pick, game in pending:
-            if game.home_score is None or game.away_score is None:
-                continue
-
-            if pick.pick_type == "prop" and pick.prop_player and pick.prop_market:
-                # Grade prop pick using player stats
-                player_stat = (
-                    session.query(PlayerStat)
-                    .filter_by(player_name=pick.prop_player, stat_type="game_log", game_date=game.date)
-                    .first()
-                )
-                prop_result = grade_prop_pick(pick.pick_value, pick.prop_market, player_stat)
-                if not prop_result:
-                    continue  # No stats available yet, skip
-                pick.result = prop_result[0]
-                if pick.result == "win":
-                    pick.payout = pick.stake * calculate_payout(pick.odds)
-                elif pick.result == "push":
-                    pick.payout = 0.0
-                else:
-                    pick.payout = -pick.stake
-            else:
-                # NB: `graded` is the endpoint's counter, incremented below.
-                grade_outcome = grade_pick(
-                    pick.pick_type, pick.pick_value,
-                    game.home_score, game.away_score, pick.odds
-                )
-                if grade_outcome is None:
-                    continue
-                grade_result = grade_outcome[0]
-                pick.result = grade_result
-                if grade_result == "win":
-                    pick.payout = pick.stake * calculate_payout(pick.odds)
-                elif grade_result == "push":
-                    pick.payout = 0.0
-                else:
-                    pick.payout = -pick.stake
-            graded += 1
-
+        # The scheduler's own paper grading, so the two cannot disagree.
+        graded_picks = paper_settlement.grade_paper_picks(session)
+        for pick in graded_picks:
             # Log grading events to activity feed
-            user = session.query(UserProfile).get(pick.user_id)
+            user = session.get(UserProfile, pick.user_id)
             user_name = user.name if user else "Unknown"
             event_type = "pick_won" if pick.result == "win" else "pick_lost"
             if pick.result in ("win", "loss"):
@@ -617,14 +604,13 @@ def grade_paper_picks(request: Request):
                     "payout": pick.payout,
                 })
 
-        # Update streaks for all affected users
-        affected_users = set(pick.user_id for pick, _ in pending)
-        for uid in affected_users:
+        # Update streaks for every user with a newly graded pick
+        for uid in {pick.user_id for pick in graded_picks}:
             _update_streaks(session, loop, uid)
 
         session.commit()
         parlays_settled = settle_parlays(session)
-        return {"graded": graded, "parlays_settled": parlays_settled}
+        return {"graded": len(graded_picks), "parlays_settled": parlays_settled}
     finally:
         session.close()
 

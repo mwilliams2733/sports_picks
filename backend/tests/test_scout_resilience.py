@@ -68,6 +68,7 @@ class _Query:
 class _Session:
     def query(self, *a, **k): return _Query()
     def close(self): pass
+    def rollback(self): pass
 
 
 CONFIG = {"seasons": {}, "database_path": ":memory:", "odds_api_key": "k",
@@ -130,6 +131,21 @@ def test_a_failed_fetch_does_not_count_as_success(scout_calls, monkeypatch):
     sch.morning_scout(CONFIG, None, scheduler)
 
     assert sch._last_scout_success is None
+
+
+def test_a_grading_failure_does_not_stop_the_scout(scout_calls, monkeypatch):
+    """A paper bet stored with odds 0 used to raise out of grading and abort
+    the scout before it fetched or priced today's slate -- every morning."""
+    def boom(session):
+        raise RuntimeError("bad stored odds")
+
+    monkeypatch.setattr(sch, "grade_pending_picks", boom)
+    scheduler = sch.configure_scheduler(CONFIG, engine=None)
+
+    sch.morning_scout(CONFIG, None, scheduler)
+
+    assert scout_calls == ["scout"], "a grading error aborted the scout"
+    assert sch._last_scout_success == sch.et_today()
 
 
 # --- fix 2: late jobs still run, and not concurrently ----------------------
