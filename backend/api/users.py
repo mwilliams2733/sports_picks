@@ -111,12 +111,18 @@ def balance_of(session, user) -> float:
 
 
 def _open_for_betting(game) -> bool:
-    """Only games that have not started. Unknown start time is not past
-    (the project-wide convention), but a status past 'scheduled' is."""
+    """Only games that have not started. A missing start_time is not past
+    for a same-day game (the project-wide convention for unknown data), but
+    ingestion never writes an in-progress status, so a 'scheduled' game
+    dated before today with no start_time is a stale row for a game that
+    already happened -- 82 such rows (59 MMA, 23 boxing) exist in the live
+    db with public results. A status past 'scheduled' is always closed."""
     if game.status != "scheduled":
         return False
     start = game_start_utc(game)
-    return start is None or start > datetime.now(timezone.utc)
+    if start is None:
+        return game.date >= et_today()
+    return start > datetime.now(timezone.utc)
 
 
 @router.get("/")
@@ -284,8 +290,6 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Calculate current balance
-        picks = session.query(PaperPick).filter(PaperPick.user_id == user_id).all()
         current_balance = balance_of(session, user)
 
         if body.stake > current_balance:

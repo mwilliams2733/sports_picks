@@ -198,6 +198,45 @@ def test_a_bet_on_a_started_game_is_refused():
     assert response.status_code == 400
 
 
+def test_a_stale_scheduled_game_from_before_today_is_refused():
+    """A game dated before today with no start_time is not a same-day game
+    of unknown timing -- ingestion never writes an in-progress status, so a
+    'scheduled' row dated before today is a stale row for a game that
+    already happened (82 such rows exist in the live db)."""
+    from datetime import timedelta
+    app = create_app(":memory:")
+    client = TestClient(app, headers=ALL_HEADERS)
+    game_ids = _seed_games(client, [{"status": "scheduled"}])
+    session = get_session(app.state.engine)
+    game = session.get(Game, game_ids[0])
+    game.date = et_today() - timedelta(days=1)
+    game.start_time = None
+    session.commit()
+    session.close()
+    user_id = _make_user(client)
+    response = client.post(f"/users/{user_id}/picks", json={
+        "game_id": game_ids[0], "pick_type": "moneyline",
+        "pick_value": "HOME ML", "odds": -110, "stake": 100})
+    assert response.status_code == 400
+
+
+def test_a_bet_on_a_not_yet_started_game_is_accepted():
+    from datetime import datetime, timedelta, timezone
+    app = create_app(":memory:")
+    client = TestClient(app, headers=ALL_HEADERS)
+    game_ids = _seed_games(client, [{"status": "scheduled"}])
+    session = get_session(app.state.engine)
+    session.get(Game, game_ids[0]).start_time = (
+        datetime.now(timezone.utc) + timedelta(hours=1)).replace(tzinfo=None)
+    session.commit()
+    session.close()
+    user_id = _make_user(client)
+    response = client.post(f"/users/{user_id}/picks", json={
+        "game_id": game_ids[0], "pick_type": "moneyline",
+        "pick_value": "HOME ML", "odds": -110, "stake": 100})
+    assert response.status_code == 200
+
+
 def test_a_settled_win_pays_at_the_price():
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)

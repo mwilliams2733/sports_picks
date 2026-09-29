@@ -1,6 +1,5 @@
 import queue
 import threading
-from datetime import date
 
 from fastapi.testclient import TestClient
 
@@ -9,6 +8,7 @@ from backend.api.websocket import ConnectionManager
 from backend.database import get_session
 from backend.models import Base, Team, Game
 from backend.tests.auth_helpers import TEST_PIN
+from backend.time_utils import et_today
 
 # Starlette's WebSocketTestSession.receive() has no internal timeout, so a
 # regressed broadcast dispatch would otherwise hang this test (and the whole
@@ -59,7 +59,7 @@ def _seed_scheduled_game(client):
     game = Game(
         sport="nba",
         season="2025-26",
-        date=date.today(),
+        date=et_today(),
         home_team_id=home.id,
         away_team_id=away.id,
         status="scheduled",
