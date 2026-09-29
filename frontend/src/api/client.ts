@@ -8,9 +8,16 @@ export class ApiError extends Error {
   body: unknown;
 
   constructor(status: number, body: unknown) {
-    const detail = typeof body === 'object' && body !== null && 'detail' in body
-      ? String((body as { detail: unknown }).detail)
+    const rawDetail = typeof body === 'object' && body !== null && 'detail' in body
+      ? (body as { detail: unknown }).detail
       : undefined;
+    // FastAPI/pydantic validation errors send `detail` as a list of
+    // { msg, ... } objects rather than a string; use the first message.
+    const detail = Array.isArray(rawDetail)
+      ? (typeof rawDetail[0] === 'object' && rawDetail[0] !== null && 'msg' in rawDetail[0]
+          ? String((rawDetail[0] as { msg: unknown }).msg)
+          : undefined)
+      : rawDetail != null ? String(rawDetail) : undefined;
     super(detail || `API error: ${status}`);
     this.name = 'ApiError';
     this.status = status;

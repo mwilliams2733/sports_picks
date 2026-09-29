@@ -5,8 +5,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import BetModal from './BetModal'
 import { ToastProvider } from './Toast'
 import { useUserStore } from '../stores/userStore'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import type { UserProfile } from '../types'
+import { getPin } from '../lib/secrets'
 
 function makeUser(overrides: Partial<UserProfile> = {}): UserProfile {
   return {
@@ -17,23 +18,22 @@ function makeUser(overrides: Partial<UserProfile> = {}): UserProfile {
   }
 }
 
-vi.mock('../api/client', () => ({
-  api: {
-    users: {
-      list: vi.fn(),
-      create: vi.fn(),
-      placePick: vi.fn(),
+vi.mock('../api/client', async (importOriginal) => {
+  // Keep the real ApiError (its `detail` parsing is what BetModal relies on
+  // to tell a wrong-PIN 401 apart from other errors); only the network calls
+  // are mocked.
+  const actual = await importOriginal<typeof import('../api/client')>()
+  return {
+    ...actual,
+    api: {
+      users: {
+        list: vi.fn(),
+        create: vi.fn(),
+        placePick: vi.fn(),
+      },
     },
-  },
-  ApiError: class ApiError extends Error {
-    status: number
-    constructor(status: number, message?: string) {
-      super(message)
-      this.name = 'ApiError'
-      this.status = status
-    }
-  },
-}))
+  }
+})
 
 function renderModal(props: Partial<React.ComponentProps<typeof BetModal>> = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -59,6 +59,7 @@ describe('BetModal', () => {
     vi.clearAllMocks()
     useUserStore.setState({ currentUserName: null, selectedUser: null })
     window.localStorage.clear()
+    window.sessionStorage.clear()
   })
 
   it('prompts for a name when there is no current user', () => {
@@ -66,7 +67,7 @@ describe('BetModal', () => {
     expect(screen.getByLabelText(/Enter your name/i)).toBeInTheDocument()
   })
 
-  it('joins with a PIN', async () => {
+  it('joins with a PIN, and keeps it in the field afterward', async () => {
     vi.mocked(api.users.create).mockResolvedValue({ id: 7, name: 'Sam' })
     vi.mocked(api.users.list).mockResolvedValue([])
     const user = userEvent.setup()
@@ -77,6 +78,22 @@ describe('BetModal', () => {
     await user.click(screen.getByRole('button', { name: 'Start Trading' }))
 
     expect(api.users.create).toHaveBeenCalledWith('Sam', '4321')
+    // The prefill effect fires once userId resolves; it must read back the
+    // PIN we just stored, not blank the field the player just filled in.
+    await waitFor(() => expect(getPin(7)).toBe('4321'))
+    expect(await screen.findByLabelText('PIN')).toHaveValue('4321')
+  })
+
+  it('rejects a malformed PIN before joining', async () => {
+    const user = userEvent.setup()
+    renderModal()
+
+    await user.type(screen.getByPlaceholderText('Your name'), 'Sam')
+    await user.type(screen.getByLabelText('PIN'), '12')
+    await user.click(screen.getByRole('button', { name: 'Start Trading' }))
+
+    expect(await screen.findByText('PIN must be 4–6 digits')).toBeInTheDocument()
+    expect(api.users.create).not.toHaveBeenCalled()
   })
 
   it('shows the bet details and stake input once a user exists', async () => {
@@ -115,5 +132,22 @@ describe('BetModal', () => {
 
     resolvePlacePick({ id: 1, result: null, payout: null, new_balance: 9900 })
     await waitFor(() => expect(screen.getByText(/pending result/i)).toBeInTheDocument())
+  })
+
+  it('forgets the PIN and clears the field on a wrong-PIN 401', async () => {
+    useUserStore.setState({ currentUserName: 'Marcus' })
+    vi.mocked(api.users.list).mockResolvedValue([makeUser()])
+    vi.mocked(api.users.placePick).mockRejectedValue(new ApiError(401, { detail: 'Wrong PIN' }))
+
+    const user = userEvent.setup()
+    renderModal()
+
+    const pinInput = await screen.findByLabelText('PIN')
+    await user.type(pinInput, '1234')
+    await user.click(await screen.findByRole('button', { name: /Confirm/ }))
+
+    expect(await screen.findByText('Wrong PIN')).toBeInTheDocument()
+    expect(getPin(1)).toBe(null)
+    expect(pinInput).toHaveValue('')
   })
 })

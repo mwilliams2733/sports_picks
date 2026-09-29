@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { api } from './client'
+import { api, ApiError } from './client'
 import { setOwnerKey } from '../lib/secrets'
 
 function lastHeaders(): Record<string, string> {
@@ -33,5 +33,18 @@ describe('auth headers', () => {
     await api.users.create('amy', '4321')
     const call = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)!
     expect(JSON.parse(call[1].body as string)).toEqual({ name: 'amy', pin: '4321' })
+  })
+
+  it('sends no owner key on a read, even when one is stored', async () => {
+    setOwnerKey('k')
+    await api.users.list()
+    expect(lastHeaders()['X-Owner-Key']).toBeUndefined()
+  })
+})
+
+describe('ApiError', () => {
+  it('uses the first validation message when detail is a list', () => {
+    const err = new ApiError(422, { detail: [{ msg: 'PIN must be 4-6 digits' }] })
+    expect(err.message).toContain('PIN must be 4-6 digits')
   })
 })

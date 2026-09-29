@@ -55,8 +55,13 @@ export default function BetModal({
 
   const handleCreateUser = async () => {
     if (!userName.trim()) return
+    if (!/^\d{4,6}$/.test(pin)) {
+      toast('PIN must be 4–6 digits', 'error')
+      return
+    }
     try {
       const res = await api.users.create(userName.trim(), pin)
+      storePin(res.id, pin)
       setUserId(res.id)
       setCurrentUserName(userName.trim())
       toast(`Welcome, ${userName.trim()}!`, 'success')

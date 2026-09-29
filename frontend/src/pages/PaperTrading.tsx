@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, getErrorMessage, ApiError } from '../api/client';
 import { useLeaderboard } from '../hooks/useLeaderboard';
@@ -26,12 +26,15 @@ export default function PaperTrading() {
   const [betPin, setBetPin] = useState('');
   const { toast } = useToast();
 
-  useEffect(() => {
-    // Prefills the (editable) PIN field when the selected user changes; this
-    // is a one-time seed of local form state, not state synced from props.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  // Prefills the (editable) PIN field when the selected user's id changes,
+  // derived during render rather than in an effect so re-selecting the same
+  // user (e.g. a new object identity after a leaderboard refetch) doesn't
+  // clobber a PIN the player is mid-typing.
+  const [pinFor, setPinFor] = useState<number | undefined>(selectedUser?.id);
+  if (selectedUser?.id !== pinFor) {
+    setPinFor(selectedUser?.id);
     setBetPin(selectedUser ? getPin(selectedUser.id) ?? '' : '');
-  }, [selectedUser]);
+  }
 
   // Place pick form state
   const [selectedGame, setSelectedGame] = useState<number | ''>('');
@@ -63,7 +66,8 @@ export default function PaperTrading() {
       return;
     }
     try {
-      await api.users.create(newName.trim(), newPin);
+      const res = await api.users.create(newName.trim(), newPin);
+      setPin(res.id, newPin);
       setNewName('');
       setNewPin('');
       toast('User created!', 'success');
@@ -317,6 +321,7 @@ export default function PaperTrading() {
           style={{ flex: 1, minWidth: '200px' }}
         />
         <input
+          aria-label="PIN"
           className="input"
           type="password"
           inputMode="numeric"
@@ -551,6 +556,7 @@ export default function PaperTrading() {
                   <div style={{ minWidth: '120px' }}>
                     <div className="input-label">PIN</div>
                     <input
+                      aria-label="PIN"
                       className="input"
                       type="password"
                       inputMode="numeric"
@@ -598,6 +604,7 @@ export default function PaperTrading() {
                 <div style={{ minWidth: '120px' }}>
                   <div className="input-label">PIN</div>
                   <input
+                    aria-label="PIN"
                     className="input"
                     type="password"
                     inputMode="numeric"
@@ -705,6 +712,7 @@ export default function PaperTrading() {
                   <div style={{ minWidth: '100px' }}>
                     <div className="text-muted" style={{ fontSize: '0.7rem' }}>PIN</div>
                     <input
+                      aria-label="PIN"
                       className="input"
                       type="password"
                       inputMode="numeric"

@@ -75,6 +75,7 @@ export default function Admin() {
       <div className="card" style={{ marginBottom: '1.5rem', padding: '1.25rem' }}>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.5rem' }}>
           <input
+            aria-label="Owner key"
             className="input"
             type="password"
             autoComplete="off"

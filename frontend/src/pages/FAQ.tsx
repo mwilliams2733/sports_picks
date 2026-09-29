@@ -281,7 +281,7 @@ const SECTIONS: FAQSection[] = [
       {
         question: 'How does grading work?',
         answer:
-          'If a game is already final when you place your pick, it\u2019s graded instantly. For live or upcoming games, picks stay "Pending" until you (or anyone) clicks the "Grade Picks" button. Grading checks all pending picks against final scores and updates results and balances. Wins pay out based on the odds (American odds format), losses deduct your stake, and pushes return your stake with no profit.',
+          'Bets close when the game starts. After games finish, picks are graded automatically each morning (the owner can also grade on demand). Wins pay at the price you took; pushes return your stake. Parlays settle once every leg is graded; a leg whose game is postponed or canceled keeps the parlay pending.',
       },
       {
         question: 'How is the leaderboard ranked?',
