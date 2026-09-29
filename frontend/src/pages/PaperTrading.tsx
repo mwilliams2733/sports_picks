@@ -2,16 +2,19 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, getErrorMessage, ApiError } from '../api/client';
 import { useLeaderboard } from '../hooks/useLeaderboard';
+import { useRankings } from '../hooks/useRankings';
 import { usePaperTradingData, useUserDetail } from '../hooks/usePaperTrading';
 import { useUserStore } from '../stores/userStore';
 import { useFeedStore } from '../stores/feedStore';
 import type { PropData, UserProfile } from '../types';
 import { useToast } from '../hooks/useToast';
 import { getPin, setPin } from '../lib/secrets';
+import LeaderboardBar from '../components/LeaderboardBar';
 
 export default function PaperTrading() {
   const queryClient = useQueryClient();
   const { data: users = [], isLoading: usersLoading } = useLeaderboard();
+  const { data: rankings = [] } = useRankings();
   const { selectedUser, setSelectedUser } = useUserStore();
   const { events: wsEvents } = useFeedStore();
   const { games: gamesQuery, props: propsQuery, feed: feedQuery } = usePaperTradingData();
@@ -285,12 +288,6 @@ export default function PaperTrading() {
     }
   };
 
-  const getStreakIndicator = (user: UserProfile) => {
-    if (user.current_streak >= 3 && user.streak_type === 'win') return '\u{1F525}';
-    if (user.current_streak >= 3 && user.streak_type === 'loss') return '\u{2744}\u{FE0F}';
-    return null;
-  };
-
   // Merge WS events + initial API events for the feed
   const allFeedEvents = [
     ...wsEvents.map(e => ({ message: e.message, timestamp: e.timestamp })),
@@ -338,35 +335,16 @@ export default function PaperTrading() {
 
       {/* Compact Leaderboard Bar */}
       <div className="section-header">Leaderboard <span className="section-divider" /></div>
-      <div className="leaderboard-bar">
-        {users.map((u, i) => (
-          <div
-            key={u.id}
-            className={`leaderboard-entry${selectedUser?.id === u.id ? ' selected' : ''}`}
-            onClick={() => selectUser(u)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectUser(u); } }}
-            role="button"
-            tabIndex={0}
-            aria-label={`Select ${u.name}`}
-            aria-pressed={selectedUser?.id === u.id}
-          >
-            <span className="leaderboard-rank">#{i + 1}</span>
-            <span className="leaderboard-name">{u.name}</span>
-            <span className="leaderboard-roi" style={{ color: u.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>
-              {u.roi >= 0 ? '+' : ''}{u.roi}%
-            </span>
-            <span className="leaderboard-roi">{formatMoney(u.current_balance)}</span>
-            {getStreakIndicator(u) && (
-              <span className="leaderboard-streak">{getStreakIndicator(u)}</span>
-            )}
-          </div>
-        ))}
-        {users.length === 0 && (
-          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '0.5rem' }}>
-            No users yet. Create one above!
-          </div>
-        )}
-      </div>
+      <LeaderboardBar
+        rows={rankings}
+        selectedId={selectedUser?.id ?? null}
+        onSelect={id => { const u = users.find(x => x.id === id); if (u) selectUser(u); }}
+      />
+      {users.length === 0 && (
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '0.5rem' }}>
+          No players yet. Join above!
+        </div>
+      )}
 
       {/* Activity Feed */}
       <div className="activity-feed">
