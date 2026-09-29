@@ -9,6 +9,9 @@ from backend.models import UserProfile, PaperPick, Game, PlayerStat, ActivityFee
 from backend.pipeline.grader import grade_pick, grade_prop_pick
 from backend.pipeline.paper_settlement import settle_parlays
 from backend.analysis.odds_utils import calculate_payout
+from backend.analysis.paper_bets import player_bets
+from backend.analysis.scorecard import summarize
+from backend.digest.record import emailed_bets
 import json
 import asyncio
 import logging
@@ -133,15 +136,11 @@ def list_users(request: Request):
         users = session.query(UserProfile).all()
         result = []
         for u in users:
-            picks = session.query(PaperPick).filter(PaperPick.user_id == u.id).all()
-            wins = sum(1 for p in picks if p.result == "win")
-            losses = sum(1 for p in picks if p.result == "loss")
-            pushes = sum(1 for p in picks if p.result == "push")
-            pending = sum(1 for p in picks if p.result is None)
-            total_wagered = sum(p.stake for p in picks)
+            bets = player_bets(session, u.id)
+            s = summarize(bets)
+            total_wagered = sum(b.stake for b in bets)
             current_balance = balance_of(session, u)
             profit = round(current_balance - u.starting_balance, 2)
-            total_picks = wins + losses + pushes
             result.append({
                 "id": u.id,
                 "name": u.name,
@@ -149,12 +148,12 @@ def list_users(request: Request):
                 "current_balance": round(current_balance, 2),
                 "total_wagered": round(total_wagered, 2),
                 "profit": profit,
-                "roi": round((profit / total_wagered * 100) if total_wagered > 0 else 0, 2),
-                "wins": wins,
-                "losses": losses,
-                "pushes": pushes,
-                "pending": pending,
-                "win_rate": round((wins / total_picks * 100) if total_picks > 0 else 0, 1),
+                "roi": round(s.roi * 100, 2) if s.roi is not None else 0,
+                "wins": s.wins,
+                "losses": s.losses,
+                "pushes": s.pushes,
+                "pending": s.pending,
+                "win_rate": round(s.win_rate * 100, 1) if s.win_rate is not None else 0,
                 "current_streak": u.current_streak or 0,
                 "best_streak": u.best_streak or 0,
                 "streak_type": u.streak_type or "none",
@@ -163,6 +162,59 @@ def list_users(request: Request):
         # Sort by current_balance descending (leaderboard)
         result.sort(key=lambda x: x["current_balance"], reverse=True)
         return result
+    finally:
+        session.close()
+
+
+MIN_RANKED_BETS = 10
+#: Shrinkage toward the prior, in bets: a record of n bets gets weight
+#: n / (n + SHRINK_BETS). Chosen 2026-09-28 so a 7-3 start at -110 ranks
+#: below a 40-30 record (brief G.2); revisit only with a dated note.
+SHRINK_BETS = 50
+#: The prior: ROI of picking sides at random at -110 (win half, pay the vig).
+PRIOR_ROI = 0.5 * (100 / 110) - 0.5
+
+
+def shrunk_roi(roi: float | None, n: int) -> float | None:
+    """ROI pulled toward PRIOR_ROI by SHRINK_BETS pseudo-bets."""
+    if roi is None:
+        return None
+    return (n * roi + SHRINK_BETS * PRIOR_ROI) / (n + SHRINK_BETS)
+
+
+def _board_row(user_id, name, is_model, s) -> dict:
+    shrunk = shrunk_roi(s.roi, s.n)
+    return {"id": user_id, "name": name, "is_model": is_model,
+            "wins": s.wins, "losses": s.losses, "pushes": s.pushes,
+            "pending": s.pending, "n": s.n,
+            "win_rate": None if s.win_rate is None else round(s.win_rate, 4),
+            "roi": None if s.roi is None else round(s.roi, 4),
+            "shrunk_roi": None if shrunk is None else round(shrunk, 4),
+            "profit": round(s.profit, 2), "ranked": s.n >= MIN_RANKED_BETS}
+
+
+def _board_order(row: dict):
+    if row["ranked"]:
+        return (0, -(row["shrunk_roi"] or 0.0), row["name"].lower())
+    return (1, -row["n"], row["name"].lower())
+
+
+@router.get("/leaderboard")
+def leaderboard(request: Request):
+    """Every player plus the Model (emailed picks, 1u each), ranked by shrunk ROI.
+
+    ROI is profit / stake, so a $1,000 bettor and a 1u model compare fairly;
+    shrinking it toward PRIOR_ROI keeps a hot start from topping the board.
+    Straight bets only. Fewer than MIN_RANKED_BETS settled bets: shown, not ranked.
+    """
+    session = get_session(request.app.state.engine)
+    try:
+        rows = [_board_row(u.id, u.name, False,
+                           summarize(player_bets(session, u.id, include_parlays=False)))
+                for u in session.query(UserProfile).all()]
+        rows.append(_board_row(None, "Model", True, summarize(emailed_bets(session, None))))
+        rows.sort(key=_board_order)
+        return rows
     finally:
         session.close()
 
@@ -254,15 +306,11 @@ def get_user(request: Request, user_id: int):
         user = session.get(UserProfile, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        picks = session.query(PaperPick).filter(PaperPick.user_id == user_id).all()
-        wins = sum(1 for p in picks if p.result == "win")
-        losses = sum(1 for p in picks if p.result == "loss")
-        pushes = sum(1 for p in picks if p.result == "push")
-        pending = sum(1 for p in picks if p.result is None)
-        total_wagered = sum(p.stake for p in picks)
+        bets = player_bets(session, user_id)
+        s = summarize(bets)
+        total_wagered = sum(b.stake for b in bets)
         current_balance = balance_of(session, user)
         profit = round(current_balance - user.starting_balance, 2)
-        total_picks = wins + losses + pushes
         return {
             "id": user.id,
             "name": user.name,
@@ -270,12 +318,12 @@ def get_user(request: Request, user_id: int):
             "current_balance": round(current_balance, 2),
             "total_wagered": round(total_wagered, 2),
             "profit": profit,
-            "roi": round((profit / total_wagered * 100) if total_wagered > 0 else 0, 2),
-            "wins": wins,
-            "losses": losses,
-            "pushes": pushes,
-            "pending": pending,
-            "win_rate": round((wins / total_picks * 100) if total_picks > 0 else 0, 1),
+            "roi": round(s.roi * 100, 2) if s.roi is not None else 0,
+            "wins": s.wins,
+            "losses": s.losses,
+            "pushes": s.pushes,
+            "pending": s.pending,
+            "win_rate": round(s.win_rate * 100, 1) if s.win_rate is not None else 0,
         }
     finally:
         session.close()
@@ -610,22 +658,14 @@ def _update_streaks(session, loop, user_id: int):
             })
 
 
-def _compute_period_stats(picks: list) -> dict:
-    """Compute win/loss/profit stats from a list of (PaperPick, Game) tuples."""
-    wins = sum(1 for p, _ in picks if p.result == "win")
-    losses = sum(1 for p, _ in picks if p.result == "loss")
-    pushes = sum(1 for p, _ in picks if p.result == "push")
-    total = wins + losses + pushes
-    profit = sum(p.payout or 0 for p, _ in picks)
-    wagered = sum(p.stake for p, _ in picks if p.result is not None)
+def _compute_period_stats(bets) -> dict:
+    """Period stats for a player's Bets, through the shared scorecard."""
+    s = summarize(bets)
     return {
-        "wins": wins,
-        "losses": losses,
-        "pushes": pushes,
-        "total": total,
-        "win_rate": round((wins / total * 100) if total > 0 else 0, 1),
-        "profit": round(profit, 2),
-        "roi": round((profit / wagered * 100) if wagered > 0 else 0, 2),
+        "wins": s.wins, "losses": s.losses, "pushes": s.pushes, "total": s.n,
+        "win_rate": round(s.win_rate * 100, 1) if s.win_rate is not None else 0,
+        "profit": round(s.profit, 2),
+        "roi": round(s.roi * 100, 2) if s.roi is not None else 0,
     }
 
 
@@ -638,26 +678,19 @@ def get_user_stats(request: Request, user_id: int):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        all_picks = (
-            session.query(PaperPick, Game)
-            .join(Game, PaperPick.game_id == Game.id)
-            .filter(PaperPick.user_id == user_id)
-            .all()
-        )
-
+        bets = player_bets(session, user_id)
         today = et_today()
         week_start = today - timedelta(days=today.weekday())  # Monday
         month_start = today.replace(day=1)
-
-        daily = [(p, g) for p, g in all_picks if g.date == today]
-        weekly = [(p, g) for p, g in all_picks if g.date >= week_start]
-        monthly = [(p, g) for p, g in all_picks if g.date >= month_start]
+        daily = [b for b in bets if b.day == today]
+        weekly = [b for b in bets if b.day >= week_start]
+        monthly = [b for b in bets if b.day >= month_start]
 
         # Daily breakdown for chart (last 30 days)
         daily_breakdown = []
         for i in range(30):
             d = today - timedelta(days=29 - i)
-            day_picks = [(p, g) for p, g in all_picks if g.date == d and p.result is not None]
+            day_picks = [b for b in bets if b.day == d and b.result is not None]
             if day_picks:
                 stats = _compute_period_stats(day_picks)
                 daily_breakdown.append({"date": str(d), **stats})
@@ -666,7 +699,7 @@ def get_user_stats(request: Request, user_id: int):
             "today": _compute_period_stats(daily),
             "this_week": _compute_period_stats(weekly),
             "this_month": _compute_period_stats(monthly),
-            "all_time": _compute_period_stats(all_picks),
+            "all_time": _compute_period_stats(bets),
             "daily_breakdown": daily_breakdown,
         }
     finally:
