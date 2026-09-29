@@ -39,7 +39,12 @@ $rebuilt = $false
 if (-not (Test-Path $index) -or (Get-Item $index).LastWriteTime -lt $headTime) {
     Write-Output 'Building the frontend...'
     Push-Location (Join-Path $Repo 'frontend')
-    npm run build *>> $BuildLog
+    # cmd /c, not a native PS pipeline: under $ErrorActionPreference = 'Stop',
+    # PS 5.1 turns every stderr line from npm (including its routine "(!) Some
+    # chunks are larger than 500 kB" warning) into a terminating
+    # NativeCommandError. cmd's own redirection also writes the log as plain
+    # bytes instead of PS 5.1's UTF-16.
+    cmd /c "npm run build >> `"$BuildLog`" 2>&1"
     $buildExit = $LASTEXITCODE
     Pop-Location
     if ($buildExit -ne 0) {
@@ -63,7 +68,7 @@ if ($rebuilt) {
 }
 if ($restartNeeded -and $app) {
     Write-Output 'App server predates HEAD or a rebuild just ran; restarting it.'
-    $app | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    $app | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Seconds 2
     $app = $null
 }
@@ -73,8 +78,10 @@ if (-not $app) {
 
     # Pin the server's environment: the real scheduler already runs as its
     # own separate process, so a second server process with the scheduler
-    # enabled would run every cron job twice.
-    Remove-Item Env:ENABLE_SCHEDULER -ErrorAction SilentlyContinue
+    # enabled would run every cron job twice. Set to '0' rather than
+    # unsetting: backend/config.py calls load_dotenv(override=False), so an
+    # unset variable could still be re-enabled by a .env file; '0' cannot be.
+    $env:ENABLE_SCHEDULER = '0'
     $env:DATABASE_PATH = Join-Path $Repo 'sports_picks.db'
 
     $proc = Start-Process -FilePath $Python -ArgumentList '-m', 'uvicorn', 'backend.api.main:app',
@@ -89,26 +96,36 @@ if (-not $app) {
         }
         try {
             $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/health' -TimeoutSec 2
-            if ($health.status -eq 'ok') { $healthy = $true }
+            if ($health.status -eq 'ok') {
+                $healthy = $true
+            } else {
+                Start-Sleep -Seconds 1
+            }
         } catch {
             Start-Sleep -Seconds 1
         }
     }
     if (-not $healthy) {
+        # Don't leave a half-started server running.
+        Get-CimInstance Win32_Process -Filter "ParentProcessId = $($proc.Id)" -ErrorAction SilentlyContinue |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
         Write-Error 'App server is not healthy; see app.log'
         exit 1
     }
 
     # Confirm the process actually listening on :8000 is the one we just
-    # started (or a child of it), not something else that beat us to the port.
+    # started (or a child of it), not something else that beat us to the
+    # port -- and not an orphaned listener whose dead parent's PID happened
+    # to get reused as $proc.Id, which the CreationDate check below rules out.
     $owners = (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue).OwningProcess
     $ownerOk = $false
     foreach ($ownerId in $owners) {
-        if ($ownerId -eq $proc.Id) {
+        $ownerProc = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerId" -ErrorAction SilentlyContinue
+        if (-not $ownerProc) { continue }
+        $isSelfOrChild = ($ownerId -eq $proc.Id) -or ($ownerProc.ParentProcessId -eq $proc.Id)
+        if ($isSelfOrChild -and $ownerProc.CreationDate -ge $proc.StartTime) {
             $ownerOk = $true
-        } else {
-            $ownerProc = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerId" -ErrorAction SilentlyContinue
-            if ($ownerProc -and $ownerProc.ParentProcessId -eq $proc.Id) { $ownerOk = $true }
         }
     }
     if (-not $ownerOk) {
