@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from backend.api.main import create_app
 from backend.database import get_session
 from backend.models import Base, Team, Game, Parlay, PaperPick
+from backend.tests.auth_helpers import ALL_HEADERS
 from backend.time_utils import et_today
 
 
@@ -54,7 +55,7 @@ def _make_user(client, name="tester"):
 
 def test_create_user_returns_starting_balance():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     Base.metadata.create_all(client.app.state.engine)
     response = client.post("/users/", json={"name": "alice"})
     assert response.status_code == 200
@@ -63,7 +64,7 @@ def test_create_user_returns_starting_balance():
 
 def test_create_duplicate_user_rejected():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     Base.metadata.create_all(client.app.state.engine)
     first = client.post("/users/", json={"name": "alice"})
     assert first.status_code == 200
@@ -74,7 +75,7 @@ def test_create_duplicate_user_rejected():
 
 def test_get_unknown_user_404():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     Base.metadata.create_all(client.app.state.engine)
     response = client.get("/users/999")
     assert response.status_code == 404
@@ -82,7 +83,7 @@ def test_get_unknown_user_404():
 
 def test_delete_user_removes_picks():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "final", "home_score": 110, "away_score": 100}])
     user_id = _make_user(client, "alice")
     pick_response = client.post(f"/users/{user_id}/picks", json={
@@ -103,7 +104,7 @@ def test_delete_user_removes_picks():
 
 def test_list_users_sorted_by_balance_desc():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "final", "home_score": 110, "away_score": 100}])
     loser_id = _make_user(client, "loser")
     winner_id = _make_user(client, "winner")
@@ -130,7 +131,7 @@ def test_list_users_sorted_by_balance_desc():
 
 def test_place_pick_on_scheduled_game_is_pending():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "scheduled"}])
     user_id = _make_user(client)
     response = client.post(f"/users/{user_id}/picks", json={
@@ -148,7 +149,7 @@ def test_place_pick_on_scheduled_game_is_pending():
 
 def test_place_pick_on_final_game_grades_immediately_win():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "final", "home_score": 110, "away_score": 100}])
     user_id = _make_user(client)
     response = client.post(f"/users/{user_id}/picks", json={
@@ -167,7 +168,7 @@ def test_place_pick_on_final_game_grades_immediately_win():
 
 def test_place_pick_zero_stake_rejected():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "scheduled"}])
     user_id = _make_user(client)
     response = client.post(f"/users/{user_id}/picks", json={
@@ -183,7 +184,7 @@ def test_place_pick_zero_stake_rejected():
 
 def test_place_pick_unknown_game_404():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     Base.metadata.create_all(client.app.state.engine)
     user_id = _make_user(client)
     response = client.post(f"/users/{user_id}/picks", json={
@@ -198,7 +199,7 @@ def test_place_pick_unknown_game_404():
 
 def test_place_pick_exceeding_balance_rejected():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "scheduled"}])
     user_id = _make_user(client)
     response = client.post(f"/users/{user_id}/picks", json={
@@ -221,7 +222,7 @@ def test_pending_stakes_are_not_reserved():
     # reservation fix, picks 2-5 must return 400 (insufficient balance) and
     # this assertion must be inverted.
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "scheduled"}])
     user_id = _make_user(client)
 
@@ -245,7 +246,7 @@ def test_pending_stakes_are_not_reserved():
 
 def test_parlay_requires_two_legs():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "scheduled"}])
     user_id = _make_user(client)
     response = client.post(f"/users/{user_id}/parlay", json={
@@ -260,7 +261,7 @@ def test_parlay_requires_two_legs():
 
 def test_parlay_combined_odds_two_minus_110_legs():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [
         {"status": "final", "home_score": 110, "away_score": 100},
         {"status": "final", "home_score": 110, "away_score": 100},
@@ -291,7 +292,7 @@ def test_parlay_payout_missing_from_balance():
     # fix, current_balance must become 11322.31 and profit must become
     # 1322.31.
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [
         {"status": "final", "home_score": 110, "away_score": 100},
         {"status": "final", "home_score": 110, "away_score": 100},
@@ -323,7 +324,7 @@ def test_parlay_on_scheduled_games_never_settles():
     # even after the game finishes and /users/grade runs. After the fix, the
     # parlay's result must become "win".
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [
         {"status": "final", "home_score": 110, "away_score": 100},
         {"status": "scheduled"},
@@ -360,7 +361,7 @@ def test_parlay_on_scheduled_games_never_settles():
 
 def test_parlay_legs_stored_with_zero_stake():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [
         {"status": "final", "home_score": 110, "away_score": 100},
         {"status": "final", "home_score": 110, "away_score": 100},
@@ -389,7 +390,7 @@ def test_parlay_legs_stored_with_zero_stake():
 
 def test_grade_endpoint_grades_pending_picks():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "scheduled"}])
     user_id = _make_user(client)
     pick_response = client.post(f"/users/{user_id}/picks", json={
@@ -423,7 +424,7 @@ def test_grade_endpoint_grades_pending_picks():
 
 def test_grade_endpoint_skips_games_without_scores():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "scheduled"}])
     user_id = _make_user(client)
     pick_response = client.post(f"/users/{user_id}/picks", json={
@@ -450,7 +451,7 @@ def test_grade_endpoint_skips_games_without_scores():
 
 def test_win_streak_counted():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [
         {"status": "final", "home_score": 110, "away_score": 100},
         {"status": "final", "home_score": 110, "away_score": 100},
@@ -477,7 +478,7 @@ def test_win_streak_counted():
 
 def test_user_stats_shape():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "scheduled"}])
     user_id = _make_user(client)
     response = client.get(f"/users/{user_id}/stats")
@@ -489,7 +490,7 @@ def test_user_stats_shape():
 
 def test_feed_route_is_shadowed():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     Base.metadata.create_all(client.app.state.engine)
     response = client.get("/users/feed")
     assert response.status_code == 200
@@ -497,7 +498,7 @@ def test_feed_route_is_shadowed():
 
 def test_feed_route_not_shadowed():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     Base.metadata.create_all(client.app.state.engine)
     response = client.get("/users/feed")
     assert response.status_code == 200
@@ -506,7 +507,7 @@ def test_feed_route_not_shadowed():
 
 def test_feed_limit_is_capped():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     Base.metadata.create_all(client.app.state.engine)
     response = client.get("/users/feed?limit=99999")
     assert response.status_code == 422
@@ -514,7 +515,7 @@ def test_feed_limit_is_capped():
 
 def test_get_user_by_id_still_works():
     app = create_app(":memory:")
-    client = TestClient(app)
+    client = TestClient(app, headers=ALL_HEADERS)
     Base.metadata.create_all(client.app.state.engine)
     user_id = _make_user(client)
     response = client.get(f"/users/{user_id}")

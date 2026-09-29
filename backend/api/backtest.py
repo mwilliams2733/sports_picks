@@ -1,9 +1,10 @@
 import json
 from datetime import datetime, timezone
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from pydantic import BaseModel
 from backend.database import get_session
 from backend.models import StrategyModel, BacktestRun, BacktestPick
+from backend.api.auth import require_owner
 
 router = APIRouter()
 
@@ -29,7 +30,7 @@ def list_strategies(request: Request):
     finally:
         session.close()
 
-@router.post("/strategies", status_code=201)
+@router.post("/strategies", status_code=201, dependencies=[Depends(require_owner)])
 def create_strategy(request: Request, body: StrategyCreate):
     session = get_session(request.app.state.engine)
     try:
@@ -44,7 +45,7 @@ def create_strategy(request: Request, body: StrategyCreate):
     finally:
         session.close()
 
-@router.put("/strategies/{strategy_id}")
+@router.put("/strategies/{strategy_id}", dependencies=[Depends(require_owner)])
 def update_strategy(request: Request, strategy_id: int, body: StrategyUpdate):
     session = get_session(request.app.state.engine)
     try:
@@ -57,7 +58,7 @@ def update_strategy(request: Request, strategy_id: int, body: StrategyUpdate):
     finally:
         session.close()
 
-@router.patch("/strategies/{strategy_id}/promote")
+@router.patch("/strategies/{strategy_id}/promote", dependencies=[Depends(require_owner)])
 def promote_strategy(request: Request, strategy_id: int):
     session = get_session(request.app.state.engine)
     try:
@@ -75,7 +76,7 @@ class BacktestRunRequest(BaseModel):
     start_date: str
     end_date: str
 
-@router.post("/run")
+@router.post("/run", dependencies=[Depends(require_owner)])
 def run_backtest(request: Request, body: BacktestRunRequest):
     from datetime import date as date_type
     session = get_session(request.app.state.engine)
@@ -126,7 +127,7 @@ class AutoTuneRequest(BaseModel):
     apply_best: bool = False
 
 
-@router.post("/auto-tune")
+@router.post("/auto-tune", dependencies=[Depends(require_owner)])
 def auto_tune(request: Request, body: AutoTuneRequest):
     """Grid-search strategy parameters and optionally apply the best config."""
     from datetime import date as date_type
@@ -205,7 +206,7 @@ MARKET_LABELS = {
 }
 
 
-@router.post("/run-all")
+@router.post("/run-all", dependencies=[Depends(require_owner)])
 def run_all_backtests(request: Request, body: RunAllRequest):
     """Run all strategy variants for a given sport and date range."""
     from datetime import date as date_type

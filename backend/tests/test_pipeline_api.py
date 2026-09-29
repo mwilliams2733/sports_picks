@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 from backend.api import pipeline_api
 from backend.api.main import create_app
 from backend.models import Base, StrategyModel
+from backend.tests.auth_helpers import OWNER_HEADERS
 
 CONFIG = {
     "database_path": ":memory:",
@@ -53,7 +54,7 @@ def client(monkeypatch):
                                                 "picks_generated": 2}))
     app = create_app(":memory:")
     Base.metadata.create_all(app.state.engine)
-    return TestClient(app)
+    return TestClient(app, headers=OWNER_HEADERS)
 
 
 @pytest.fixture()

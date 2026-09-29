@@ -1,7 +1,8 @@
 from datetime import datetime, timezone, date, timedelta
-from fastapi import APIRouter, Request, HTTPException, Query
+from fastapi import APIRouter, Request, HTTPException, Query, Depends
 from pydantic import BaseModel
 from sqlalchemy import func
+from backend.api.auth import require_owner
 from backend.database import get_session
 from backend.models import UserProfile, PaperPick, Game, PlayerStat, ActivityFeed, Parlay
 from backend.pipeline.grader import grade_pick, grade_prop_pick
@@ -155,7 +156,7 @@ def get_activity_feed(request: Request, limit: int = Query(50, ge=1, le=200)):
         session.close()
 
 
-@router.delete("/{user_id}")
+@router.delete("/{user_id}", dependencies=[Depends(require_owner)])
 def delete_user(request: Request, user_id: int):
     """Delete a user and all their picks."""
     session = get_session(request.app.state.engine)
@@ -502,7 +503,7 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
         session.close()
 
 
-@router.post("/grade")
+@router.post("/grade", dependencies=[Depends(require_owner)])
 def grade_paper_picks(request: Request):
     """Grade all pending paper picks for games that are final."""
     session = get_session(request.app.state.engine)

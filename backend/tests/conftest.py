@@ -50,6 +50,13 @@ def _untrained_calibrated_model():
     EnsembleStrategy._calibrated = previous
 
 
+@pytest.fixture(autouse=True)
+def _test_owner_key(monkeypatch):
+    """Every test runs with a known owner key; guarded calls send OWNER_HEADERS."""
+    from backend.tests.auth_helpers import TEST_OWNER_KEY
+    monkeypatch.setenv("SPORTS_PICKS_OWNER_KEY", TEST_OWNER_KEY)
+
+
 class RealNetworkAccess(RuntimeError):
     """A test tried to open a socket to the outside world."""
 

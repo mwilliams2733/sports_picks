@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from backend.api.main import create_app
 from backend.models import Base, StrategyModel, Team, PlayerStat
 from backend.database import get_engine, get_session
+from backend.tests.auth_helpers import OWNER_HEADERS
 
 def test_backtest_run_prop():
     app = create_app(":memory:")
@@ -27,7 +28,7 @@ def test_backtest_run_prop():
     session.commit()
     strat_id = strat.id
     session.close()
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     resp = client.post("/backtest/run", json={
         "strategy_id": strat_id, "start_date": "2026-02-10", "end_date": "2026-02-15",
     })

@@ -78,6 +78,22 @@ def resolve_odds_api_key(shared_env_path: str | os.PathLike | None = None) -> st
     return None
 
 
+def resolve_owner_key(shared_env_path: str | os.PathLike | None = None) -> str | None:
+    """The owner key for admin routes: environment first, then shared.env.
+
+    Read on every call (not cached) so a key added to shared.env takes
+    effect without a restart, and so tests can monkeypatch it. Never log
+    the value.
+    """
+    from_env = os.environ.get("SPORTS_PICKS_OWNER_KEY")
+    if from_env:
+        return from_env
+    path = (shared_env_path
+            or os.environ.get("SHARED_ENV_PATH")
+            or DEFAULT_SHARED_ENV)
+    return _read_env_file(path).get("SPORTS_PICKS_OWNER_KEY") or None
+
+
 def load_config(path: str) -> dict:
     with open(path) as f:
         config = yaml.safe_load(f)
