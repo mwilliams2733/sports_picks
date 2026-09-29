@@ -4,6 +4,7 @@ Expected values were computed independently on 2026-09-28; the z = 1.96 case
 is the textbook Wilson interval for 8 of 10, (0.490, 0.943).
 """
 from datetime import date
+import logging
 
 import pytest
 
@@ -62,12 +63,14 @@ def test_roi_counts_a_push_as_staked_and_returned():
 
 
 def test_verdict_only_when_the_whole_range_clears_break_even():
-    thin = summarize([_b("win")] * 3 + [_b("loss")] * 2)       # range spans 0.524
+    thin = summarize([_b("win")] * 3 + [_b("loss")] * 2)       # range spans break-even
     assert thin.verdict is None
     strong = summarize([_b("win")] * 40 + [_b("loss")] * 5)
     assert strong.verdict == "above"
     weak = summarize([_b("win")] * 5 + [_b("loss")] * 40)
     assert weak.verdict == "below"
+    thin_below = summarize([_b("win")] * 2 + [_b("loss")] * 3)  # range spans break-even
+    assert thin_below.verdict is None
 
 
 def test_sunday_and_monday_are_different_weeks():
@@ -101,6 +104,12 @@ def test_drawdown_takes_the_deeper_of_two_dips():
     assert t.max_drawdown == pytest.approx(3.0)
 
 
+def test_drawdown_computed_on_day_end_values():
+    """Drawdown measured on day-end cumulative, not per-bet."""
+    t = trend([_b("win", profit=1, day=D), _b("loss", profit=-1, day=D)])
+    assert t.max_drawdown == pytest.approx(0.0)
+
+
 def test_a_push_does_not_break_a_losing_streak_and_a_win_does():
     seq = ["loss", "loss", "push", "loss", "win", "loss"]
     t = trend([_b(r, day=date(2026, 9, i + 1)) for i, r in enumerate(seq)])
@@ -121,3 +130,12 @@ def test_pending_bets_are_not_on_the_trend():
 def test_to_dict_rounds_and_keeps_nones():
     d = summarize([_b(None)]).to_dict()
     assert d["win_rate"] is None and d["n"] == 0 and d["pending"] == 1
+
+
+def test_bad_odds_excluded_with_warning(caplog):
+    """Decided bets with invalid odds are excluded from break_even, logged once."""
+    with caplog.at_level(logging.WARNING):
+        s = summarize([_b("win", odds=0), _b("loss", odds=-110)])
+    # With one valid bet at -110, break_even is its implied probability
+    assert s.break_even == pytest.approx(110 / 210)  # only the -110 bet counts
+    assert "1 decided bets excluded from break-even for invalid odds" in caplog.text

@@ -15,12 +15,15 @@ Definitions (spec 2026-09-28 §1):
 """
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Iterable
 
 from backend.analysis.odds_utils import InvalidOddsError, american_to_implied_prob
+
+logger = logging.getLogger(__name__)
 
 Z90 = 1.645
 
@@ -102,12 +105,15 @@ def summarize(bets: Iterable[Bet], label: str = "all") -> Summary:
     decided = wins + losses
     interval = wilson(wins, decided)
     prices = []
+    bad_odds_count = 0
     for b in settled:
         if b.result in ("win", "loss"):
             try:
                 prices.append(american_to_implied_prob(b.odds))
             except InvalidOddsError:
-                continue
+                bad_odds_count += 1
+    if bad_odds_count > 0:
+        logger.warning(f"{bad_odds_count} decided bets excluded from break-even for invalid odds")
     profit = sum(b.profit for b in settled)
     staked = sum(b.stake for b in settled)
     return Summary(
@@ -167,23 +173,30 @@ class Trend:
 def trend(bets: Iterable[Bet]) -> Trend:
     """Cumulative profit by day, max drawdown, longest losing streak.
 
-    Bets are taken in day order, input order within a day. A push breaks
-    neither streak; a win ends a losing streak. Drawdown is measured from a
-    running peak that starts at 0.
+    Bets are taken in day order, input order within a day. Longest losing
+    streak follows the caller's input order (per-bet). Drawdown is measured on
+    day-end cumulative profit values, with running peak starting at 0.
     """
     settled = sorted((b for b in bets if b.result is not None), key=lambda b: b.day)
-    cum = peak = drawdown = 0.0
+    cum = 0.0
     streak = longest = 0
     by_day: dict[date, float] = {}
     for b in settled:
         cum += b.profit
-        peak = max(peak, cum)
-        drawdown = max(drawdown, peak - cum)
         if b.result == "loss":
             streak += 1
             longest = max(longest, streak)
         elif b.result == "win":
             streak = 0
         by_day[b.day] = cum
+
+    # Compute max drawdown from day-end values
+    peak = 0.0
+    drawdown = 0.0
+    for day in sorted(by_day.keys()):
+        cum = by_day[day]
+        peak = max(peak, cum)
+        drawdown = max(drawdown, peak - cum)
+
     return Trend(points=sorted(by_day.items()), max_drawdown=drawdown,
                  longest_losing_streak=longest)
