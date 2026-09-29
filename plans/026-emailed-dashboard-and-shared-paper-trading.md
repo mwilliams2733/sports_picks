@@ -40,7 +40,7 @@ planning and presented to the owner with this plan for approval.
 ## Status
 
 - **Priority**: P1
-- **Effort**: L (11 tasks)
+- **Effort**: L (12 tasks; amended 2026-09-28 — see Tasks 7, 9, 10, 11)
 - **Risk**: HIGH for Tasks 4, 5, 11 — they decide who can change data once the
   app is reachable from the internet. MED elsewhere.
 - **Depends on**: none (all of 2026-09-28's work is merged at `545de44`)
@@ -119,7 +119,8 @@ has a test in the owning task.
 | `frontend/src/pages/Admin.tsx`, `PaperTrading.tsx`, `components/BetModal.tsx`, `pages/FAQ.tsx` | owner key + PIN fields; copy | 8 |
 | `frontend/src/components/LeaderboardBar.tsx` (new), `hooks/useRankings.ts` (new) | leaderboard | 9 |
 | `frontend/src/components/EmailedRecord.tsx` (new), `hooks/useEmailedRecord.ts` (new), `pages/TrackRecord.tsx` | emailed view | 10 |
-| `scripts/share.ps1` (new) | current app server + tunnel + URL | 11 |
+| `frontend/src/components/SpendConfirmButton.tsx` (new) | refresh asks before spending credits | 11 |
+| `scripts/share.ps1` (new) | current app server + tunnel + URL | 12 |
 
 ---
 
@@ -1818,9 +1819,11 @@ git commit -m "fix(paper): no bets after kickoff; parlays settle later and reach
 **Interfaces:**
 - Consumes: Task 1 `Bet`, `summarize`; Task 3 `emailed_bets`; Task 6 `balance_of`
 - Produces:
-  - `player_bets(session, user_id: int) -> list[Bet]` — straight bets (`parlay_id IS NULL`) plus each parlay once; `day` = game date (parlay: latest leg's game date)
-  - `GET /users/leaderboard` → list of `{"id": int | None, "name": str, "is_model": bool, "wins", "losses", "pushes", "pending", "n": int, "win_rate": float | None, "roi": float | None, "profit": float, "ranked": bool}`; rates are fractions; ranked rows first by ROI desc, then unranked by `n` desc, then name
-  - `MIN_RANKED_BETS = 10`
+  - `player_bets(session, user_id: int, include_parlays: bool = True) -> list[Bet]` — straight bets (`parlay_id IS NULL`) plus, when `include_parlays`, each parlay once; `day` = game date (parlay: latest leg's game date)
+  - `GET /users/leaderboard` → list of `{"id": int | None, "name": str, "is_model": bool, "wins", "losses", "pushes", "pending", "n": int, "win_rate": float | None, "roi": float | None, "shrunk_roi": float | None, "profit": float, "ranked": bool}`; rates are fractions; ranked rows first by `shrunk_roi` desc, then unranked by `n` desc, then name. **Straight bets only** — parlays stay in a player's own stats and balance but never on the board (brief G.3).
+  - `MIN_RANKED_BETS = 10`, `SHRINK_BETS = 50`, `PRIOR_ROI = 0.5 * (100 / 110) - 0.5` (≈ −0.0455); `shrunk_roi(roi, n)`
+
+> **Amended 2026-09-28** for the owner's decisions on the review brief (`docs/superpowers/specs/2026-09-28-review-remediation-brief.pdf`, G.2/G.3): rank by **shrunk ROI** — `(n·roi + SHRINK_BETS·PRIOR_ROI) / (n + SHRINK_BETS)`, pulling each record toward the return of picking sides at random at −110 — with raw ROI shown beside it; parlays off the main board. Checked numbers: 7-3 at −110 raw 0.3364 → shrunk 0.0182; 40-30 at −110 raw 0.0909 → shrunk 0.0341, so the long record ranks first. MMA quarantine (D.3) needs nothing here: the digest never emails MMA (`digest.sports` is ncaaf/nfl/nba/mlb), so the Model row cannot contain it; the full quarantine belongs to the later MMA-audit plan.
 
 - [ ] **Step 1: Write the failing tests** — `backend/tests/test_leaderboard.py`:
 
@@ -1925,7 +1928,24 @@ def test_ranked_by_roi_not_balance():
     assert names.index("sharp") < names.index("big")
 
 
-def test_a_parlay_counts_once_and_its_legs_never():
+def test_seven_and_three_does_not_outrank_forty_and_thirty():
+    """Brief G.2: a hot start must not crown itself. Shrunk ROI: 7-3 -> 0.0182,
+    40-30 -> 0.0341 (both at -110), though 7-3's raw ROI is 0.336."""
+    app = _app()
+    s = get_session(app.state.engine)
+    _player(s, "hot", ["win"] * 7 + ["loss"] * 3)
+    _player(s, "long", ["win"] * 40 + ["loss"] * 30)
+    s.close()
+    rows = TestClient(app).get("/users/leaderboard").json()
+    names = [r["name"] for r in rows]
+    board = {r["name"]: r for r in rows}
+    assert names.index("long") < names.index("hot")
+    assert board["hot"]["roi"] == pytest.approx(0.3364, abs=1e-4)
+    assert board["hot"]["shrunk_roi"] == pytest.approx(0.0182, abs=1e-4)
+    assert board["long"]["shrunk_roi"] == pytest.approx(0.0341, abs=1e-4)
+
+
+def test_parlays_are_off_the_board_but_in_personal_stats():
     app = _app()
     s = get_session(app.state.engine)
     u = UserProfile(name="parlayer")
@@ -1940,10 +1960,13 @@ def test_a_parlay_counts_once_and_its_legs_never():
                         pick_value="HOME ML", odds=-110, stake=0, result="win",
                         payout=0, parlay_id=p.id))
     s.commit()
+    uid = u.id
     s.close()
     row = _board(app)["parlayer"]
-    assert (row["wins"], row["n"]) == (1, 1)
-    assert row["profit"] == pytest.approx(264.46)
+    assert row["n"] == 0 and row["wins"] == 0          # brief G.3: not on the board
+    stats = TestClient(app).get(f"/users/{uid}/stats").json()["all_time"]
+    assert (stats["wins"], stats["total"]) == (1, 1)   # once, legs never
+    assert stats["profit"] == pytest.approx(264.46)
 
 
 def test_one_definition_of_win_rate_and_roi_everywhere():
@@ -1995,7 +2018,10 @@ from backend.analysis.scorecard import Bet
 from backend.models import Game, PaperPick, Parlay
 
 
-def player_bets(session, user_id: int) -> list[Bet]:
+def player_bets(session, user_id: int, include_parlays: bool = True) -> list[Bet]:
+    """include_parlays=False is the leaderboard's view: parlays multiply the
+    vig, so they are kept off the board (brief G.3) but stay in a player's
+    own stats and balance."""
     bets: list[Bet] = []
     straight = (session.query(PaperPick, Game).join(Game, Game.id == PaperPick.game_id)
                 .filter(PaperPick.user_id == user_id, PaperPick.parlay_id.is_(None))
@@ -2004,7 +2030,9 @@ def player_bets(session, user_id: int) -> list[Bet]:
         bets.append(Bet(result=pick.result, stake=pick.stake,
                         profit=(pick.payout or 0.0) if pick.result else 0.0,
                         odds=pick.odds, day=game.date))
-    for parlay in session.query(Parlay).filter(Parlay.user_id == user_id).all():
+    parlays = (session.query(Parlay).filter(Parlay.user_id == user_id).all()
+               if include_parlays else [])
+    for parlay in parlays:
         last_leg = (session.query(func.max(Game.date))
                     .join(PaperPick, PaperPick.game_id == Game.id)
                     .filter(PaperPick.parlay_id == parlay.id).scalar())
@@ -2022,33 +2050,50 @@ def player_bets(session, user_id: int) -> list[Bet]:
 
 ```python
 MIN_RANKED_BETS = 10
+#: Shrinkage toward the prior, in bets: a record of n bets gets weight
+#: n / (n + SHRINK_BETS). Chosen 2026-09-28 so a 7-3 start at -110 ranks
+#: below a 40-30 record (brief G.2); revisit only with a dated note.
+SHRINK_BETS = 50
+#: The prior: ROI of picking sides at random at -110 (win half, pay the vig).
+PRIOR_ROI = 0.5 * (100 / 110) - 0.5
+
+
+def shrunk_roi(roi: float | None, n: int) -> float | None:
+    """ROI pulled toward PRIOR_ROI by SHRINK_BETS pseudo-bets."""
+    if roi is None:
+        return None
+    return (n * roi + SHRINK_BETS * PRIOR_ROI) / (n + SHRINK_BETS)
 
 
 def _board_row(user_id, name, is_model, s) -> dict:
+    shrunk = shrunk_roi(s.roi, s.n)
     return {"id": user_id, "name": name, "is_model": is_model,
             "wins": s.wins, "losses": s.losses, "pushes": s.pushes,
             "pending": s.pending, "n": s.n,
             "win_rate": None if s.win_rate is None else round(s.win_rate, 4),
             "roi": None if s.roi is None else round(s.roi, 4),
+            "shrunk_roi": None if shrunk is None else round(shrunk, 4),
             "profit": round(s.profit, 2), "ranked": s.n >= MIN_RANKED_BETS}
 
 
 def _board_order(row: dict):
     if row["ranked"]:
-        return (0, -(row["roi"] or 0.0), row["name"].lower())
+        return (0, -(row["shrunk_roi"] or 0.0), row["name"].lower())
     return (1, -row["n"], row["name"].lower())
 
 
 @router.get("/leaderboard")
 def leaderboard(request: Request):
-    """Every player plus the Model (emailed picks, 1u each), ranked by ROI.
+    """Every player plus the Model (emailed picks, 1u each), ranked by shrunk ROI.
 
-    ROI is profit / stake, so a $1,000 bettor and a 1u model compare fairly.
-    Fewer than MIN_RANKED_BETS settled bets: shown, not ranked.
+    ROI is profit / stake, so a $1,000 bettor and a 1u model compare fairly;
+    shrinking it toward PRIOR_ROI keeps a hot start from topping the board.
+    Straight bets only. Fewer than MIN_RANKED_BETS settled bets: shown, not ranked.
     """
     session = get_session(request.app.state.engine)
     try:
-        rows = [_board_row(u.id, u.name, False, summarize(player_bets(session, u.id)))
+        rows = [_board_row(u.id, u.name, False,
+                           summarize(player_bets(session, u.id, include_parlays=False)))
                 for u in session.query(UserProfile).all()]
         rows.append(_board_row(None, "Model", True, summarize(emailed_bets(session, None))))
         rows.sort(key=_board_order)
@@ -2092,14 +2137,16 @@ Run: `.venv/Scripts/python.exe -m pytest backend/tests/test_leaderboard.py backe
 
 - [ ] **Step 5: Mutation checks**
   1. Move the `/leaderboard` route below `get_user`: `test_the_route_is_not_shadowed_by_user_id` fails.
-  2. In `player_bets`, drop `PaperPick.parlay_id.is_(None)`: `test_a_parlay_counts_once_and_its_legs_never` fails.
+  2. In `player_bets`, drop `PaperPick.parlay_id.is_(None)`: `test_parlays_are_off_the_board_but_in_personal_stats` fails.
   3. `MIN_RANKED_BETS = 10` → `3`: `test_fewer_than_ten_settled_bets_is_unranked_and_sorts_last` fails.
+  4. In `_board_order`, sort by `row["roi"]` instead of `row["shrunk_roi"]`: `test_seven_and_three_does_not_outrank_forty_and_thirty` fails.
+  5. In `leaderboard`, `include_parlays=False` → `True`: `test_parlays_are_off_the_board_but_in_personal_stats` fails.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add backend/analysis/paper_bets.py backend/api/users.py backend/tests/test_leaderboard.py
-git commit -m "feat(paper): a leaderboard with the model on it, ranked by ROI"
+git commit -m "feat(paper): a leaderboard with the model on it, ranked by shrunk ROI"
 ```
 
 ---
@@ -2214,7 +2261,8 @@ function writeHeaders(extra: Record<string, string> = {}): Record<string, string
 export interface LeaderboardRow {
   id: number | null; name: string; is_model: boolean;
   wins: number; losses: number; pushes: number; pending: number; n: number;
-  win_rate: number | null; roi: number | null; profit: number; ranked: boolean;
+  win_rate: number | null; roi: number | null; shrunk_roi: number | null;
+  profit: number; ranked: boolean;
 }
 
 export interface EmailedSummary {
@@ -2251,7 +2299,7 @@ export interface EmailedTrend {
 `frontend/src/pages/FAQ.tsx`: replace the three paper-trading answers quoted below (search for their opening words) with:
 - "Go to the Paper Trading page…" → `'Go to the Paper Trading page, type your name and choose a 4–6 digit PIN, and click "Join". Names are unique (ignoring capitals). Your PIN is needed for every bet; five wrong tries lock betting for 15 minutes. You start with $10,000.'`
 - "Click your name on the leaderboard…" → keep the text but end it with `' Bets close when the game starts.'` instead of the sentence about grading.
-- "The leaderboard ranks users by current balance…" → `'The leaderboard ranks everyone by ROI (profit divided by amount staked), so a big bankroll does not beat a sharp one. "Model" is the daily email\u2019s picks at 1 unit each. You need 10 settled bets to be ranked; until then you are listed but unranked.'`
+- "The leaderboard ranks users by current balance…" → `'The leaderboard ranks everyone by adjusted ROI: profit divided by amount staked, pulled toward the return of picking sides at random (about \u22124.5%) until you have a long record, so a hot week does not top the board. Raw ROI is shown beside it. Only single bets count; parlays stay in your own stats. "Model" is the daily email\u2019s picks at 1 unit each. You need 10 settled bets to be ranked; until then you are listed but unranked.'`
 
 - [ ] **Step 4: Run to verify**
 
@@ -2290,20 +2338,21 @@ import type { LeaderboardRow } from '../types'
 
 const row = (o: Partial<LeaderboardRow>): LeaderboardRow => ({
   id: 1, name: 'x', is_model: false, wins: 0, losses: 0, pushes: 0, pending: 0,
-  n: 0, win_rate: null, roi: null, profit: 0, ranked: false, ...o,
+  n: 0, win_rate: null, roi: null, shrunk_roi: null, profit: 0, ranked: false, ...o,
 })
 
 describe('LeaderboardBar', () => {
   it('numbers only ranked rows and marks the rest', () => {
     render(<LeaderboardBar selectedId={null} onSelect={vi.fn()} rows={[
-      row({ id: 1, name: 'Amy', ranked: true, n: 12, roi: 0.051, win_rate: 0.58 }),
-      row({ id: null, name: 'Model', is_model: true, ranked: true, n: 20, roi: 0.02, win_rate: 0.55 }),
+      row({ id: 1, name: 'Amy', ranked: true, n: 12, roi: 0.336, shrunk_roi: 0.051, win_rate: 0.58 }),
+      row({ id: null, name: 'Model', is_model: true, ranked: true, n: 20, roi: 0.02, shrunk_roi: -0.02, win_rate: 0.55 }),
       row({ id: 3, name: 'Bo', ranked: false, n: 4 }),
     ]} />)
     expect(screen.getByText('#1')).toBeInTheDocument()
     expect(screen.getByText('#2')).toBeInTheDocument()
     expect(screen.getByText('needs 10 bets')).toBeInTheDocument()
-    expect(screen.getByText('+5.1%')).toBeInTheDocument()
+    expect(screen.getByText('+5.1%')).toBeInTheDocument()        // adjusted ROI, the rank metric
+    expect(screen.getByText('raw +33.6%')).toBeInTheDocument()   // raw ROI beside it
   })
 
   it('selects players but not the model', async () => {
@@ -2321,7 +2370,8 @@ describe('LeaderboardBar', () => {
   it('shows a dash, never NaN, with no settled bets', () => {
     render(<LeaderboardBar selectedId={null} onSelect={vi.fn()} rows={[row({ name: 'New' })]} />)
     expect(screen.queryByText(/NaN/)).toBeNull()
-    expect(screen.getAllByText('—').length).toBe(2)    // ROI and win rate
+    expect(screen.getAllByText('—').length).toBe(2)    // adjusted ROI and win rate
+    expect(screen.getByText('raw —')).toBeInTheDocument()
   })
 })
 ```
@@ -2382,9 +2432,11 @@ export default function LeaderboardBar({ rows, selectedId, onSelect }: Props) {
           >
             <span className="leaderboard-rank">{label}</span>
             <span className="leaderboard-name">{r.name}</span>
-            <span className="leaderboard-roi" style={{ color: (r.roi ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-              {pct(r.roi, true)}
+            <span className="leaderboard-roi" title="Adjusted ROI: pulled toward about -4.5% until the record is long"
+              style={{ color: (r.shrunk_roi ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+              {pct(r.shrunk_roi, true)}
             </span>
+            <span className="leaderboard-raw">raw {pct(r.roi, true)}</span>
             <span className="leaderboard-record">{r.wins}-{r.losses}-{r.pushes}</span>
             <span className="leaderboard-winrate">{pct(r.win_rate)}</span>
             {r.pending > 0 && <span className="leaderboard-pending">{r.pending} pending</span>}
@@ -2401,7 +2453,7 @@ export default function LeaderboardBar({ rows, selectedId, onSelect }: Props) {
 ```css
 .leaderboard-entry.model { border-style: dashed; }
 .leaderboard-entry.model .leaderboard-name { font-style: italic; }
-.leaderboard-record, .leaderboard-winrate, .leaderboard-pending { font-size: 0.8rem; color: var(--text-muted); }
+.leaderboard-record, .leaderboard-winrate, .leaderboard-pending, .leaderboard-raw { font-size: 0.8rem; color: var(--text-muted); }
 ```
 
 `frontend/src/pages/PaperTrading.tsx`: `import LeaderboardBar from '../components/LeaderboardBar'` and `import { useRankings } from '../hooks/useRankings'`; add `const { data: rankings = [] } = useRankings()`. Replace the `<div className="leaderboard-bar">…</div>` block (the `users.map` and its empty state) with:
@@ -2423,13 +2475,13 @@ Keep `useLeaderboard` (it still supplies `users` for selection). If `getStreakIn
 
 - [ ] **Step 4: Run to verify** — `cd frontend && npx vitest run && npx tsc -b --noEmit && npx eslint .` Expected: green.
 
-- [ ] **Step 5: Mutation check** — in `LeaderboardBar`, `r.ranked ? \`#${++rank}\`` → `\`#${++rank}\``: `numbers only ranked rows and marks the rest` fails.
+- [ ] **Step 5: Mutation checks** — (1) in `LeaderboardBar`, `r.ranked ? \`#${++rank}\`` → `\`#${++rank}\``: `numbers only ranked rows and marks the rest` fails. (2) Show `pct(r.roi, true)` in the rank-metric span instead of `pct(r.shrunk_roi, true)`: the same test fails (it expects `+5.1%`).
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/src
-git commit -m "feat(ui): leaderboard ranked by ROI, with the model on it"
+git commit -m "feat(ui): leaderboard ranked by adjusted ROI, with the model on it"
 ```
 
 ---
@@ -2443,6 +2495,8 @@ git commit -m "feat(ui): leaderboard ranked by ROI, with the model on it"
 **Interfaces:**
 - Consumes: Task 8 `api.stats.emailed`, `api.stats.emailedTrend`, `EmailedGroups`, `EmailedTrend`
 - Produces: `useEmailedRecord(kind, by) -> { groups: UseQueryResult<EmailedGroups>, trend: UseQueryResult<EmailedTrend> }`; `<EmailedRecord />` (reads/writes `kind` and `by` search params)
+
+> **Amended 2026-09-28** (brief G.1, owner decision "stars hidden"): the Emailed picks view is the **default** Track Record tab; the all-picks view moves behind `?source=all`, labelled "Research: all picks". The emailed view offers **Week and Month only** — no Stars grouping in the UI until a star definition is validated (the backend's `by=stars` stays, for that validation).
 
 - [ ] **Step 1: Write the failing test** — `frontend/src/components/EmailedRecord.test.tsx`:
 
@@ -2492,6 +2546,15 @@ describe('EmailedRecord', () => {
     expect(cell.className).toContain('verdict-above')
     expect(screen.getByTestId('breakeven-2026-09-28')).toHaveTextContent('52.4%')
   })
+
+  it('offers no Stars grouping while stars are hidden', async () => {
+    vi.mocked(api.stats.emailed).mockResolvedValue({ kind: 'game', by: 'week', groups: [], total: s({}) })
+    vi.mocked(api.stats.emailedTrend).mockResolvedValue({ kind: 'game', points: [], max_drawdown: 0, longest_losing_streak: 0 })
+    renderIt()
+    await screen.findByText(/No emailed picks have settled yet/)
+    expect(screen.queryByRole('button', { name: 'Stars' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Week' })).toBeInTheDocument()
+  })
 })
 ```
 
@@ -2532,20 +2595,20 @@ import type { EmailedSummary } from '../types'
 
 const pct = (x: number | null) => (x == null ? '—' : `${(x * 100).toFixed(1)}%`)
 const units = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(2)}u`
+// No Stars grouping: stars are hidden until a definition is validated
+// (owner decision 2026-09-28). The API still serves by=stars for that work.
 const BYS: { key: EmailedBy; label: string }[] = [
-  { key: 'week', label: 'Week' }, { key: 'month', label: 'Month' }, { key: 'stars', label: 'Stars' },
+  { key: 'week', label: 'Week' }, { key: 'month', label: 'Month' },
 ]
 
 function groupLabel(by: EmailedBy, label: string) {
-  if (by === 'stars') return label === 'unrated' ? 'Unrated' : `${label}★`
-  if (by === 'week') return `Week of ${label}`
-  return label
+  return by === 'week' ? `Week of ${label}` : label
 }
 
 export default function EmailedRecord() {
   const [params, setParams] = useSearchParams()
   const kind = (params.get('kind') === 'prop' ? 'prop' : 'game') as EmailedKind
-  const by = (['week', 'month', 'stars'].includes(params.get('by') ?? '') ? params.get('by') : 'week') as EmailedBy
+  const by = (params.get('by') === 'month' ? 'month' : 'week') as EmailedBy
   const set = (k: string, v: string) => { const next = new URLSearchParams(params); next.set(k, v); setParams(next) }
   const { groups, trend } = useEmailedRecord(kind, by)
 
@@ -2645,17 +2708,17 @@ export default function EmailedRecord() {
 (If `.stat-grid`, `.stat-card`, `.stat-value`, `.stat-sub` or `--accent` do not exist in `App.css`/`index.css`, use the class names `TrackRecord.tsx` already uses for its summary cards — check with `grep -n "stat-" frontend/src/pages/TrackRecord.tsx frontend/src/App.css`.)
 
 `frontend/src/pages/TrackRecord.tsx`:
-1. `import EmailedRecord from '../components/EmailedRecord'`; read `const source = searchParams.get('source') === 'emailed' ? 'emailed' : 'all'`.
-2. `setSport` and `setRange` currently rebuild params from scratch and would drop `source`; in both, start `next` with `if (source === 'emailed') next.source = 'emailed'`.
+1. `import EmailedRecord from '../components/EmailedRecord'`; read `const source = searchParams.get('source') === 'all' ? 'all' : 'emailed'` — **emailed is the default**.
+2. `setSport` and `setRange` (used only by the all-picks view) rebuild params from scratch and would drop `source`; in both, start `next` with `next.source = 'all'`.
 3. Immediately after the hooks and **before** the `if (error)` / `if (loading)` early returns, add:
 
 ```tsx
   const sourceSwitch = (
     <div className="tab-group" style={{ marginBottom: '1rem' }}>
-      {(['all', 'emailed'] as const).map(s => (
+      {(['emailed', 'all'] as const).map(s => (
         <button key={s} className={`tab${source === s ? ' active' : ''}`} aria-pressed={source === s}
-          onClick={() => setSearchParams(s === 'emailed' ? { source: 'emailed' } : {})}>
-          {s === 'all' ? 'All picks' : 'Emailed picks'}
+          onClick={() => setSearchParams(s === 'all' ? { source: 'all' } : {})}>
+          {s === 'emailed' ? 'Emailed picks' : 'Research: all picks'}
         </button>
       ))}
     </div>
@@ -2666,12 +2729,54 @@ export default function EmailedRecord() {
 ```
 
 4. Render `{sourceSwitch}` directly under the existing page header in the all-picks view.
+5. Add `frontend/src/pages/TrackRecord.test.tsx` — brief G.1's acceptance test, "the default tab's numbers come from the emailed-picks table":
+
+```tsx
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import TrackRecord from './TrackRecord'
+import { api } from '../api/client'
+
+vi.mock('../api/client', () => ({
+  api: {
+    stats: { emailed: vi.fn(), emailedTrend: vi.fn(), record: vi.fn(), daily: vi.fn(), calibration: vi.fn() },
+    picks: { history: vi.fn() },
+  },
+}))
+
+function renderAt(url: string) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={qc}><MemoryRouter initialEntries={[url]}><TrackRecord /></MemoryRouter></QueryClientProvider>)
+}
+
+describe('TrackRecord', () => {
+  it('opens on the emailed record, not the all-picks record', async () => {
+    const empty = { label: 'all', wins: 0, losses: 0, pushes: 0, pending: 0, n: 0, win_rate: null, range_low: null,
+      range_high: null, break_even: null, profit: 0, staked: 0, roi: null, verdict: null }
+    vi.mocked(api.stats.emailed).mockResolvedValue({ kind: 'game', by: 'week', groups: [], total: empty })
+    vi.mocked(api.stats.emailedTrend).mockResolvedValue({ kind: 'game', points: [], max_drawdown: 0, longest_losing_streak: 0 })
+    vi.mocked(api.stats.record).mockResolvedValue({ wins: 99, losses: 1, pushes: 0, total: 100, win_rate: 99, roi: 50, total_profit: 50 } as never)
+    vi.mocked(api.stats.daily).mockResolvedValue([])
+    vi.mocked(api.stats.calibration).mockResolvedValue({} as never)
+    vi.mocked(api.picks.history).mockResolvedValue([])
+    renderAt('/track-record')
+    expect(await screen.findByText(/No emailed picks have settled yet/)).toBeInTheDocument()
+    expect(api.stats.emailed).toHaveBeenCalled()
+    expect(screen.queryByText('99-1')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Research: all picks' })).toBeInTheDocument()
+  })
+})
+```
+
+(If `useRecord` calls anything else on `api`, add it to the mock; if `RecordData` needs other fields the `as never` casts cover them.)
 
 - [ ] **Step 4: Run to verify** — `cd frontend && npx vitest run && npx tsc -b --noEmit && npx eslint .` Expected: green.
 
-- [ ] **Step 5: Mutation check** — in `EmailedRecord`, `className={g.verdict ? \`verdict-${g.verdict}\` : ''}` → `className=""`: `shows win rate beside break-even and colours a clear verdict` fails.
+- [ ] **Step 5: Mutation checks** — (1) in `EmailedRecord`, `className={g.verdict ? \`verdict-${g.verdict}\` : ''}` → `className=""`: `shows win rate beside break-even and colours a clear verdict` fails. (2) In `TrackRecord`, make the default `'all'`: `opens on the emailed record, not the all-picks record` fails. (3) Add `{ key: 'stars', label: 'Stars' }` back to `BYS`: `offers no Stars grouping while stars are hidden` fails.
 
-- [ ] **Step 6: Visual check in Chrome** (global CLAUDE.md: verify UI visually, not from markup). `cd frontend && npm run dev`, open `/track-record?source=emailed` with claude-in-chrome at desktop width and at 414px: the switch, the Game/Prop toggle, cards (or the empty state), chart and tables render without horizontal scroll. Then `/paper-trading`: the leaderboard shows Model dashed/italic, unranked rows say "needs 10 bets", and the join and bet forms show a PIN field. Record what was checked in the commit message.
+- [ ] **Step 6: Visual check in Chrome** (global CLAUDE.md: verify UI visually, not from markup). `cd frontend && npm run dev`, open `/track-record` (emailed is now the default) with claude-in-chrome at desktop width and at 414px: the switch, the Game/Prop toggle, cards (or the empty state), chart and tables render without horizontal scroll. Then `/paper-trading`: the leaderboard shows Model dashed/italic, unranked rows say "needs 10 bets", and the join and bet forms show a PIN field. Record what was checked in the commit message.
 
 - [ ] **Step 7: Commit**
 
@@ -2682,7 +2787,184 @@ git commit -m "feat(ui): the emailed record on Track Record, by week, month and 
 
 ---
 
-### Task 11: Share the link — and prove it works
+### Task 11: The refresh button asks before it spends credits
+
+**Added 2026-09-28** (review brief G.5): "show the estimated odds-credit cost and require confirmation before spending. Never one tap → budget burn."
+
+**Files:**
+- Create: `frontend/src/components/SpendConfirmButton.tsx`, `frontend/src/components/SpendConfirmButton.test.tsx`
+- Modify: `frontend/src/hooks/useRefreshData.ts`, `frontend/src/pages/TodaysPicks.tsx` (the `Refresh data` button, ~line 145), `frontend/src/pages/Backtesting.tsx` (`handleRunPipeline`, ~line 78, and its button)
+
+Every UI caller of `api.pipeline.run` (grep at `545de44`: `hooks/useRefreshData.ts`, `pages/Backtesting.tsx`) must go through the confirmation. Re-run `grep -rn "pipeline.run" frontend/src --include=*.ts --include=*.tsx | grep -v test` and STOP if it lists another caller.
+
+**Interfaces:**
+- Consumes: `api.credits.get()` (exists: `{ daily_used, daily_target, monthly_remaining, ... }`), `api.pipeline.run` (returns `credits_used`)
+- Produces: `<SpendConfirmButton label pendingLabel pending onConfirm />`; `LAST_REFRESH_KEY = 'sp.lastRefreshCredits'` (localStorage) written after every successful pipeline run
+
+- [ ] **Step 1: Write the failing test** — `frontend/src/components/SpendConfirmButton.test.tsx`:
+
+```tsx
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import SpendConfirmButton, { LAST_REFRESH_KEY } from './SpendConfirmButton'
+import { api } from '../api/client'
+
+vi.mock('../api/client', () => ({ api: { credits: { get: vi.fn() } } }))
+
+function renderIt(onConfirm = vi.fn()) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={qc}>
+    <SpendConfirmButton label="Refresh data" pendingLabel="Refreshing…" pending={false} onConfirm={onConfirm} />
+  </QueryClientProvider>)
+  return onConfirm
+}
+
+beforeEach(() => {
+  localStorage.clear()
+  vi.mocked(api.credits.get).mockResolvedValue({ monthly_used: 900, monthly_limit: 20000, monthly_remaining: 19100,
+    daily_used: 120, daily_target: 600, api_requests_remaining: null })
+})
+
+describe('SpendConfirmButton', () => {
+  it('one tap never spends', async () => {
+    const onConfirm = renderIt()
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh data' }))
+    expect(onConfirm).not.toHaveBeenCalled()
+    expect(await screen.findByText(/120 of 600 used today/)).toBeInTheDocument()
+  })
+
+  it('shows what the last refresh cost', async () => {
+    localStorage.setItem(LAST_REFRESH_KEY, '34')
+    renderIt()
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh data' }))
+    expect(await screen.findByText(/last refresh used 34 credits/)).toBeInTheDocument()
+  })
+
+  it('says the cost is unknown before the first refresh', async () => {
+    renderIt()
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh data' }))
+    expect(await screen.findByText(/cost not known yet/)).toBeInTheDocument()
+  })
+
+  it('spends only on confirm, once', async () => {
+    const onConfirm = renderIt()
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh data' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Spend credits and refresh' }))
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancel backs out without spending', async () => {
+    const onConfirm = renderIt()
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh data' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(onConfirm).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Refresh data' })).toBeInTheDocument()
+  })
+})
+```
+
+- [ ] **Step 2: Run to verify it fails** — `cd frontend && npx vitest run src/components/SpendConfirmButton.test.tsx`. Expected: cannot resolve `./SpendConfirmButton`.
+
+- [ ] **Step 3: Implement**
+
+`frontend/src/components/SpendConfirmButton.tsx`:
+
+```tsx
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../api/client'
+
+// Written after every successful pipeline run (useRefreshData, Backtesting),
+// so the confirmation can say what a refresh actually costs.
+export const LAST_REFRESH_KEY = 'sp.lastRefreshCredits'
+
+export function rememberRefreshCost(credits: number): void {
+  try { localStorage.setItem(LAST_REFRESH_KEY, String(credits)) } catch { /* storage unavailable */ }
+}
+
+function lastRefreshCost(): number | null {
+  try {
+    const v = localStorage.getItem(LAST_REFRESH_KEY)
+    return v == null ? null : Number(v)
+  } catch { return null }
+}
+
+interface Props {
+  label: string
+  pendingLabel: string
+  pending: boolean
+  onConfirm: () => void
+}
+
+// A pipeline run spends Odds API credits against the monthly budget. One tap
+// must never spend: the first tap shows the cost, the second confirms
+// (review brief G.5).
+export default function SpendConfirmButton({ label, pendingLabel, pending, onConfirm }: Props) {
+  const [asking, setAsking] = useState(false)
+  const credits = useQuery({ queryKey: ['credits'], queryFn: () => api.credits.get(), enabled: asking })
+
+  if (pending) return <button className="btn btn-secondary" disabled>{pendingLabel}</button>
+  if (!asking) return <button className="btn btn-secondary" onClick={() => setAsking(true)}>{label}</button>
+
+  const last = lastRefreshCost()
+  const c = credits.data
+  return (
+    <span className="spend-confirm" role="group" aria-label="Confirm spending API credits">
+      <span className="spend-confirm-text">
+        Spends Odds API credits — {last == null ? 'cost not known yet' : `last refresh used ${last} credits`}
+        {c ? ` · ${c.daily_used} of ${c.daily_target} used today, ${c.monthly_remaining.toLocaleString()} left this month` : ''}
+      </span>
+      <button className="btn btn-primary" onClick={() => { setAsking(false); onConfirm() }}>Spend credits and refresh</button>
+      <button className="btn btn-secondary" onClick={() => setAsking(false)}>Cancel</button>
+    </span>
+  )
+}
+```
+
+`frontend/src/hooks/useRefreshData.ts`: import `rememberRefreshCost` from `'../components/SpendConfirmButton'`; in `onSuccess`, call `rememberRefreshCost(data.credits_used)` and add `queryClient.invalidateQueries({ queryKey: ['credits'] })`.
+
+`frontend/src/pages/TodaysPicks.tsx`: replace the `Refresh data` `<button …>` (the one with `disabled={refreshData.isPending}` and `onClick={() => refreshData.mutate(sport)}`) with:
+
+```tsx
+        <SpendConfirmButton
+          label="Refresh data"
+          pendingLabel="Refreshing…"
+          pending={refreshData.isPending}
+          onConfirm={() => refreshData.mutate(sport)}
+        />
+```
+
+keeping any wrapper element and class the old button sat in (check it renders in the same toolbar spot — plan 025 moved it there deliberately).
+
+`frontend/src/pages/Backtesting.tsx`: in `handleRunPipeline`, after `const result = await api.pipeline.run();` add `rememberRefreshCost(result.credits_used);`; replace the button that calls `handleRunPipeline` with `<SpendConfirmButton label="<its current label>" pendingLabel="Running…" pending={pipelineRunning} onConfirm={handleRunPipeline} />`.
+
+`frontend/src/App.css`, append:
+
+```css
+.spend-confirm { display: inline-flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.spend-confirm-text { font-size: 0.8rem; color: var(--text-muted); }
+```
+
+Update `frontend/src/hooks/useRefreshData.test.tsx` if it asserts the button click calls `mutate` directly (it now needs the confirm click).
+
+- [ ] **Step 4: Run to verify** — `cd frontend && npx vitest run && npx tsc -b --noEmit && npx eslint .` Expected: green.
+
+- [ ] **Step 5: Mutation checks** — (1) make the first click call `onConfirm()` directly: `one tap never spends` fails. (2) In the confirm button, call `onConfirm` twice: `spends only on confirm, once` fails.
+
+- [ ] **Step 6: Visual check in Chrome** — with the Task 10 setup, the toolbar on Today's Picks shows "Refresh data"; one click shows the cost line and two buttons, at desktop width and 414px, without pushing the toolbar off-screen. Do not press "Spend credits and refresh" against a server using the live key.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add frontend/src
+git commit -m "feat(ui): refreshing asks before it spends Odds API credits"
+```
+
+---
+
+### Task 12: Share the link — and prove it works
 
 **Files:**
 - Create: `scripts/share.ps1`
@@ -2804,7 +3086,7 @@ In `plans/README.md`, add row 026 with the commits, test counts, mutation checks
 
 ## Self-review (author, 2026-09-28)
 
-- **Spec coverage:** §1 scorecard → Task 1; §2 emailed bets + confidence → Tasks 2–3; §3 players' bets → Task 7; §4 endpoints → Tasks 3, 7; §5 screens → Tasks 8–10; §6 security → Tasks 4, 5, 11; data-model changes → Tasks 2, 5; testing strategy → every task's tests + Task 10 Step 6 + Task 11 Step 3; sequencing (security before sharing) → Task order, Task 11 last. Added beyond the spec: Task 6 (three defects found while planning, required for a fair leaderboard).
+- **Spec coverage:** §1 scorecard → Task 1; §2 emailed bets + confidence → Tasks 2–3; §3 players' bets → Task 7; §4 endpoints → Tasks 3, 7; §5 screens → Tasks 8–10; §6 security → Tasks 4, 5, 11; data-model changes → Tasks 2, 5; testing strategy → every task's tests + Task 10 Step 6 + Task 11 Step 3; sequencing (security before sharing) → Task order, Task 12 last. Amended 2026-09-28 for the review brief: G.1 → Task 10, G.2/G.3 → Tasks 7 and 9, G.5 → Task 11; D.3 needs nothing in 026 (MMA is never emailed). Added beyond the spec: Task 6 (three defects found while planning, required for a fair leaderboard).
 - **Placeholders:** none; every code step carries code.
 - **Type consistency:** `Bet`/`Summary.to_dict()` keys match `EmailedSummary`; leaderboard dict keys match `LeaderboardRow`; `emailed_bets(session, kind)`, `player_bets(session, user_id)`, `balance_of(session, user)`, `settle_parlays(session)` are named identically wherever used.
 - **Review Focus:** five lines, each with a test: Task 5 (names, leading-zero PIN), Tasks 3 and 10 (empty record), Task 6 (canceled parlay leg), Task 1 (one trend point per day).
