@@ -27,6 +27,19 @@ def _pct(p: float | None) -> str:
     return "—" if p is None else f"{round(p * 100)}%"
 
 
+def _fmt_odds(odds: int) -> str:
+    """American odds with an explicit sign on a positive price.
+
+    "(145)" reads as a magnitude, not a price -- a reader has to already
+    know American odds convention to tell it apart from "(-145)" at a
+    glance. "(+145)" needs no such context.
+    """
+    return f"+{odds}" if odds > 0 else str(odds)
+
+
+_HEAD = '<head><meta charset="utf-8"></head>'
+
+
 #: Words for what a totals line counts, by sport. Absent -> no unit word,
 #: which is correct for a sport nobody has checked rather than a guess.
 _TOTAL_UNITS = {
@@ -142,14 +155,14 @@ def render_digest(sections: list[DigestSection], target_date: date):
             rows.append(
                 f'<tr><td style="padding:10px 0;border-bottom:1px solid #e5e7eb;">'
                 f'<div style="{_FONT}font-size:15px;font-weight:600;color:#111827;">'
-                f'{_escape(_selection_label(p))} <span style="font-weight:400;color:#6b7280;">({p.odds})</span></div>'
+                f'{_escape(_selection_label(p))} <span style="font-weight:400;color:#6b7280;">({_fmt_odds(p.odds)})</span></div>'
                 f'<div style="{_FONT}font-size:13px;color:#374151;padding-top:2px;">'
                 f'{_escape(p.matchup)} &nbsp;·&nbsp; '
                 f'Model {_pct(p.model_prob)} &nbsp;·&nbsp; Price {_pct(p.price_prob)}</div>'
                 f'{rationale_html}</td></tr>'
             )
             text_lines.append(
-                f"  {_selection_label(p)} ({p.odds}) — {p.matchup} — "
+                f"  {_selection_label(p)} ({_fmt_odds(p.odds)}) — {p.matchup} — "
                 f"Model {_pct(p.model_prob)} / Price {_pct(p.price_prob)}"
             )
             if p.rationale:
@@ -171,17 +184,17 @@ def render_digest(sections: list[DigestSection], target_date: date):
                 rows.append(
                     f'<tr><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;">'
                     f'<div style="{_FONT}font-size:14px;color:#111827;">'
-                    f'{_escape(_prop_label(p.pick_value))} <span style="color:#6b7280;">({p.odds})</span></div>'
+                    f'{_escape(_prop_label(p.pick_value))} <span style="color:#6b7280;">({_fmt_odds(p.odds)})</span></div>'
                     f'<div style="{_FONT}font-size:12px;color:#6b7280;padding-top:2px;">'
                     f'{_escape(p.matchup)}</div></td></tr>'
                 )
                 text_lines.append(
-                    f"    {_prop_label(p.pick_value)} ({p.odds}) — {p.matchup}"
+                    f"    {_prop_label(p.pick_value)} ({_fmt_odds(p.odds)}) — {p.matchup}"
                 )
         text_lines.append("")
 
     html = (
-        f'<html><body style="margin:0;padding:0;background:#f9fafb;">'
+        f'<html>{_HEAD}<body style="margin:0;padding:0;background:#f9fafb;">'
         f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         f'style="background:#f9fafb;padding:16px;"><tr><td align="center">'
         f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
@@ -208,24 +221,38 @@ def render_digest(sections: list[DigestSection], target_date: date):
 _FOOTER_TEXT = ('Model output for research, not betting advice. "Model" is the '
                'model\'s win probability; "Price" is what the quoted price implies.')
 
+#: The empty-day email shows no "Model"/"Price" figures at all -- unlike
+#: the normal digest's footer, defining those terms here would refer to
+#: nothing on the page.
+_EMPTY_DAY_FOOTER_TEXT = 'Model output for research, not betting advice.'
 
-def empty_day_reason(section: DigestSection, min_shrunk_edge_pp: float) -> str:
+
+def empty_day_reason(section: DigestSection, min_shrunk_edge_pp: float,
+                     min_odds: int, max_odds: int) -> str:
     """One line explaining why this sport contributed nothing today.
 
     Shared between the empty-day email body and the job's INFO log, so the
-    two can never say something different about the same sport.
+    two can never say something different about the same sport. Three
+    distinct reasons, not two -- "no picks at all", "priced picks existed
+    but none were in the price window", and "some were in the window but
+    none cleared the edge bar" point at different places to look.
     """
     d = section.diagnostics
     label = _label(section.sport)
     if d is None or d.generated == 0:
         return f"{label}: no picks generated today."
+    if d.survived_price == 0:
+        return (f"{label}: {d.generated} pick{'' if d.generated == 1 else 's'} generated, "
+               f"none priced between {_fmt_odds(min_odds)} and {_fmt_odds(max_odds)}.")
     bar = f"{min_shrunk_edge_pp:g}"
+    weight = ("not measured" if not d.lambda_measured
+             else f"{d.lambda_used:.2f}")
     return (f"{label}: {d.generated} pick{'' if d.generated == 1 else 's'} generated, "
-           f"none cleared the {bar}-point bar (model weight {d.lambda_used:.2f}).")
+           f"none cleared the {bar}-point bar (model weight {weight}).")
 
 
 def render_empty_day_digest(sections: list[DigestSection], target_date: date,
-                            min_shrunk_edge_pp: float):
+                            min_shrunk_edge_pp: float, min_odds: int, max_odds: int):
     """Return (subject, html, text) for a day where nothing cleared the send bar.
 
     ``sections`` is the full diagnostics list from ``select_digest`` -- every
@@ -237,9 +264,9 @@ def render_empty_day_digest(sections: list[DigestSection], target_date: date,
     pretty = target_date.strftime("%a %b %d").replace(" 0", " ")
     subject = f"No qualifying picks — {pretty}"
 
-    reasons = [empty_day_reason(s, min_shrunk_edge_pp) for s in sections]
+    reasons = [empty_day_reason(s, min_shrunk_edge_pp, min_odds, max_odds) for s in sections]
 
-    text_lines = [f"NO QUALIFYING PICKS — {pretty}", ""] + reasons + ["", _FOOTER_TEXT]
+    text_lines = [f"NO QUALIFYING PICKS — {pretty}", ""] + reasons + ["", _EMPTY_DAY_FOOTER_TEXT]
     text = "\n".join(text_lines)
 
     rows = "".join(
@@ -248,7 +275,7 @@ def render_empty_day_digest(sections: list[DigestSection], target_date: date,
         for r in reasons
     )
     html = (
-        f'<html><body style="margin:0;padding:0;background:#f9fafb;">'
+        f'<html>{_HEAD}<body style="margin:0;padding:0;background:#f9fafb;">'
         f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         f'style="background:#f9fafb;padding:16px;"><tr><td align="center">'
         f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
@@ -257,7 +284,7 @@ def render_empty_day_digest(sections: list[DigestSection], target_date: date,
         f'padding-bottom:10px;">No qualifying picks — {pretty}</td></tr>'
         + rows
         + f'<tr><td style="{_FONT}font-size:11px;color:#9ca3af;padding-top:18px;">'
-        f'{_FOOTER_TEXT}</td></tr>'
+        f'{_EMPTY_DAY_FOOTER_TEXT}</td></tr>'
         f'</table></td></tr></table></body></html>'
     )
     return subject, html, text

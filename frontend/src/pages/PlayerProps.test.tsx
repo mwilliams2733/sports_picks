@@ -1,0 +1,34 @@
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
+import PlayerProps from './PlayerProps'
+import type { PropData } from '../types'
+
+const ok = <T,>(data: T) => ({ data, error: null, isLoading: false })
+
+const LOW_CONFIDENCE_PROP: PropData = {
+  id: 1, game_id: 1, sport: 'nba', date: '2026-09-29', matchup: 'BOS @ NYY',
+  bookmaker: 'draftkings', market: 'player_points', market_label: 'Points',
+  player_name: 'Jayson Tatum', outcome: 'Over', line: 27.5, odds: -110,
+  projection: 29.0, edge_pct: 6.0, confidence: 1, season_avg: 28.0,
+  recent_avg: 29.5, source: 'season average', is_stale: false,
+}
+
+vi.mock('../hooks/useProps', () => ({
+  useProps: () => ({ props: ok([LOW_CONFIDENCE_PROP]), markets: ok([]) }),
+}))
+
+function renderAt(url: string) {
+  return render(<MemoryRouter initialEntries={[url]}><PlayerProps /></MemoryRouter>)
+}
+
+describe('PlayerProps', () => {
+  it('ignores ?confidence=3 while SHOW_STARS is false, so a shared link cannot silently hide props', () => {
+    renderAt('/player-props?confidence=3')
+    // LOW_CONFIDENCE_PROP has confidence=1; a minConfidence of 3 would hide
+    // it if the URL param were honored.
+    expect(screen.getByText('Jayson Tatum')).toBeInTheDocument()
+    expect(screen.queryByText(/\+ Stars/)).toBeNull()
+    expect(document.body.textContent).not.toMatch(/[★☆]/)
+  })
+})

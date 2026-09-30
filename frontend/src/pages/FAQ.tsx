@@ -1,6 +1,17 @@
 import { useState } from 'react';
 import { SHOW_STARS } from '../lib/display';
 
+//: The Player Props columns answer names a "Conf" column of confidence
+//: stars. While stars are hidden, that sentence describes a column that
+//: does not exist on the page -- strip it rather than leave a dangling
+//: reference.
+const STAR_COLUMN_NOTE = ' Conf — confidence rating (1–5 stars).';
+
+function displayItem(item: FAQItem): FAQItem {
+  if (SHOW_STARS || !item.answer.includes(STAR_COLUMN_NOTE)) return item;
+  return { ...item, answer: item.answer.replace(STAR_COLUMN_NOTE, '') };
+}
+
 interface FAQItem {
   question: string;
   answer: string;
@@ -353,6 +364,7 @@ export default function FAQ() {
           <div className="faq-list">
             {section.items
               .filter(item => SHOW_STARS || item.question !== 'What do the confidence stars mean?')
+              .map(displayItem)
               .map(item => (
                 <Accordion key={item.question} item={item} />
               ))}

@@ -25,8 +25,12 @@ export default function PlayerProps() {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('edge');
   // minConfidence is purely local state, so its initial value from the URL
-  // is read via a lazy initializer instead of an effect.
+  // is read via a lazy initializer instead of an effect. While stars are
+  // hidden, a shared/bookmarked `?confidence=N` link must not silently
+  // filter props out of view with no visible control to explain why --
+  // ignore it and stay at 0 (show everything).
   const [minConfidence, setMinConfidence] = useState(() => {
+    if (!SHOW_STARS) return 0;
     const urlConf = searchParams.get('confidence');
     return urlConf ? Number(urlConf) : 0;
   });

@@ -43,19 +43,37 @@ digest:
 python -m backend.analysis.market_shrinkage --db <snapshot> --sport <s>
 ```
 
-| Sport | Games | Best λ | Brier: market alone → model alone |
-|---|---|---|---|
-| NFL | 1,184 | 0.00 | 0.2109 → 0.2258 |
-| MLB | 127 | 0.00 | 0.2216 → 0.2438 |
+| Sport | Games | Date span | Best λ | Brier: market alone → model alone |
+|---|---|---|---|---|
+| NFL | 1,184 | 2022-09-08 .. 2026-09-28 | 0.00 | 0.2109 → 0.2258 |
+| MLB | 127 | 2026-05-24 .. 2026-09-27 | 0.00 | 0.2216 → 0.2438 |
+
+Both were measured against a `sqlite3 .backup` snapshot of the live db taken
+2026-09-29 (a live-connection copy risks a WAL-torn read; see
+`sports-picks-db-snapshot` in project memory).
 
 Brier rose monotonically with λ in both sports — i.e. blending any amount of
 model opinion into the market price made the combined forecast worse,
-in-sample, for both sports measured. The best in-sample λ is 0, so the send
-bar currently blends none of the model's opinion in: only the market's
-own price informs `shrunk_edge`, which means (with λ = 0) no game pick can
-ever clear `min_shrunk_edge_pp` > 0. This is intentional: the bar is closed
-until there is evidence the model adds anything beyond what the market
-price already says.
+in-sample, for both sports measured. The best in-sample λ is 0, so
+`blend_weight` is 0.00 for both, which makes `shrunk_edge` (= λ × edge_pct)
+exactly 0 for every pick in both sports, regardless of that pick's price or
+edge — price is not a separate input to `shrunk_edge`; it enters only
+through `edge_pct`, and λ = 0 zeroes it out entirely. With
+`min_shrunk_edge_pp` at 3.0, that means no game pick in either sport can
+ever clear the bar. This is intentional: the bar is closed until there is
+evidence the model adds anything beyond what the market price already says.
+
+**This is an in-sample bound, not a held-out result.** An in-sample best λ
+of 0 means blending hurt on the SAME data the λ search was fit to — it does
+not by itself say anything about held-out performance, because a held-out
+search could in principle prefer a different λ than the in-sample one did.
+What it does bound is the ceiling: if blending the model in already looks
+worse on the data most favorable to it (the data it was evaluated on), it
+is very unlikely to look better on unseen data. Realistically, re-enabling
+either sport needs more than a re-run of this same search on fresher data —
+it needs a changed model or new features that give the model something the
+market price does not already have, followed by a fresh **held-out**
+measurement (below).
 
 **Re-enable condition.** The bar starts passing picks for a sport once that
 sport's **held-out** λ (not in-sample) is measured above 0 — i.e. blending

@@ -1,9 +1,17 @@
+import os
 from datetime import date, datetime, timedelta, timezone
 
+import pytest
 
+from backend.config import load_config
 from backend.database import get_engine, get_session
 from backend.models import Base, Team, Game, StrategyModel, PickModel, PickResult
 from backend.digest.selector import select_digest, DigestDiagnostics
+
+#: Repo root, computed the same way backend/scripts/check_digest.py does it,
+#: so this test finds the real config.yaml regardless of the runner's cwd.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REAL_CONFIG_PATH = os.path.join(_REPO_ROOT, "config.yaml")
 
 SEASONS = {"nfl": {"start": "09-05", "end": "02-10"},
            "nba": {"start": "10-22", "end": "06-20"}}
@@ -95,7 +103,7 @@ def test_a_sport_in_season_with_no_games_still_gets_an_empty_section():
     assert by_sport["nba"].picks == []
     assert by_sport["nba"].props == []
     assert by_sport["nba"].diagnostics == DigestDiagnostics(
-        games=0, generated=0, survived_price=0, lambda_used=0.0)
+        games=0, generated=0, survived_price=0, lambda_used=0.0, lambda_measured=False)
 
 
 def test_zero_confidence_picks_are_excluded_but_the_section_still_appears():
@@ -644,3 +652,46 @@ def test_suppression_fires_below_the_floor():
 
     sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR, min_trailing_win_pct=0.5)
     assert sections == []
+
+
+# --- the send bar fails closed, not open ------------------------------------
+
+def test_the_real_config_send_bar_passes_zero_game_picks_at_lambda_zero():
+    """Loads config.yaml's actual digest.send_bar through backend.config's
+    real loader -- the same one backend/digest/job.py uses -- and proves the
+    frozen bar (lambda=0.00 for both measured sports) is closed: a slate
+    with a +20, a +5 and a -20 edge_pct must produce zero game picks, not
+    "everything, since 0.0 >= 0.0" (the bug this fix round closes)."""
+    real_send_bar = load_config(REAL_CONFIG_PATH)["digest"]["send_bar"]
+    assert real_send_bar["blend_weight"].get("nfl") == 0.0
+
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+              [(3, 20.0, -110, 0.6), (3, 5.0, -110, 0.55), (3, -20.0, -110, 0.3)])
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=real_send_bar)
+    assert sections[0].picks == []
+
+
+def test_a_send_bar_missing_min_shrunk_edge_pp_raises():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, -20.0, -110, 0.3)])
+    broken_bar = {k: v for k, v in OPEN_BAR.items() if k != "min_shrunk_edge_pp"}
+    with pytest.raises(ValueError, match="digest.send_bar.min_shrunk_edge_pp is required"):
+        select_digest(s, d, ["nfl"], SEASONS, send_bar=broken_bar)
+
+
+@pytest.mark.parametrize("key", ["min_shrunk_edge_pp", "min_odds", "max_odds",
+                                 "max_game_picks", "max_props"])
+def test_each_required_send_bar_key_is_required(key):
+    broken_bar = {k: v for k, v in OPEN_BAR.items() if k != key}
+    with pytest.raises(ValueError, match=f"digest.send_bar.{key} is required"):
+        select_digest(_session(), date(2026, 11, 1), ["nfl"], SEASONS, send_bar=broken_bar)
+
+
+@pytest.mark.parametrize("bad_value", [None, "150", True, [150]])
+def test_a_non_numeric_send_bar_value_raises_valueerror_not_typeerror(bad_value):
+    broken_bar = {**OPEN_BAR, "max_odds": bad_value}
+    with pytest.raises(ValueError, match="digest.send_bar.max_odds is required"):
+        select_digest(_session(), date(2026, 11, 1), ["nfl"], SEASONS, send_bar=broken_bar)

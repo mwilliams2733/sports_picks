@@ -65,6 +65,13 @@ KEEP = 3
 _SENT_RE = re.compile(r"Digest sent to (\d+) recipient")
 _EMPTY_RE = re.compile(r"Digest for (\d{4}-\d{2}-\d{2}) is empty")
 _SLATE_RE = re.compile(r"Morning slate for (\d{4}-\d{2}-\d{2}): (.+?)\s*$")
+#: The empty-day email (added alongside the send bar) DOES send and DOES log
+#: a "Digest sent to N recipient(s)" line, which on its own reads as
+#: healthy. This marker -- logged only when every in-season sport with games
+#: generated zero picks -- is how a scout that fetched games but produced
+#: nothing is told apart from a normal empty-day send (games priced, picks
+#: generated, none just cleared the bar).
+_NO_PICKS_RE = re.compile(r"Digest for (\d{4}-\d{2}-\d{2}): no picks were generated for any sport")
 
 
 #: Hour (ET) the digest job fires. Mirrors config digest.send_hour_et.
@@ -155,6 +162,17 @@ def digest_lines(lines, target_date) -> list[str]:
     return out
 
 
+def no_picks_generated(lines, target_date) -> bool:
+    """True if the "no picks were generated for any sport" marker for
+    `target_date` appears anywhere in `lines`. See `_NO_PICKS_RE`."""
+    stamp = target_date.isoformat()
+    for line in lines:
+        m = _NO_PICKS_RE.search(line)
+        if m and m.group(1) == stamp:
+            return True
+    return False
+
+
 def slate_line(lines, target_date) -> str | None:
     """What the morning scout said it was pricing, or None if it never said.
 
@@ -201,7 +219,14 @@ def classify(lines, target_date, *, picks_now: int,
                           "no digest line for today at all: the scheduler was "
                           "down, or it died before 11:00 ET"]))
 
-    if any(_SENT_RE.search(x) for x in relevant):
+    # A "sent" line alone is not enough: the empty-day email also sends and
+    # logs "Digest sent", even when every in-season sport with games
+    # generated zero picks -- the scout-failed case this line exists to
+    # catch. When the marker is present, fall through to the same
+    # SCOUT_NEVER_RAN / EMPTY_BUT_PICKS_EXIST / EMPTY_QUIET logic an
+    # unsent-empty digest would have hit.
+    no_picks = no_picks_generated(lines, target_date)
+    if any(_SENT_RE.search(x) for x in relevant) and not no_picks:
         return Result(Outcome.SENT, True, slate, picks_now,
                       "; ".join(notes) or "digest sent")
 

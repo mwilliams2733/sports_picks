@@ -20,7 +20,7 @@ import datetime
 import pytest
 
 from backend.scripts.check_digest import (Outcome, classify, digest_lines,
-                                          slate_line)
+                                          no_picks_generated, slate_line)
 
 TODAY = datetime.date(2026, 9, 23)
 
@@ -34,6 +34,13 @@ SLATE_EMPTY = ("2026-09-23 08:00:11 INFO:backend.pipeline.scheduler:"
                "Morning slate for 2026-09-23: nothing scheduled")
 YESTERDAY_SENT = ("2026-09-22 11:00:02 INFO:backend.digest.job:"
                   "Digest sent to 4 recipient(s)")
+#: Logged by backend/digest/job.py only when EVERY in-season sport with
+#: games generated zero picks -- the scout-fetched-nothing fault. The
+#: empty-day email still sends and still logs SENT, so this marker is how
+#: the health check tells that apart from "picks were generated but none
+#: cleared the bar" (which stays healthy).
+NO_PICKS = ("2026-09-23 11:00:02 INFO:backend.digest.job:"
+           "Digest for 2026-09-23: no picks were generated for any sport")
 
 
 # --- reading the log ------------------------------------------------------
@@ -185,3 +192,42 @@ def test_a_digest_that_already_sent_is_reported_even_when_early():
     result = classify([SLATE, SENT], TODAY, picks_now=10, et_hour=2)
 
     assert result.outcome is Outcome.SENT
+
+
+# --- the empty-day email must not read as healthy when the scout failed ----
+
+def test_no_picks_generated_marker_is_found_for_its_date():
+    assert no_picks_generated([NO_PICKS], TODAY) is True
+
+
+def test_no_picks_generated_marker_for_a_different_date_is_not_found():
+    assert no_picks_generated([NO_PICKS.replace("2026-09-23", "2026-09-22")], TODAY) is False
+
+
+def test_marker_with_no_slate_line_is_scout_never_ran():
+    """(a) The empty-day email DID send (SENT is present), but every sport
+    generated zero picks and the scout never logged a slate -- this is the
+    2026-09-28 fault, not a healthy send."""
+    result = classify([NO_PICKS, SENT], TODAY, picks_now=0)
+
+    assert result.outcome is Outcome.SCOUT_NEVER_RAN
+    assert result.ok is False
+
+
+def test_marker_with_picks_existing_now_is_empty_but_picks_exist():
+    """(b) The scout DID log a slate, the empty-day email sent, but every
+    sport generated zero picks at 11:00 and picks exist for today now --
+    the morning slate landed too late, same as the pre-send-bar signal."""
+    result = classify([SLATE, NO_PICKS, SENT], TODAY, picks_now=6)
+
+    assert result.outcome is Outcome.EMPTY_BUT_PICKS_EXIST
+    assert result.ok is False
+
+
+def test_empty_day_email_with_picks_generated_stays_ok():
+    """(c) No marker: picks WERE generated (just none cleared the bar). The
+    empty-day email sending is exactly what should happen, and stays OK."""
+    result = classify([SLATE, SENT], TODAY, picks_now=0)
+
+    assert result.outcome is Outcome.SENT
+    assert result.ok is True

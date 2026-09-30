@@ -1,7 +1,7 @@
 from datetime import date
 
-from backend.digest.selector import DigestPick, DigestSection
-from backend.digest.render import render_digest
+from backend.digest.selector import DigestDiagnostics, DigestPick, DigestSection
+from backend.digest.render import empty_day_reason, render_digest, render_empty_day_digest
 
 
 def _section():
@@ -327,3 +327,103 @@ def test_prop_labels_are_untouched():
     _, html, text = render_digest([section], date(2026, 9, 20))
     assert "James Harden Over 6.5 Assists" in html
     assert "James Harden Over 6.5 Assists" in text
+
+
+# --- fix round 1: mojibake, odds sign, empty-day footer, reason text -------
+
+def test_normal_digest_html_declares_utf8():
+    """P1: the dry-run preview (no real SMTP declaring the charset) rendered
+    mojibake ("â€”", "Â·") without an explicit charset meta tag."""
+    _, html, _ = render_digest([_section()], date(2026, 9, 20))
+    assert '<meta charset="utf-8">' in html
+    assert html.index('<meta charset="utf-8">') < html.index("<body")
+
+
+def test_empty_day_html_declares_utf8():
+    section = DigestSection(
+        sport="nfl", picks=[], props=[],
+        diagnostics=DigestDiagnostics(games=0, generated=0, survived_price=0,
+                                      lambda_used=0.0, lambda_measured=False),
+    )
+    _, html, _ = render_empty_day_digest([section], date(2026, 9, 20), 3.0, -150, 150)
+    assert '<meta charset="utf-8">' in html
+
+
+def test_positive_odds_render_with_a_sign():
+    section = DigestSection(
+        sport="nfl",
+        picks=[DigestPick(sport="nfl", matchup="Bills @ Chiefs", pick_value="AWAY ML",
+                          odds=145, confidence=5, edge_pct=8.1, rationale="",
+                          home_team="Chiefs", away_team="Bills")],
+        props=[DigestPick(sport="nfl", matchup="Bills @ Chiefs",
+                          pick_value="Mahomes Over 275.5 Pass Yards",
+                          odds=120, confidence=0, edge_pct=0.0, rationale="")],
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "(+145)" in html and "(+145)" in text
+    assert "(145)" not in html and "(145)" not in text
+    assert "(+120)" in html and "(+120)" in text
+
+
+def test_negative_odds_keep_their_sign():
+    _, html, text = render_digest([_section()], date(2026, 9, 20))
+    assert "(-110)" in html and "(-110)" in text
+
+
+def test_empty_day_footer_has_no_model_price_definitions():
+    """P3: the empty-day email shows no Model/Price figures, so its footer
+    must not define terms that appear nowhere on the page."""
+    section = DigestSection(
+        sport="nfl", picks=[], props=[],
+        diagnostics=DigestDiagnostics(games=0, generated=0, survived_price=0,
+                                      lambda_used=0.0, lambda_measured=False),
+    )
+    _, html, text = render_empty_day_digest([section], date(2026, 9, 20), 3.0, -150, 150)
+    assert "Model output for research, not betting advice." in html
+    assert "Model output for research, not betting advice." in text
+    assert '"Model" is the' not in html and '"Model" is the' not in text
+    assert '"Price" is what' not in html and '"Price" is what' not in text
+
+
+def test_reason_says_no_picks_generated_when_generated_is_zero():
+    section = DigestSection(
+        sport="mlb", picks=[], props=[],
+        diagnostics=DigestDiagnostics(games=0, generated=0, survived_price=0,
+                                      lambda_used=0.0, lambda_measured=False),
+    )
+    assert empty_day_reason(section, 3.0, -150, 150) == "MLB: no picks generated today."
+
+
+def test_reason_says_none_priced_in_window_when_nothing_survived_price():
+    section = DigestSection(
+        sport="nfl", picks=[], props=[],
+        diagnostics=DigestDiagnostics(games=1, generated=9, survived_price=0,
+                                      lambda_used=0.0, lambda_measured=True),
+    )
+    assert empty_day_reason(section, 3.0, -150, 150) == (
+        "NFL: 9 picks generated, none priced between -150 and +150."
+    )
+
+
+def test_reason_says_none_cleared_the_bar_when_some_survived_price():
+    section = DigestSection(
+        sport="nfl", picks=[], props=[],
+        diagnostics=DigestDiagnostics(games=1, generated=9, survived_price=9,
+                                      lambda_used=0.0, lambda_measured=True),
+    )
+    assert empty_day_reason(section, 3.0, -150, 150) == (
+        "NFL: 9 picks generated, none cleared the 3-point bar (model weight 0.00)."
+    )
+
+
+def test_reason_says_not_measured_for_a_sport_missing_from_blend_weight():
+    """M5: 0.00 reads as a measured result of zero. A sport absent from
+    blend_weight has not been measured at all, and must say so."""
+    section = DigestSection(
+        sport="ncaaf", picks=[], props=[],
+        diagnostics=DigestDiagnostics(games=1, generated=5, survived_price=5,
+                                      lambda_used=0.0, lambda_measured=False),
+    )
+    reason = empty_day_reason(section, 3.0, -150, 150)
+    assert "model weight not measured" in reason
+    assert "0.00" not in reason

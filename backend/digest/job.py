@@ -66,12 +66,30 @@ def send_daily_digest(config: dict, engine, target_date=None) -> dict:
                 return result
 
             empty_day = True
-            min_shrunk_edge_pp = send_bar.get("min_shrunk_edge_pp", 0.0)
+            min_shrunk_edge_pp = send_bar["min_shrunk_edge_pp"]
+            min_odds = send_bar["min_odds"]
+            max_odds = send_bar["max_odds"]
             for section in sections:
                 logger.info("Digest for %s: %s", target_date,
-                           empty_day_reason(section, min_shrunk_edge_pp))
+                           empty_day_reason(section, min_shrunk_edge_pp, min_odds, max_odds))
+
+            # A distinct marker, logged ONLY when every in-season sport that
+            # had games today generated zero picks -- the 2026-09-28 class
+            # of fault (the scout ran, fetched games, but produced nothing).
+            # `check_digest.py` treats this the same as the old "digest was
+            # empty" case, even though the empty-day email below DOES send
+            # (and therefore logs "Digest sent to N recipient(s)", which on
+            # its own reads as healthy). Without this marker, a scout that
+            # silently produced nothing would report OK.
+            sports_with_games = [s for s in sections
+                                 if s.diagnostics and s.diagnostics.games > 0]
+            if sports_with_games and all(s.diagnostics.generated == 0
+                                        for s in sports_with_games):
+                logger.info("Digest for %s: no picks were generated for any sport",
+                           target_date)
+
             subject, html, text = render_empty_day_digest(sections, target_date,
-                                                           min_shrunk_edge_pp)
+                                                           min_shrunk_edge_pp, min_odds, max_odds)
 
         if not subject:
             logger.info("Digest for %s is empty; nothing sent", target_date)

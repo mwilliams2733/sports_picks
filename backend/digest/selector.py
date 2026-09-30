@@ -53,6 +53,11 @@ class DigestDiagnostics:
     generated: int          # game picks after dedupe, before any filter
     survived_price: int     # of those, how many had a price inside the window
     lambda_used: float      # blend_weight[sport], or 0.0 if missing
+    #: True only when `sport` has its own entry in blend_weight. False means
+    #: lambda_used is a fallback 0.0, not a measurement -- the empty-day
+    #: email must say "not measured", never "0.00" (which reads as a
+    #: measured result of zero).
+    lambda_measured: bool = True
 
 
 @dataclass(frozen=True)
@@ -174,17 +179,36 @@ def _recency(pick: PickModel) -> tuple:
     return (created.replace(tzinfo=None), pick.id or 0)
 
 
-#: Defaults chosen so a caller that omits `send_bar` entirely (an old test,
-#: say) gets "no gate, no ceiling" rather than a KeyError. Production always
-#: supplies the full dict from config.yaml's digest.send_bar.
-_SEND_BAR_DEFAULTS = {
-    "min_shrunk_edge_pp": 0.0,
-    "min_odds": -100_000,
-    "max_odds": 100_000,
-    "max_game_picks": 5,
-    "max_props": 5,
-    "blend_weight": {},
-}
+#: These five must be present and numeric. A missing or non-numeric value
+#: used to default to 0.0 -- which, combined with lambda=0, made
+#: `shrunk (0.0) >= min_shrunk_edge_pp (0.0)` true for EVERY priced pick,
+#: including a negative edge. The bar must fail CLOSED (raise) rather than
+#: fail open (silently admit everything) when it is misconfigured.
+#: `blend_weight` is deliberately not in this list: a sport missing from it
+#: is a documented, intentional 0.0 (see select_digest's docstring), not a
+#: misconfiguration.
+_REQUIRED_SEND_BAR_KEYS = (
+    "min_shrunk_edge_pp", "min_odds", "max_odds", "max_game_picks", "max_props",
+)
+
+
+def _validate_send_bar(send_bar: dict | None) -> dict:
+    """Return a validated copy of `send_bar`, or raise ValueError.
+
+    Every key in `_REQUIRED_SEND_BAR_KEYS` must be present and a real number
+    (not None, not a bool, not a string) -- config.yaml's `null` and a typo'd
+    or removed key must both be loud failures, not a silent 0.0.
+    """
+    if not isinstance(send_bar, dict):
+        raise ValueError("digest.send_bar is required")
+    validated = dict(send_bar)
+    for key in _REQUIRED_SEND_BAR_KEYS:
+        value = send_bar.get(key)
+        if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"digest.send_bar.{key} is required")
+        validated[key] = value
+    validated["blend_weight"] = send_bar.get("blend_weight") or {}
+    return validated
 
 
 def _start_time_key(games_by_id, p) -> tuple:
@@ -241,8 +265,8 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
     pick's de-vigged edge, the same reason props are never ranked against
     game picks), capped at max_props.
     """
-    bar = {**_SEND_BAR_DEFAULTS, **(send_bar or {})}
-    blend_weight = bar["blend_weight"] or {}
+    bar = _validate_send_bar(send_bar)
+    blend_weight = bar["blend_weight"]
     min_odds = bar["min_odds"]
     max_odds = bar["max_odds"]
     min_shrunk = bar["min_shrunk_edge_pp"]
@@ -255,6 +279,7 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
         if not is_sport_in_season(sport, seasons, target_date):
             continue
 
+        lambda_measured = sport in blend_weight
         lam = float(blend_weight.get(sport, 0.0))
 
         games = (
@@ -271,7 +296,8 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
             sections.append(DigestSection(
                 sport=sport, picks=[], props=[], record=record,
                 diagnostics=DigestDiagnostics(games=0, generated=0,
-                                              survived_price=0, lambda_used=lam),
+                                              survived_price=0, lambda_used=lam,
+                                              lambda_measured=lambda_measured),
             ))
             continue
 
@@ -365,7 +391,8 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
         sections.append(DigestSection(
             sport=sport, picks=digest_picks, props=digest_props, record=record,
             diagnostics=DigestDiagnostics(games=len(games), generated=generated,
-                                          survived_price=survived_price, lambda_used=lam),
+                                          survived_price=survived_price, lambda_used=lam,
+                                          lambda_measured=lambda_measured),
         ))
 
     return sections

@@ -369,8 +369,8 @@ export default function Backtesting() {
                 </div>
               )}
 
-              {/* Prop Confidence Breakdown */}
-              {isProp && currentResult.by_confidence && (
+              {/* Prop Confidence Breakdown -- all or nothing behind SHOW_STARS */}
+              {SHOW_STARS && isProp && currentResult.by_confidence && (
                 <div>
                   <div className="input-label" style={{ marginBottom: '0.5rem' }}>By Confidence</div>
                   <div className="table-wrap">
@@ -393,7 +393,7 @@ export default function Backtesting() {
                             return (
                               <tr key={conf}>
                                 <td className="font-medium">
-                                  {SHOW_STARS ? `${'*'.repeat(Number(conf))} (${conf} star${Number(conf) !== 1 ? 's' : ''})` : `Tier ${conf}`}
+                                  {'*'.repeat(Number(conf))} ({conf} star{Number(conf) !== 1 ? 's' : ''})
                                 </td>
                                 <td className="mono">{r.wins}-{r.losses}</td>
                                 <td className="mono text-muted">{total}</td>

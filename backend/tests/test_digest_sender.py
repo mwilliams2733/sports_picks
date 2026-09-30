@@ -7,9 +7,14 @@ from backend.digest.job import send_daily_digest
 WIRING_SEASONS = {"nfl": {"start": "09-05", "end": "02-10"},
                   "mlb": {"start": "03-27", "end": "10-31"}}
 
+#: Mirrors the real config.yaml digest.send_bar block: both measured sports
+#: have an explicit (measured) lambda of 0.00 -- not simply absent from
+#: blend_weight, which would instead read "not measured" in the empty-day
+#: email (see render.empty_day_reason / M5).
 FROZEN_SEND_BAR = {
     "min_shrunk_edge_pp": 3.0, "min_odds": -150, "max_odds": 150,
-    "max_game_picks": 3, "max_props": 5, "blend_weight": {},
+    "max_game_picks": 3, "max_props": 5,
+    "blend_weight": {"nfl": 0.00, "mlb": 0.00},
 }
 
 
@@ -197,6 +202,10 @@ def test_wiring_empty_day_email_when_lambda_is_zero_for_every_sport(monkeypatch,
     assert "★" not in captured["html"] and "☆" not in captured["html"]
     assert "★" not in captured["text"] and "☆" not in captured["text"]
     assert "NFL: 9 picks generated" in caplog.text, "the same reason must be logged at INFO"
+    assert "no picks were generated for any sport" not in caplog.text, (
+        "nfl DID generate picks (9) -- they just didn't clear the bar. "
+        "The scout-failed marker must not fire here."
+    )
 
 
 def test_wiring_ranks_by_shrunk_edge_and_caps_at_three_game_picks(monkeypatch):
@@ -244,3 +253,52 @@ def test_wiring_ranks_by_shrunk_edge_and_caps_at_three_game_picks(monkeypatch):
     i4, i1, i2 = (captured["text"].index(v) for v in ("P1-4", "P1-1", "P1-2"))
     assert i4 < i1 < i2
     assert "★" not in captured["text"] and "☆" not in captured["text"]
+
+
+def test_wiring_marker_logged_only_when_every_sport_generated_zero_picks(monkeypatch, caplog):
+    """(d) nfl has a game today but the scout generated no picks for it at
+    all (a stand-in for the 2026-09-28 fault). The marker must fire. Also
+    checked in the companion empty-day test above: when a sport DID
+    generate picks that just failed the bar, the marker must NOT fire."""
+    from backend.database import get_engine
+    from backend.models import Base
+    engine = get_engine(":memory:")
+    Base.metadata.create_all(engine)
+    d = date(2026, 9, 20)
+    _seed_wiring_nfl_game(engine, d, [])  # a game, but zero picks generated
+
+    monkeypatch.setattr("backend.digest.job.send_email", lambda *a, **k: True)
+    caplog.set_level(logging.INFO)
+    cfg = {"seasons": WIRING_SEASONS,
+          "digest": {"enabled": True, "sports": ["nfl"], "send_bar": FROZEN_SEND_BAR,
+                     "from": "a@b.c", "recipients": ["d@e.f"]}}
+    result = send_daily_digest(cfg, engine, target_date=d)
+
+    assert result["sent"] is True
+    assert "no picks were generated for any sport" in caplog.text
+
+
+def test_a_send_bar_missing_min_shrunk_edge_pp_sends_nothing_and_errors(monkeypatch):
+    """The bar must fail closed on a broken config, not silently admit
+    everything. This is the job-level guard for the fix-round-1 regression:
+    a config missing min_shrunk_edge_pp used to default to 0.0 and, at
+    lambda=0, pass every priced pick including a negative edge."""
+    from backend.database import get_engine
+    from backend.models import Base
+    engine = get_engine(":memory:")
+    Base.metadata.create_all(engine)
+    d = date(2026, 9, 20)
+    _seed_wiring_nfl_game(engine, d, [("P1-0", -20.0, -110, 0.3)])
+
+    def _boom_send(*a, **k):
+        raise AssertionError("must never reach send_email on a broken send bar")
+    monkeypatch.setattr("backend.digest.job.send_email", _boom_send)
+
+    broken_bar = {k: v for k, v in FROZEN_SEND_BAR.items() if k != "min_shrunk_edge_pp"}
+    cfg = {"seasons": WIRING_SEASONS,
+          "digest": {"enabled": True, "sports": ["nfl"], "send_bar": broken_bar,
+                     "from": "a@b.c", "recipients": ["d@e.f"]}}
+    result = send_daily_digest(cfg, engine, target_date=d)
+
+    assert result["sent"] is False
+    assert result["error"] == "ValueError"
