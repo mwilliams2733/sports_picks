@@ -1818,3 +1818,16 @@ button, a, .tab, .nav-link, .bottom-nav-tab, .leaderboard-entry {
 .prop-quote-row .quote-sides {
   margin-top: 0.35rem;
 }
+.no-pin-badge {
+  margin-left: 0.5rem;
+}
+.set-pin {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+.set-pin .input {
+  width: 7rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}

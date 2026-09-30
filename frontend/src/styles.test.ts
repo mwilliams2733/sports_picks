@@ -42,6 +42,8 @@ describe('plan 027 styles live in the loaded stylesheet', () => {
     '.quote-reason',
     '.quote-age',
     '.prop-quote-row',
+    '.no-pin-badge',
+    '.set-pin',
   ])('index.css defines %s', (selector) => {
     expect(indexCss).toContain(selector)
   })
