@@ -16,12 +16,11 @@ REAL_CONFIG_PATH = os.path.join(_REPO_ROOT, "config.yaml")
 SEASONS = {"nfl": {"start": "09-05", "end": "02-10"},
            "nba": {"start": "10-22", "end": "06-20"}}
 
-#: A wide-open bar: no price window, no edge gate, generous caps. Used by
-#: tests that exercise something other than the bar itself (dedupe, matchup
-#: text, rationale, ...). blend_weight is irrelevant when min_shrunk_edge_pp
-#: is 0 -- shrunk edge is >= 0 for any non-negative edge_pct, so everything
-#: clears regardless of lambda.
-OPEN_BAR = {"min_shrunk_edge_pp": 0.0, "min_odds": -100_000, "max_odds": 100_000,
+#: A wide-open bar: no price window, generous caps. Used by tests that
+#: exercise something other than the price window itself (dedupe, matchup
+#: text, rationale, ...). There is no edge gate any more -- blend_weight is
+#: recorded only, not used for filtering or ranking.
+OPEN_BAR = {"min_odds": -100_000, "max_odds": 100_000,
            "max_game_picks": 10, "max_props": 10, "blend_weight": {}}
 
 
@@ -312,17 +311,9 @@ def test_dedup_tolerates_a_missing_or_naive_created_at():
     assert kept[0].edge_pct == 9.9, "the newest row wins; a NULL never does"
 
 
-# --- the send bar: shrunk edge, price window, caps -------------------------
-
-def test_shrunk_edge_is_lambda_times_edge_pct():
-    s = _session()
-    d = date(2026, 11, 1)
-    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 10.0, -110, 0.55)])
-    sections = select_digest(
-        s, d, ["nfl"], SEASONS,
-        send_bar=_bar(blend_weight={"nfl": 0.5}))
-    assert sections[0].picks[0].shrunk_edge == 5.0
-
+# --- the send bar: price window, caps, raw-edge ranking ---------------------
+# The shrunk-edge gate is gone (owner decision 2026-09-30): every priced
+# game pick is shown, ranked by raw edge_pct. blend_weight is recorded only.
 
 def test_price_minus_150_is_in_and_minus_151_is_out():
     s = _session()
@@ -330,7 +321,7 @@ def test_price_minus_150_is_in_and_minus_151_is_out():
     _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 10.0, -150, 0.55), (3, 10.0, -151, 0.55)])
     sections = select_digest(
         s, d, ["nfl"], SEASONS,
-        send_bar=_bar(min_odds=-150, max_odds=150, blend_weight={"nfl": 1.0}))
+        send_bar=_bar(min_odds=-150, max_odds=150))
     vals = [p.pick_value for p in sections[0].picks]
     assert vals == ["P1-0"]
 
@@ -341,7 +332,7 @@ def test_price_plus_150_is_in_and_plus_151_is_out():
     _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 10.0, 150, 0.45), (3, 10.0, 151, 0.45)])
     sections = select_digest(
         s, d, ["nfl"], SEASONS,
-        send_bar=_bar(min_odds=-150, max_odds=150, blend_weight={"nfl": 1.0}))
+        send_bar=_bar(min_odds=-150, max_odds=150))
     vals = [p.pick_value for p in sections[0].picks]
     assert vals == ["P1-0"]
 
@@ -350,22 +341,21 @@ def test_a_pick_with_no_price_is_dropped():
     s = _session()
     d = date(2026, 11, 1)
     _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 10.0, None, 0.55)])
-    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=_bar(blend_weight={"nfl": 1.0}))
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert sections[0].picks == []
     assert sections[0].diagnostics.survived_price == 0
 
 
-def test_shrunk_exactly_the_floor_is_in_just_below_is_out():
+def test_a_negative_edge_still_survives_and_is_shown():
+    """There is no edge floor any more -- a priced pick with a negative edge
+    is shown too, not silently dropped."""
     s = _session()
     d = date(2026, 11, 1)
-    # lambda=1.0 so shrunk == edge_pct exactly.
-    _mk_priced(s, "nfl", 1, 1, 2, d,
-              [(3, 3.0, -110, 0.55), (3, 2.9, -110, 0.55)])
-    sections = select_digest(
-        s, d, ["nfl"], SEASONS,
-        send_bar=_bar(min_shrunk_edge_pp=3.0, blend_weight={"nfl": 1.0}))
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, -20.0, -110, 0.3)])
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     vals = [p.pick_value for p in sections[0].picks]
     assert vals == ["P1-0"]
+    assert sections[0].picks[0].edge_pct == -20.0
 
 
 def test_the_fourth_game_pick_is_cut():
@@ -376,33 +366,35 @@ def test_the_fourth_game_pick_is_cut():
                (3, 20.0, -110, 0.6), (3, 10.0, -110, 0.55)])
     sections = select_digest(
         s, d, ["nfl"], SEASONS,
-        send_bar=_bar(max_game_picks=3, blend_weight={"nfl": 1.0}))
+        send_bar=_bar(max_game_picks=3))
     vals = [p.pick_value for p in sections[0].picks]
     assert vals == ["P1-0", "P1-1", "P1-2"]
 
 
-def test_a_sport_missing_from_blend_weight_gets_lambda_zero():
+def test_a_sport_missing_from_blend_weight_still_shows_its_picks():
+    """blend_weight no longer gates anything -- a sport missing from it
+    still gets its picks, ranked by edge like any other sport. Only
+    diagnostics.lambda_used reflects the missing measurement."""
     s = _session()
     d = date(2026, 11, 1)
     _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 100.0, -110, 0.9)])
     sections = select_digest(
         s, d, ["nfl"], SEASONS,
-        send_bar=_bar(min_shrunk_edge_pp=0.01, blend_weight={"mlb": 1.0}))
-    assert sections[0].picks == []
+        send_bar=_bar(blend_weight={"mlb": 1.0}))
+    assert [p.pick_value for p in sections[0].picks] == ["P1-0"]
     assert sections[0].diagnostics.lambda_used == 0.0
+    assert sections[0].diagnostics.lambda_measured is False
 
 
-def test_ranked_by_shrunk_edge_descending():
+def test_ranked_by_raw_edge_descending():
     s = _session()
     d = date(2026, 11, 1)
     _mk_priced(s, "nfl", 1, 1, 2, d,
               [(3, 4.0, -110, 0.9), (3, 18.0, -110, 0.4), (3, 9.0, -110, 0.55)])
-    sections = select_digest(
-        s, d, ["nfl"], SEASONS,
-        send_bar=_bar(blend_weight={"nfl": 1.0}))
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     vals = [p.pick_value for p in sections[0].picks]
     assert vals == ["P1-1", "P1-2", "P1-0"], (
-        "ranking must follow shrunk edge, not model probability"
+        "ranking must follow raw edge, not model probability"
     )
 
 
@@ -413,11 +405,24 @@ def test_ties_break_by_start_time_then_id():
               start_time=datetime(2026, 11, 1, 20, 0))
     _mk_priced(s, "nfl", 2, 3, 4, d, [(3, 10.0, -110, 0.6)],
               start_time=datetime(2026, 11, 1, 13, 0))
-    sections = select_digest(
-        s, d, ["nfl"], SEASONS,
-        send_bar=_bar(blend_weight={"nfl": 1.0}))
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     vals = [p.pick_value for p in sections[0].picks]
     assert vals == ["P2-0", "P1-0"], "the earlier start time must sort first"
+
+
+def test_a_leftover_min_shrunk_edge_pp_key_is_ignored_not_honoured(caplog):
+    """A stale config carrying the removed key must not silently change
+    behaviour -- it is ignored (with a WARNING), not re-honoured as a gate."""
+    import logging
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, -20.0, -110, 0.3)])
+    caplog.set_level(logging.WARNING)
+    sections = select_digest(
+        s, d, ["nfl"], SEASONS,
+        send_bar=_bar(min_shrunk_edge_pp=50.0))  # would reject everything if honoured
+    assert [p.pick_value for p in sections[0].picks] == ["P1-0"]
+    assert "min_shrunk_edge_pp" in caplog.text
 
 
 # --- props: gradeable markets, same price window, no edge gate -------------
@@ -470,16 +475,15 @@ def test_a_prop_with_no_price_is_dropped():
 
 
 def test_props_are_not_edge_gated():
-    """A prop with a tiny edge still survives -- there is no shrunk-edge gate
-    on props, only the price window and market gradeability."""
+    """A prop with a tiny edge still survives -- there is no edge gate
+    on props (and none on game picks any more either), only the price
+    window and market gradeability."""
     s = _session()
     d = date(2026, 11, 1)
     _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 0.1, -110, 0.51)], pick_type="prop")
     s.query(PickModel).filter_by(pick_value="P1-0").update({"prop_market": "player_pass_yds"})
     s.commit()
-    sections = select_digest(
-        s, d, ["nfl"], SEASONS,
-        send_bar=_bar(min_shrunk_edge_pp=50.0))  # would fail a game pick outright
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert [p.pick_value for p in sections[0].props] == ["P1-0"]
 
 
@@ -658,31 +662,26 @@ def test_suppression_fires_below_the_floor():
 
 def test_the_real_config_send_bar_passes_zero_game_picks_at_lambda_zero():
     """Loads config.yaml's actual digest.send_bar through backend.config's
-    real loader -- the same one backend/digest/job.py uses -- and proves the
-    frozen bar (lambda=0.00 for both measured sports) is closed: a slate
-    with a +20, a +5 and a -20 edge_pct must produce zero game picks, not
-    "everything, since 0.0 >= 0.0" (the bug this fix round closes)."""
+    real loader -- the same one backend/digest/job.py uses. Since the
+    shrunk-edge gate was removed 2026-09-30, lambda=0.00 (recorded, not
+    gating) no longer excludes anything: a slate with a +20, a +5 and a -20
+    edge_pct produces all three picks, ranked by raw edge descending."""
     real_send_bar = load_config(REAL_CONFIG_PATH)["digest"]["send_bar"]
     assert real_send_bar["blend_weight"].get("nfl") == 0.0
+    assert "min_shrunk_edge_pp" not in real_send_bar
 
     s = _session()
     d = date(2026, 11, 1)
     _mk_priced(s, "nfl", 1, 1, 2, d,
               [(3, 20.0, -110, 0.6), (3, 5.0, -110, 0.55), (3, -20.0, -110, 0.3)])
     sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=real_send_bar)
-    assert sections[0].picks == []
+    vals = [p.pick_value for p in sections[0].picks]
+    assert vals == ["P1-0", "P1-1", "P1-2"]
+    edges = [p.edge_pct for p in sections[0].picks]
+    assert edges == [20.0, 5.0, -20.0]
 
 
-def test_a_send_bar_missing_min_shrunk_edge_pp_raises():
-    s = _session()
-    d = date(2026, 11, 1)
-    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, -20.0, -110, 0.3)])
-    broken_bar = {k: v for k, v in OPEN_BAR.items() if k != "min_shrunk_edge_pp"}
-    with pytest.raises(ValueError, match="digest.send_bar.min_shrunk_edge_pp is required"):
-        select_digest(s, d, ["nfl"], SEASONS, send_bar=broken_bar)
-
-
-@pytest.mark.parametrize("key", ["min_shrunk_edge_pp", "min_odds", "max_odds",
+@pytest.mark.parametrize("key", ["min_odds", "max_odds",
                                  "max_game_picks", "max_props"])
 def test_each_required_send_bar_key_is_required(key):
     broken_bar = {k: v for k, v in OPEN_BAR.items() if k != key}

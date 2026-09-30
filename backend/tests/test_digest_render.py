@@ -161,7 +161,7 @@ def test_html_escapes_angle_bracket_in_pick_value():
     assert "&lt;1.5 Rebounds" in html
 
 
-def test_game_row_shows_model_and_price_not_edge():
+def test_game_row_shows_model_price_and_edge():
     section = DigestSection(
         sport="nfl",
         picks=[DigestPick(sport="nfl", matchup="Bills @ Chiefs", pick_value="HOME ML",
@@ -174,8 +174,46 @@ def test_game_row_shows_model_and_price_not_edge():
     assert "Price 58%" in html
     assert "Model 64%" in text
     assert "Price 58%" in text
-    assert "8.1" not in html
-    assert "8.1" not in text
+    assert "Edge +8.1 pts" in html
+    assert "Edge +8.1 pts" in text
+
+
+def test_game_row_edge_is_signed_with_one_decimal():
+    section = DigestSection(
+        sport="nfl",
+        picks=[DigestPick(sport="nfl", matchup="Bills @ Chiefs", pick_value="HOME ML",
+                          odds=-110, confidence=5, edge_pct=-6.25,
+                          rationale="")],
+        props=[],
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "Edge -6.2 pts" in html or "Edge -6.3 pts" in html
+    assert ("Edge -6.2 pts" in text) or ("Edge -6.3 pts" in text)
+
+
+def test_prop_row_has_no_edge_text_at_all():
+    """Props never show their own edge_pct -- it is a stat-unit gap, not a
+    probability difference (see render.py's props loop). The email-wide
+    footer legitimately contains the word "Edge" (the definition line), so
+    this checks for the prop's own formatted value, not the bare word."""
+    section = DigestSection(
+        sport="nba", picks=[],
+        props=[DigestPick(sport="nba", matchup="Lakers @ Celtics",
+                          pick_value="Tatum Over 27.5 Points", odds=-115,
+                          confidence=4, edge_pct=12.0, rationale="")],
+    )
+    _, html, text = render_digest([section], date(2026, 9, 20))
+    assert "Edge +12.0" not in html and "Edge +12.0" not in text
+    assert "12.0 pts" not in html and "12.0 pts" not in text
+
+
+def test_footer_carries_the_edge_definition_line():
+    _, html, text = render_digest([_section()], date(2026, 9, 20))
+    edge_line = ("Edge = model win % minus the market's no-vig win %, in "
+                "points. The model has not yet beaten the market; edges "
+                "are shown for your judgement, not as a signal.")
+    assert edge_line in html
+    assert edge_line in text
 
 
 def test_missing_probabilities_render_as_dash():
@@ -345,7 +383,7 @@ def test_empty_day_html_declares_utf8():
         diagnostics=DigestDiagnostics(games=0, generated=0, survived_price=0,
                                       lambda_used=0.0, lambda_measured=False),
     )
-    _, html, _ = render_empty_day_digest([section], date(2026, 9, 20), 3.0, -150, 150)
+    _, html, _ = render_empty_day_digest([section], date(2026, 9, 20), -150, 150)
     assert '<meta charset="utf-8">' in html
 
 
@@ -378,7 +416,7 @@ def test_empty_day_footer_has_no_model_price_definitions():
         diagnostics=DigestDiagnostics(games=0, generated=0, survived_price=0,
                                       lambda_used=0.0, lambda_measured=False),
     )
-    _, html, text = render_empty_day_digest([section], date(2026, 9, 20), 3.0, -150, 150)
+    _, html, text = render_empty_day_digest([section], date(2026, 9, 20), -150, 150)
     assert "Model output for research, not betting advice." in html
     assert "Model output for research, not betting advice." in text
     assert '"Model" is the' not in html and '"Model" is the' not in text
@@ -391,39 +429,33 @@ def test_reason_says_no_picks_generated_when_generated_is_zero():
         diagnostics=DigestDiagnostics(games=0, generated=0, survived_price=0,
                                       lambda_used=0.0, lambda_measured=False),
     )
-    assert empty_day_reason(section, 3.0, -150, 150) == "MLB: no picks generated today."
+    assert empty_day_reason(section, -150, 150) == "MLB: no picks generated today."
 
 
 def test_reason_says_none_priced_in_window_when_nothing_survived_price():
+    """The only other way a sport is empty now that the edge gate is gone:
+    picks were generated but none were priced in the window."""
     section = DigestSection(
         sport="nfl", picks=[], props=[],
         diagnostics=DigestDiagnostics(games=1, generated=9, survived_price=0,
                                       lambda_used=0.0, lambda_measured=True),
     )
-    assert empty_day_reason(section, 3.0, -150, 150) == (
+    assert empty_day_reason(section, -150, 150) == (
         "NFL: 9 picks generated, none priced between -150 and +150."
     )
 
 
-def test_reason_says_none_cleared_the_bar_when_some_survived_price():
-    section = DigestSection(
-        sport="nfl", picks=[], props=[],
-        diagnostics=DigestDiagnostics(games=1, generated=9, survived_price=9,
-                                      lambda_used=0.0, lambda_measured=True),
-    )
-    assert empty_day_reason(section, 3.0, -150, 150) == (
-        "NFL: 9 picks generated, none cleared the 3-point bar (model weight 0.00)."
-    )
-
-
-def test_reason_says_not_measured_for_a_sport_missing_from_blend_weight():
-    """M5: 0.00 reads as a measured result of zero. A sport absent from
-    blend_weight has not been measured at all, and must say so."""
+def test_reason_text_never_mentions_model_weight_or_a_bar():
+    """The shrunk-edge bar and its 'model weight' wording are gone -- a
+    sport that survived price is no longer 'empty' at all (every priced
+    pick is now shown), so there is no third reason that could mention
+    either."""
     section = DigestSection(
         sport="ncaaf", picks=[], props=[],
-        diagnostics=DigestDiagnostics(games=1, generated=5, survived_price=5,
+        diagnostics=DigestDiagnostics(games=1, generated=5, survived_price=0,
                                       lambda_used=0.0, lambda_measured=False),
     )
-    reason = empty_day_reason(section, 3.0, -150, 150)
-    assert "model weight not measured" in reason
+    reason = empty_day_reason(section, -150, 150)
+    assert "model weight" not in reason
+    assert "bar" not in reason
     assert "0.00" not in reason

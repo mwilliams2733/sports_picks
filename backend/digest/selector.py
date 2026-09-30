@@ -34,10 +34,6 @@ class DigestPick:
     #: The stored pick this was rendered from, so the send can be recorded
     #: (EmailedPick). None only for a DigestPick built outside the selector.
     pick_id: int | None = None
-    #: lambda[sport] * edge_pct. Only game picks are ranked by it; a prop's
-    #: DigestPick leaves this None -- props are not blended with the market
-    #: (see the note on prop ranking in select_digest).
-    shrunk_edge: float | None = None
 
 
 @dataclass(frozen=True)
@@ -52,11 +48,13 @@ class DigestDiagnostics:
     games: int              # games scheduled for this sport on target_date
     generated: int          # game picks after dedupe, before any filter
     survived_price: int     # of those, how many had a price inside the window
-    lambda_used: float      # blend_weight[sport], or 0.0 if missing
+    #: blend_weight[sport], or 0.0 if missing. Recorded for reference only
+    #: (see config.yaml's digest.send_bar.blend_weight comment) -- since
+    #: 2026-09-30 it no longer gates or ranks anything, and is not shown in
+    #: the empty-day reason text.
+    lambda_used: float
     #: True only when `sport` has its own entry in blend_weight. False means
-    #: lambda_used is a fallback 0.0, not a measurement -- the empty-day
-    #: email must say "not measured", never "0.00" (which reads as a
-    #: measured result of zero).
+    #: lambda_used is a fallback 0.0, not a measurement.
     lambda_measured: bool = True
 
 
@@ -179,16 +177,18 @@ def _recency(pick: PickModel) -> tuple:
     return (created.replace(tzinfo=None), pick.id or 0)
 
 
-#: These five must be present and numeric. A missing or non-numeric value
-#: used to default to 0.0 -- which, combined with lambda=0, made
+#: These four must be present and numeric. A missing or non-numeric value
+#: used to default to 0.0 -- which, combined with lambda=0, used to make
 #: `shrunk (0.0) >= min_shrunk_edge_pp (0.0)` true for EVERY priced pick,
-#: including a negative edge. The bar must fail CLOSED (raise) rather than
-#: fail open (silently admit everything) when it is misconfigured.
+#: including a negative edge. That gate is gone entirely (owner decision
+#: 2026-09-30, see docs/review-remediation.md) -- picks are now ranked and
+#: shown by raw edge, not admitted or rejected by it. The remaining keys
+#: still fail CLOSED (raise) rather than fail open when misconfigured.
 #: `blend_weight` is deliberately not in this list: a sport missing from it
 #: is a documented, intentional 0.0 (see select_digest's docstring), not a
-#: misconfiguration.
+#: misconfiguration, and it no longer gates anything either way.
 _REQUIRED_SEND_BAR_KEYS = (
-    "min_shrunk_edge_pp", "min_odds", "max_odds", "max_game_picks", "max_props",
+    "min_odds", "max_odds", "max_game_picks", "max_props",
 )
 
 
@@ -198,6 +198,14 @@ def _validate_send_bar(send_bar: dict | None) -> dict:
     Every key in `_REQUIRED_SEND_BAR_KEYS` must be present and a real number
     (not None, not a bool, not a string) -- config.yaml's `null` and a typo'd
     or removed key must both be loud failures, not a silent 0.0.
+
+    A leftover `min_shrunk_edge_pp` key (from a config that predates the
+    2026-09-30 removal of the shrunk-edge gate) is explicitly ignored, with
+    a WARNING, rather than silently honoured or treated as a hard error.
+    Raising here would turn an inert, no-longer-meaningful leftover key into
+    an outage of the whole digest job -- worse than the thing it would be
+    guarding against, since the key does nothing either way now. A WARNING
+    is loud enough that it will be noticed and the stale key cleaned up.
     """
     if not isinstance(send_bar, dict):
         raise ValueError("digest.send_bar is required")
@@ -207,6 +215,10 @@ def _validate_send_bar(send_bar: dict | None) -> dict:
         if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"digest.send_bar.{key} is required")
         validated[key] = value
+    if "min_shrunk_edge_pp" in send_bar:
+        logger.warning(
+            "digest.send_bar.min_shrunk_edge_pp is set but no longer used "
+            "(the shrunk-edge gate was removed 2026-09-30); ignoring it.")
     validated["blend_weight"] = send_bar.get("blend_weight") or {}
     return validated
 
@@ -237,39 +249,41 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
     """Return one DigestSection per in-season sport.
 
     A sport in season always gets a section, even one with no games that day
-    or no picks that clear the send bar -- ``diagnostics`` on each section is
-    how the empty-day email explains itself. (The one exception is trailing-
-    record suppression, below: a suppressed sport is left out entirely, same
-    as before this changed.)
+    or no picks priced inside the window -- ``diagnostics`` on each section
+    is how the empty-day email explains itself. (The one exception is
+    trailing-record suppression, below: a suppressed sport is left out
+    entirely, same as before this changed.)
 
-    Game picks must clear a frozen "send bar" (``send_bar`` -- see
-    config.yaml's digest.send_bar, frozen 2026-09-29):
+    Game picks must clear a "send bar" (``send_bar`` -- see config.yaml's
+    digest.send_bar):
 
     - a stored price (``odds_at_pick``) is required; a pick with none is
       dropped -- previously it was kept and shown at -110;
     - the price must fall in [min_odds, max_odds], inclusive at both ends;
-    - "shrunk edge" = blend_weight[sport] * edge_pct must be
-      >= min_shrunk_edge_pp. edge_pct is the stored PickModel.edge_pct
-      (model minus market, in percentage points -- de-vigged for moneyline,
+    - ranked by raw edge (``edge_pct``, the stored PickModel.edge_pct --
+      model minus market, in percentage points, de-vigged for moneyline,
       measured against 0.5 for spreads/totals; see
-      backend/analysis/variants/ensemble.py). A sport missing from
-      blend_weight counts as 0.0, which (with a positive min_shrunk_edge_pp)
-      means it never clears the bar.
-    - ranked by shrunk edge descending, ties broken by start time then id;
+      backend/analysis/variants/ensemble.py) descending, ties broken by
+      start time then id;
     - capped at max_game_picks.
+
+    There is no longer an edge gate (owner decision 2026-09-30, see
+    docs/review-remediation.md): every priced game pick is shown, with its
+    raw edge, up to the cap -- the reader judges the edge, not the selector.
+    ``blend_weight`` stays in config as the recorded market-shrinkage
+    measurement, but it no longer filters or ranks anything.
 
     Props are a separate, price-gated but not edge-gated list: only
     gradeable markets (present in MARKET_STAT_MAP) survive, the same price
     window applies, and they are sorted by start time then id (no ranking by
     edge -- a prop's edge_pct is price-blind and not comparable to a game
-    pick's de-vigged edge, the same reason props are never ranked against
-    game picks), capped at max_props.
+    pick's de-vigged edge; it is never shown for a prop, see render.py),
+    capped at max_props.
     """
     bar = _validate_send_bar(send_bar)
     blend_weight = bar["blend_weight"]
     min_odds = bar["min_odds"]
     max_odds = bar["max_odds"]
-    min_shrunk = bar["min_shrunk_edge_pp"]
     max_game_picks = bar["max_game_picks"]
     max_props = bar["max_props"]
 
@@ -320,15 +334,11 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
                  and min_odds <= p.odds_at_pick <= max_odds]
         survived_price = len(priced)
 
-        qualifying = []
-        for p in priced:
-            shrunk = lam * (p.edge_pct or 0.0)
-            if shrunk >= min_shrunk:
-                qualifying.append((shrunk, p))
+        # No edge gate: every priced game pick qualifies. Ranked by raw
+        # edge_pct descending, ties broken by start time then id.
+        priced.sort(key=lambda p: (-(p.edge_pct or 0.0), *_start_time_key(games_by_id, p)))
 
-        qualifying.sort(key=lambda item: (-item[0], *_start_time_key(games_by_id, item[1])))
-
-        def _make_pick(p: PickModel, shrunk: float) -> DigestPick:
+        def _make_pick(p: PickModel) -> DigestPick:
             game = games_by_id[p.game_id]
             away_name, home_name = _team_names(session, game)
             return DigestPick(
@@ -344,10 +354,9 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
                 home_team=home_name,
                 away_team=away_name,
                 pick_id=p.id,
-                shrunk_edge=round(shrunk, 2),
             )
 
-        digest_picks = [_make_pick(p, shrunk) for shrunk, p in qualifying[:max_game_picks]]
+        digest_picks = [_make_pick(p) for p in priced[:max_game_picks]]
 
         # Props: gradeable markets only, same price window, no edge gate.
         props = (

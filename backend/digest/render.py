@@ -27,6 +27,15 @@ def _pct(p: float | None) -> str:
     return "—" if p is None else f"{round(p * 100)}%"
 
 
+def _fmt_edge(edge_pct: float) -> str:
+    """A game pick's raw edge, signed, one decimal: "+6.2" or "-3.0".
+
+    Shown only for game picks -- see the note on prop edge in the props
+    loop below for why a prop's edge_pct must never be rendered this way.
+    """
+    return f"+{edge_pct:.1f}" if edge_pct >= 0 else f"{edge_pct:.1f}"
+
+
 def _fmt_odds(odds: int) -> str:
     """American odds with an explicit sign on a positive price.
 
@@ -158,12 +167,14 @@ def render_digest(sections: list[DigestSection], target_date: date):
                 f'{_escape(_selection_label(p))} <span style="font-weight:400;color:#6b7280;">({_fmt_odds(p.odds)})</span></div>'
                 f'<div style="{_FONT}font-size:13px;color:#374151;padding-top:2px;">'
                 f'{_escape(p.matchup)} &nbsp;·&nbsp; '
-                f'Model {_pct(p.model_prob)} &nbsp;·&nbsp; Price {_pct(p.price_prob)}</div>'
+                f'Model {_pct(p.model_prob)} &nbsp;·&nbsp; Price {_pct(p.price_prob)} '
+                f'&nbsp;·&nbsp; Edge {_fmt_edge(p.edge_pct)} pts</div>'
                 f'{rationale_html}</td></tr>'
             )
             text_lines.append(
                 f"  {_selection_label(p)} ({_fmt_odds(p.odds)}) — {p.matchup} — "
-                f"Model {_pct(p.model_prob)} / Price {_pct(p.price_prob)}"
+                f"Model {_pct(p.model_prob)} / Price {_pct(p.price_prob)} / "
+                f"Edge {_fmt_edge(p.edge_pct)} pts"
             )
             if p.rationale:
                 text_lines.append(f"      {p.rationale}")
@@ -208,6 +219,8 @@ def render_digest(sections: list[DigestSection], target_date: date):
         f'Model output for research, not betting advice. "Model" is the '
         f'model\'s win probability; "Price" is what the quoted price implies.'
         f'</td></tr>'
+        f'<tr><td style="{_FONT}font-size:11px;color:#9ca3af;padding-top:6px;">'
+        f'{_EDGE_FOOTER_TEXT}</td></tr>'
         f'</table></td></tr></table></body></html>'
     )
 
@@ -215,11 +228,22 @@ def render_digest(sections: list[DigestSection], target_date: date):
         'Model output for research, not betting advice. "Model" is the '
         'model\'s win probability; "Price" is what the quoted price implies.'
     )
+    text_lines.append(_EDGE_FOOTER_TEXT)
     return subject, html, "\n".join(text_lines)
 
 
 _FOOTER_TEXT = ('Model output for research, not betting advice. "Model" is the '
                'model\'s win probability; "Price" is what the quoted price implies.')
+
+#: Added 2026-09-30 when the 3-point shrunk-edge send bar was lifted (owner
+#: decision -- see docs/review-remediation.md): every game pick's raw edge
+#: is now shown, and this line is the reader's only guardrail against
+#: mistaking "shown" for "validated".
+_EDGE_FOOTER_TEXT = (
+    "Edge = model win % minus the market's no-vig win %, in points. The "
+    "model has not yet beaten the market; edges are shown for your "
+    "judgement, not as a signal."
+)
 
 #: The empty-day email shows no "Model"/"Price" figures at all -- unlike
 #: the normal digest's footer, defining those terms here would refer to
@@ -227,33 +251,30 @@ _FOOTER_TEXT = ('Model output for research, not betting advice. "Model" is the '
 _EMPTY_DAY_FOOTER_TEXT = 'Model output for research, not betting advice.'
 
 
-def empty_day_reason(section: DigestSection, min_shrunk_edge_pp: float,
-                     min_odds: int, max_odds: int) -> str:
+def empty_day_reason(section: DigestSection, min_odds: int, max_odds: int) -> str:
     """One line explaining why this sport contributed nothing today.
 
     Shared between the empty-day email body and the job's INFO log, so the
-    two can never say something different about the same sport. Three
-    distinct reasons, not two -- "no picks at all", "priced picks existed
-    but none were in the price window", and "some were in the window but
-    none cleared the edge bar" point at different places to look.
+    two can never say something different about the same sport.
+
+    Since the 3-point shrunk-edge gate was removed (owner decision
+    2026-09-30, see docs/review-remediation.md), every priced game pick is
+    shown -- there is no longer a way for picks to survive the price window
+    and still be empty. Two reasons, not three: "no picks generated today"
+    and "picks generated, none priced in the window".
     """
     d = section.diagnostics
     label = _label(section.sport)
     if d is None or d.generated == 0:
         return f"{label}: no picks generated today."
-    if d.survived_price == 0:
-        return (f"{label}: {d.generated} pick{'' if d.generated == 1 else 's'} generated, "
-               f"none priced between {_fmt_odds(min_odds)} and {_fmt_odds(max_odds)}.")
-    bar = f"{min_shrunk_edge_pp:g}"
-    weight = ("not measured" if not d.lambda_measured
-             else f"{d.lambda_used:.2f}")
     return (f"{label}: {d.generated} pick{'' if d.generated == 1 else 's'} generated, "
-           f"none cleared the {bar}-point bar (model weight {weight}).")
+           f"none priced between {_fmt_odds(min_odds)} and {_fmt_odds(max_odds)}.")
 
 
 def render_empty_day_digest(sections: list[DigestSection], target_date: date,
-                            min_shrunk_edge_pp: float, min_odds: int, max_odds: int):
-    """Return (subject, html, text) for a day where nothing cleared the send bar.
+                            min_odds: int, max_odds: int):
+    """Return (subject, html, text) for a day where nothing was priced or
+    generated, for any in-season sport.
 
     ``sections`` is the full diagnostics list from ``select_digest`` -- every
     in-season sport, including ones with zero games that day. The caller is
@@ -264,7 +285,7 @@ def render_empty_day_digest(sections: list[DigestSection], target_date: date,
     pretty = target_date.strftime("%a %b %d").replace(" 0", " ")
     subject = f"No qualifying picks — {pretty}"
 
-    reasons = [empty_day_reason(s, min_shrunk_edge_pp, min_odds, max_odds) for s in sections]
+    reasons = [empty_day_reason(s, min_odds, max_odds) for s in sections]
 
     text_lines = [f"NO QUALIFYING PICKS — {pretty}", ""] + reasons + ["", _EMPTY_DAY_FOOTER_TEXT]
     text = "\n".join(text_lines)

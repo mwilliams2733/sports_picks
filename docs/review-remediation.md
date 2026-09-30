@@ -96,3 +96,34 @@ rendering is suppressed. This includes the Track Record confidence
 breakdown table, the Player Props and Today's Picks confidence columns and
 the Player Props minimum-confidence filter, and the FAQ's confidence-star
 explainer.
+
+## 2026-09-30 — 3-point shrunk-edge bar lifted; raw edge shown
+
+The owner lifted the 3-point shrunk-edge bar to see raw edges and judge for
+themselves; picks remain tracked in full for analysis. The brief's non-goal
+on raw edges is knowingly set aside by the owner.
+
+`min_shrunk_edge_pp` is removed from `config.yaml`'s `digest.send_bar` and
+from the selector's required keys. `blend_weight` stays in config as the
+recorded 2026-09-29 market-shrinkage measurement (see the section above),
+but it no longer filters or ranks picks -- every priced game pick (price in
+[min_odds, max_odds], same as before) is now emailed, ranked by raw
+`edge_pct` descending, up to `max_game_picks`. The email shows each game
+pick's edge (e.g. "Edge +6.2 pts") and a footer line explaining what it
+means and that it is not a validated signal. Props still show no edge --
+prop `edge_pct` is a stat-unit gap, not a probability difference, and
+remains not comparable to a game pick's edge (see the "known traps" section
+of `docs/data-dictionary.md`).
+
+A leftover `min_shrunk_edge_pp` key in `send_bar` is ignored with a WARNING
+log rather than raising, since the key is now inert either way and raising
+would turn a harmless leftover into a full digest outage.
+
+**Pick export, for offline analysis.** `python -m backend.scripts.export_picks
+--db <path> --out <dir> [--since YYYY-MM-DD] [--sport nfl ...]` writes a
+read-only, complete CSV export of every stored pick (`picks.csv`), the
+append-only price history (`line_history.csv`), and a manifest, for a data
+scientist working outside this repo. Paper bets and user data are excluded.
+See `docs/data-dictionary.md` for column definitions, grading and CLV
+conventions, and known traps in this data (repo has no root README; this
+file is the closest thing to a docs index, hence the pointer here).

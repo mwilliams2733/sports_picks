@@ -34,13 +34,17 @@ digest:
   # Owner's enabled sports (2026-09-28): NFL, MLB, UFC ("mma" is the UFC key).
   # Around NBA opening night (2026-10-20) the plan is to swap mlb for nba.
   sports: ["nfl", "mlb", "mma"]
-  send_bar:            # frozen 2026-09-29 (owner decision 2026-09-28); change only with a dated note
-    min_shrunk_edge_pp: 3.0
+  send_bar:            # price window + caps only; change only with a dated note in docs/review-remediation.md
     min_odds: -150
     max_odds: 150
     max_game_picks: 3
     max_props: 5
-    blend_weight:      # lambda per sport, measured 2026-09-29 by backend.analysis.market_shrinkage (NFL 1,184 games, MLB 127; in-sample best 0.00 both)
+    # lambda per sport, measured 2026-09-29 by backend.analysis.market_shrinkage
+    # (NFL 1,184 games, MLB 127; in-sample best 0.00 both). Recorded as a
+    # measurement only -- since 2026-09-30 (owner decision; the 3-point
+    # shrunk-edge gate was lifted) this no longer gates or ranks anything.
+    # Game picks are ranked and shown by raw edge_pct instead.
+    blend_weight:
       nfl: 0.00
       mlb: 0.00
   # Optional. When set (e.g. 0.50), a sport whose trailing 30-day record is
