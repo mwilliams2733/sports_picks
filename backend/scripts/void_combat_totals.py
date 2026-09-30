@@ -67,10 +67,13 @@ def run_on_session(session, *, apply: bool = False) -> dict:
             continue
         summary["regraded"] += 1
         summary["by_result"][result.result] = summary["by_result"].get(result.result, 0) + 1
-        if result.result == "win":
+        # payout_for (grader.py) already signs a loss's payout at -1.0 (and
+        # a win's at the real calculated payout), so summing the STORED
+        # value handles both -- unlike assuming every loss cost exactly
+        # -1.0, which is wrong for any row whose payout was reconstructed
+        # or otherwise does not match that default.
+        if result.result in ("win", "loss"):
             summary["units_removed"] += result.payout or 0.0
-        elif result.result == "loss":
-            summary["units_removed"] -= 1.0
         if apply:
             result.result = VOID_RESULT
             result.payout = VOID_PAYOUT
