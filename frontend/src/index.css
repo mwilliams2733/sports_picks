@@ -1766,3 +1766,68 @@ button, a, .tab, .nav-link, .bottom-nav-tab, .leaderboard-entry {
 
 .spend-confirm { display: inline-flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
 .spend-confirm-text { font-size: 0.8rem; color: var(--text-muted); }
+
+/* Plan 027: server-priced bet sides */
+.quote-sides {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.quote-side {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: var(--transition);
+}
+.quote-side:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.quote-side.selected {
+  border-color: var(--accent);
+  background: var(--bg-active);
+}
+.quote-side:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.quote-reason {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+.quote-age {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.prop-quote-list {
+  max-height: 320px;
+  overflow-y: auto;
+  margin-top: 0.5rem;
+}
+.prop-quote-row {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.prop-quote-row .quote-sides {
+  margin-top: 0.35rem;
+}
+.no-pin-badge {
+  margin-left: 0.5rem;
+}
+.set-pin {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+.set-pin .input {
+  width: 7rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}

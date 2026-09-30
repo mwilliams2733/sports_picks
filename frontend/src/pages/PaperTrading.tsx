@@ -6,10 +6,14 @@ import { useRankings } from '../hooks/useRankings';
 import { usePaperTradingData, useUserDetail } from '../hooks/usePaperTrading';
 import { useUserStore } from '../stores/userStore';
 import { useFeedStore } from '../stores/feedStore';
-import type { PropData, UserProfile } from '../types';
+import type { AvailableGameQuote, AvailablePropQuote, BetLeg, GamePickType, UserProfile } from '../types';
 import { useToast } from '../hooks/useToast';
 import { getPin, setPin } from '../lib/secrets';
 import LeaderboardBar from '../components/LeaderboardBar';
+import QuotePicker from '../components/QuotePicker';
+import PropQuotePicker from '../components/PropQuotePicker';
+import { useGameQuotes, usePropQuotes } from '../hooks/useQuotes';
+import { addOrReplaceLeg, ageLabel, formatOdds, legFromQuote, parlayEstimate, priceMoveNote } from '../lib/quotes';
 
 export default function PaperTrading() {
   const queryClient = useQueryClient();
@@ -17,10 +21,9 @@ export default function PaperTrading() {
   const { data: rankings = [] } = useRankings();
   const { selectedUser, setSelectedUser } = useUserStore();
   const { events: wsEvents } = useFeedStore();
-  const { games: gamesQuery, props: propsQuery, feed: feedQuery } = usePaperTradingData();
+  const { games: gamesQuery, feed: feedQuery } = usePaperTradingData();
   const { picks: userPicksQuery, stats: userStatsQuery } = useUserDetail(selectedUser?.id);
   const games = gamesQuery.data ?? [];
-  const props = propsQuery.data ?? [];
   const initialFeedEvents = feedQuery.data ?? [];
   const userPicks = userPicksQuery.data ?? [];
   const userStats = userStatsQuery.data ?? null;
@@ -39,22 +42,24 @@ export default function PaperTrading() {
     setBetPin(selectedUser ? getPin(selectedUser.id) ?? '' : '');
   }
 
-  // Place pick form state
-  const [selectedGame, setSelectedGame] = useState<number | ''>('');
-  const [pickType, setPickType] = useState('moneyline');
-  const [pickValue, setPickValue] = useState('');
-  const [pickOdds, setPickOdds] = useState(-110);
+  // Place pick form state. The price is never typed: the player picks a side
+  // the server has quoted, and the server prices it again on placement.
+  const [selectedGame, setSelectedGame] = useState<number | null>(null);
+  const [pickType, setPickType] = useState<GamePickType | 'prop'>('moneyline');
+  const [chosen, setChosen] = useState<AvailableGameQuote | AvailablePropQuote | null>(null);
   const [stake, setStake] = useState(100);
+  const gameQuotes = useGameQuotes(selectedGame);
+  const propQuotes = usePropQuotes(pickType === 'prop' ? selectedGame : null);
+  const game = games.find(g => g.id === selectedGame);
+  const newestQuote = (gameQuotes.data?.quotes ?? [])
+    .flatMap(q => (q.available ? [q.quoted_at] : []))
+    .sort()
+    .pop();
 
   // Parlay builder state
-  type ParlayLeg = { game_id: number; pick_type: string; pick_value: string; odds: number; label: string; sport: string; prop_market?: string; prop_player?: string };
+  type ParlayLeg = { leg: BetLeg; label: string; sport: string; odds: number };
   const [parlayLegs, setParlayLegs] = useState<ParlayLeg[]>([]);
   const [parlayStake, setParlayStake] = useState(100);
-  const [, setParlayResult] = useState<{ combined_odds: number; potential_payout: number; result: string | null; payout: number | null } | null>(null);
-
-  // Prop-specific state
-  const [selectedPropId, setSelectedPropId] = useState<number | ''>('');
-  const [propSearch, setPropSearch] = useState('');
 
   // Selecting a user is now only that. Their picks and stats are queries
   // keyed on the id, so they load, cache and refresh themselves.
@@ -80,197 +85,72 @@ export default function PaperTrading() {
     }
   };
 
-  const handlePlacePick = async () => {
-    if (!selectedUser) return;
+  const forgetPinOn401 = (e: unknown) => {
+    if (e instanceof ApiError && e.status === 401 && selectedUser) {
+      setPin(selectedUser.id, null);
+      setBetPin('');
+    }
+  };
 
-    if (pickType === 'prop') {
-      // Prop pick — use selected prop
-      const prop = props.find(p => p.id === selectedPropId);
-      if (!prop || !prop.line) return;
-      try {
-        const propPickValue = `${prop.player_name} ${prop.outcome} ${prop.line} ${prop.market_label}`;
-        const result = await api.users.placePick(selectedUser.id, {
-          game_id: prop.game_id,
-          pick_type: 'prop',
-          pick_value: propPickValue,
-          odds: prop.odds,
-          stake: stake,
-          prop_market: prop.market,
-          prop_player: prop.player_name,
-        }, betPin);
-        setPin(selectedUser.id, betPin);
-        toast(`Pick placed! Balance: $${result.new_balance.toLocaleString()}`, 'success');
-        queryClient.invalidateQueries({ queryKey: ['users'] });
-        setSelectedPropId('');
-        setPropSearch('');
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 401) {
-          setPin(selectedUser.id, null);
-          setBetPin('');
-        }
-        toast(getErrorMessage(e), 'error');
-      }
-    } else {
-      // Game pick (moneyline, spread, over/under)
-      if (!selectedGame || !pickValue.trim()) return;
-      try {
-        const result = await api.users.placePick(selectedUser.id, {
-          game_id: selectedGame as number,
-          pick_type: pickType,
-          pick_value: pickValue,
-          odds: pickOdds,
-          stake: stake,
-        }, betPin);
-        setPin(selectedUser.id, betPin);
-        toast(`Pick placed! Balance: $${result.new_balance.toLocaleString()}`, 'success');
-        queryClient.invalidateQueries({ queryKey: ['users'] });
-        setPickValue('');
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 401) {
-          setPin(selectedUser.id, null);
-          setBetPin('');
-        }
-        toast(getErrorMessage(e), 'error');
-      }
+  const handlePlacePick = async () => {
+    if (!selectedUser || selectedGame === null || !chosen) return;
+    try {
+      const res = await api.users.placePick(selectedUser.id,
+        { ...legFromQuote(selectedGame, chosen), stake }, betPin);
+      setPin(selectedUser.id, betPin);
+      toast(`${priceMoveNote(chosen.pick_value, chosen.odds, res.pick_value, res.odds)}. `
+        + `Balance: $${res.new_balance.toLocaleString()}`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setChosen(null);
+    } catch (e) {
+      forgetPinOn401(e);
+      toast(getErrorMessage(e), 'error');
     }
   };
 
   const addParlayLeg = () => {
-    if (pickType === 'prop') {
-      const prop = props.find(p => p.id === selectedPropId);
-      if (!prop) return;
-      const game = games.find(g => g.id === prop.game_id);
-      setParlayLegs(prev => [...prev, {
-        game_id: prop.game_id,
-        pick_type: 'prop',
-        pick_value: `${prop.player_name} ${prop.outcome} ${prop.line} ${prop.market_label}`,
-        odds: prop.odds,
-        label: `${prop.player_name} ${prop.outcome} ${prop.line}`,
-        sport: game?.sport ?? '',
-        prop_market: prop.market,
-        prop_player: prop.player_name,
-      }]);
-      setSelectedPropId('');
-      setPropSearch('');
-    } else {
-      if (!selectedGame || !pickValue.trim()) return;
-      const game = games.find(g => g.id === selectedGame);
-      setParlayLegs(prev => [...prev, {
-        game_id: selectedGame as number,
-        pick_type: pickType,
-        pick_value: pickValue,
-        odds: pickOdds,
-        label: `${game ? `${game.away_team}@${game.home_team}` : ''} ${pickValue}`,
-        sport: game?.sport ?? '',
-      }]);
-      setPickValue('');
-    }
+    if (selectedGame === null || !chosen) return;
+    const matchup = game ? `${game.away_team}@${game.home_team} ` : '';
+    const newLeg: ParlayLeg = {
+      leg: legFromQuote(selectedGame, chosen),
+      label: `${matchup}${chosen.pick_value}`,
+      sport: game?.sport ?? '',
+      odds: chosen.odds,
+    };
+    setParlayLegs(prev => addOrReplaceLeg(prev, newLeg));
+    setChosen(null);
   };
 
   const removeParlayLeg = (index: number) => {
     setParlayLegs(prev => prev.filter((_, i) => i !== index));
   };
 
-  const parlayDecimalOdds = parlayLegs.reduce((acc, leg) => {
-    const dec = leg.odds < 0 ? 1 + (100 / Math.abs(leg.odds)) : 1 + (leg.odds / 100);
-    return acc * dec;
-  }, 1);
-
-  const parlayAmericanOdds = parlayDecimalOdds >= 2
-    ? `+${Math.round((parlayDecimalOdds - 1) * 100)}`
-    : `${Math.round(-100 / (parlayDecimalOdds - 1))}`;
+  const estimate = parlayEstimate(parlayLegs.map(l => l.odds));
 
   const handlePlaceParlay = async () => {
     if (!selectedUser || parlayLegs.length < 2) return;
     try {
       const res = await api.users.placeParlay(selectedUser.id, {
-        legs: parlayLegs.map(l => ({
-          game_id: l.game_id, pick_type: l.pick_type, pick_value: l.pick_value,
-          odds: l.odds, prop_market: l.prop_market, prop_player: l.prop_player,
-        })),
-        stake: parlayStake,
-      }, betPin);
-      setParlayResult(res);
+        legs: parlayLegs.map(l => l.leg), stake: parlayStake }, betPin);
       setPin(selectedUser.id, betPin);
-      toast(`${parlayLegs.length}-leg parlay placed! Potential: $${res.potential_payout.toLocaleString()}`, 'success');
+      toast(`${parlayLegs.length}-leg parlay placed at ${formatOdds(res.combined_odds)}. `
+        + `Potential: $${res.potential_payout.toLocaleString()}`, 'success');
       queryClient.invalidateQueries({ queryKey: ['users'] });
       setParlayLegs([]);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) {
-        setPin(selectedUser.id, null);
-        setBetPin('');
-      }
+      forgetPinOn401(e);
       toast(getErrorMessage(e), 'error');
     }
   };
 
-  // Auto-fill odds when game + pick type changes
-  const handleGameSelect = (gameId: number) => {
+  const handleGameSelect = (gameId: number | null) => {
     setSelectedGame(gameId);
-    const game = games.find(g => g.id === gameId);
-    if (game) {
-      if (pickType === 'moneyline') {
-        setPickValue('HOME ML');
-        setPickOdds(game.moneyline_home ?? -110);
-      } else if (pickType === 'spread') {
-        setPickValue(`HOME ${game.spread_home ?? -3.5}`);
-        setPickOdds(-110);
-      } else if (pickType === 'over_under') {
-        setPickValue(`Over ${game.over_under ?? 220}`);
-        setPickOdds(-110);
-      }
-    }
+    setChosen(null);
   };
 
-  const handlePickTypeChange = (type: string) => {
+  const handlePickTypeChange = (type: GamePickType | 'prop') => {
     setPickType(type);
-    if (type === 'prop') {
-      setSelectedGame('');
-      setPickValue('');
-    } else if (selectedGame) {
-      // Re-trigger auto-fill for game picks
-      const game = games.find(g => g.id === selectedGame);
-      if (game) {
-        if (type === 'moneyline') {
-          setPickValue('HOME ML');
-          setPickOdds(game.moneyline_home ?? -110);
-        } else if (type === 'spread') {
-          setPickValue(`HOME ${game.spread_home ?? -3.5}`);
-          setPickOdds(-110);
-        } else if (type === 'over_under') {
-          setPickValue(`Over ${game.over_under ?? 220}`);
-          setPickOdds(-110);
-        }
-      }
-    }
-  };
-
-  // Deduplicate props by player+market (group Over/Under into one entry)
-  const uniqueProps = props.reduce<PropData[]>((acc, p) => {
-    const key = `${p.player_name}-${p.market}`;
-    if (!acc.find(x => `${x.player_name}-${x.market}` === key)) {
-      acc.push(p);
-    }
-    return acc;
-  }, []);
-
-  // Filter props by search term
-  const filteredProps = propSearch.trim()
-    ? uniqueProps.filter(p =>
-        p.player_name.toLowerCase().includes(propSearch.toLowerCase()) ||
-        p.market_label.toLowerCase().includes(propSearch.toLowerCase()) ||
-        p.matchup.toLowerCase().includes(propSearch.toLowerCase())
-      )
-    : uniqueProps;
-
-  // Get Over/Under options for a selected player+market
-  const getSelectedPropOptions = () => {
-    if (!selectedPropId) return [];
-    const selected = props.find(p => p.id === selectedPropId);
-    if (!selected) return [];
-    return props.filter(p =>
-      p.player_name === selected.player_name && p.market === selected.market
-    );
+    setChosen(null);
   };
 
   const formatMoney = (n: number) => {
@@ -297,9 +177,6 @@ export default function PaperTrading() {
   ];
 
   if (usersLoading) return <div className="loading"><div className="spinner" /> Loading...</div>;
-
-  const selectedProp = props.find(p => p.id === selectedPropId);
-  const propOptions = getSelectedPropOptions();
 
   return (
     <div>
@@ -431,8 +308,23 @@ export default function PaperTrading() {
           <div className="card" style={{ marginBottom: '1rem' }}>
             <div className="input-label" style={{ marginBottom: '0.5rem' }}>Place a Pick</div>
 
-            {/* Pick Type Selector */}
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'end', marginBottom: '0.75rem' }}>
+              <div style={{ flex: 2, minWidth: '180px' }}>
+                <div className="input-label">Game</div>
+                <select className="input" value={selectedGame ?? ''}
+                  onChange={e => handleGameSelect(e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">Select game...</option>
+                  {games.map(g => (
+                    <option key={g.id} value={g.id}>
+                      {g.away_team} @ {g.home_team} ({g.sport.toUpperCase()})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {newestQuote && <span className="quote-age">{ageLabel(newestQuote)}</span>}
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
               {(['moneyline', 'spread', 'over_under', 'prop'] as const).map(t => (
                 <button
                   key={t}
@@ -440,144 +332,36 @@ export default function PaperTrading() {
                   onClick={() => handlePickTypeChange(t)}
                   style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
                 >
-                  {t === 'over_under' ? 'Over/Under' : t === 'prop' ? 'Player Prop' : t.charAt(0).toUpperCase() + t.slice(1)}
+                  {t === 'over_under' ? 'Total' : t === 'prop' ? 'Prop' : t.charAt(0).toUpperCase() + t.slice(1)}
                 </button>
               ))}
             </div>
 
-            {pickType === 'prop' ? (
-              /* Prop Pick Form */
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'end' }}>
-                <div style={{ flex: 3, minWidth: '250px' }}>
-                  <div className="input-label">Search Player Props</div>
-                  <input
-                    className="input"
-                    value={propSearch}
-                    onChange={e => { setPropSearch(e.target.value); setSelectedPropId(''); }}
-                    placeholder="Search by player, market, or matchup..."
-                  />
-                  {propSearch.trim() && filteredProps.length > 0 && !selectedPropId && (
-                    <div style={{
-                      border: '1px solid var(--border)',
-                      borderRadius: '0.375rem',
-                      maxHeight: '200px',
-                      overflowY: 'auto',
-                      marginTop: '0.25rem',
-                      background: 'var(--card-bg)',
-                    }}>
-                      {filteredProps.slice(0, 20).map(p => (
-                        <div
-                          key={`${p.player_name}-${p.market}-${p.outcome}`}
-                          onClick={() => {
-                            setSelectedPropId(p.id);
-                            setPropSearch(`${p.player_name} - ${p.market_label}`);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              setSelectedPropId(p.id);
-                              setPropSearch(`${p.player_name} - ${p.market_label}`);
-                            }
-                          }}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`${p.player_name} ${p.market_label}`}
-                          style={{
-                            padding: '0.5rem 0.75rem',
-                            cursor: 'pointer',
-                            borderBottom: '1px solid var(--border)',
-                            fontSize: '0.85rem',
-                          }}
-                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--card-hover)')}
-                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                        >
-                          <span className="font-medium">{p.player_name}</span>
-                          <span className="text-muted"> - {p.market_label}</span>
-                          <span className="text-muted" style={{ fontSize: '0.75rem' }}> ({p.matchup})</span>
-                          {p.line != null && (
-                            <span className="mono" style={{ marginLeft: '0.5rem' }}>
-                              {p.outcome} {p.line} ({p.odds > 0 ? '+' : ''}{p.odds})
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Show Over/Under toggle when a prop is selected */}
-                {selectedProp && propOptions.length > 1 && (
-                  <div style={{ minWidth: '140px' }}>
-                    <div className="input-label">Side</div>
-                    <select
-                      className="input"
-                      value={selectedPropId}
-                      onChange={e => setSelectedPropId(Number(e.target.value))}
-                    >
-                      {propOptions.map(p => (
-                        <option key={p.id} value={p.id}>
-                          {p.outcome} {p.line} ({p.odds > 0 ? '+' : ''}{p.odds})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {selectedProp && (
-                  <div style={{ minWidth: '120px' }}>
-                    <div className="input-label">Stake ($)</div>
-                    <input className="input" type="number" value={stake} onChange={e => setStake(Number(e.target.value))} min={1} />
-                  </div>
-                )}
-
-                {selectedProp && (
-                  <div style={{ minWidth: '120px' }}>
-                    <div className="input-label">PIN</div>
-                    <input
-                      aria-label="PIN"
-                      className="input"
-                      type="password"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      maxLength={6}
-                      placeholder={'PIN (4–6 digits)'}
-                      value={betPin}
-                      onChange={e => setBetPin(e.target.value)}
-                    />
-                  </div>
-                )}
-
-                {selectedProp && (
-                  <button className="btn btn-primary" onClick={handlePlacePick} style={{ alignSelf: 'end' }}>
-                    Place Prop
-                  </button>
-                )}
-              </div>
+            {selectedGame === null ? (
+              <div className="text-muted">Choose a game to see its prices.</div>
+            ) : pickType === 'prop' ? (
+              <PropQuotePicker
+                quotes={propQuotes.data?.quotes ?? []}
+                selected={chosen && !('side' in chosen) ? chosen : null}
+                onSelect={setChosen}
+              />
             ) : (
-              /* Game Pick Form */
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'end' }}>
-                <div style={{ flex: 2, minWidth: '180px' }}>
-                  <div className="input-label">Game</div>
-                  <select className="input" value={selectedGame} onChange={e => handleGameSelect(Number(e.target.value))}>
-                    <option value="">Select game...</option>
-                    {games.map(g => (
-                      <option key={g.id} value={g.id}>
-                        {g.away_team} @ {g.home_team} ({g.sport.toUpperCase()})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div style={{ flex: 1, minWidth: '140px' }}>
-                  <div className="input-label">Pick</div>
-                  <input className="input" value={pickValue} onChange={e => setPickValue(e.target.value)} placeholder="HOME ML" />
-                </div>
-                <div style={{ minWidth: '90px' }}>
-                  <div className="input-label">Odds</div>
-                  <input className="input" type="number" value={pickOdds} onChange={e => setPickOdds(Number(e.target.value))} />
-                </div>
+              <QuotePicker
+                quotes={gameQuotes.data?.quotes ?? []}
+                pickType={pickType}
+                homeName={game?.home_team ?? 'Home'}
+                awayName={game?.away_team ?? 'Away'}
+                selected={chosen && 'side' in chosen ? chosen.side : null}
+                onSelect={setChosen}
+              />
+            )}
+
+            {chosen && (
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'end', marginTop: '0.75rem' }}>
                 <div style={{ minWidth: '120px' }}>
                   <div className="input-label">Stake ($)</div>
-                  <input className="input" type="number" value={stake} onChange={e => setStake(Number(e.target.value))} min={1} />
+                  <input className="input" type="number" value={stake}
+                    onChange={e => setStake(Number(e.target.value))} min={1} />
                 </div>
                 <div style={{ minWidth: '120px' }}>
                   <div className="input-label">PIN</div>
@@ -593,30 +377,9 @@ export default function PaperTrading() {
                     onChange={e => setBetPin(e.target.value)}
                   />
                 </div>
-                <button className="btn btn-primary" onClick={handlePlacePick} style={{ alignSelf: 'end' }}>
-                  Place Pick
+                <button className="btn btn-primary" onClick={handlePlacePick}>
+                  Place {chosen.pick_value} {formatOdds(chosen.odds)}
                 </button>
-              </div>
-            )}
-
-            {/* Selected prop summary */}
-            {pickType === 'prop' && selectedProp && (
-              <div style={{ marginTop: '0.75rem', padding: '0.5rem 0.75rem', background: 'var(--card-hover)', borderRadius: '0.375rem', fontSize: '0.85rem' }}>
-                <span className="font-medium">{selectedProp.player_name}</span>
-                {' '}<span className="badge badge-default">{selectedProp.market_label}</span>
-                {' '}<span className="mono">{selectedProp.outcome} {selectedProp.line}</span>
-                {' '}<span className="mono" style={{ color: selectedProp.odds > 0 ? 'var(--green)' : undefined }}>
-                  ({selectedProp.odds > 0 ? '+' : ''}{selectedProp.odds})
-                </span>
-                {' '}<span className="text-muted">| {selectedProp.matchup}</span>
-                {selectedProp.projection != null && (
-                  <span className="text-muted"> | Proj: {selectedProp.projection}</span>
-                )}
-                {selectedProp.edge_pct != null && (
-                  <span style={{ color: selectedProp.edge_pct > 0 ? 'var(--green)' : 'var(--red)' }}>
-                    {' '}| Edge: {selectedProp.edge_pct > 0 ? '+' : ''}{selectedProp.edge_pct.toFixed(1)}%
-                  </span>
-                )}
               </div>
             )}
           </div>
@@ -633,27 +396,27 @@ export default function PaperTrading() {
             {/* Add leg button in the existing pick form */}
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
               <button className="btn btn-primary" onClick={addParlayLeg}
-                disabled={pickType === 'prop' ? !selectedPropId : (!selectedGame || !pickValue.trim())}
+                disabled={!chosen}
                 style={{ fontSize: '0.8rem' }}>
                 + Add Leg
               </button>
               <span className="text-muted" style={{ alignSelf: 'center', fontSize: '0.8rem' }}>
-                Select a game/prop above, then click "Add Leg" to build your parlay
+                Pick a side above, then "Add Leg" to build your parlay
               </span>
             </div>
 
             {/* Parlay legs list */}
             {parlayLegs.length > 0 && (
               <div style={{ marginBottom: '0.75rem' }}>
-                {parlayLegs.map((leg, i) => (
+                {parlayLegs.map((pl, i) => (
                   <div key={i} style={{
                     display: 'flex', alignItems: 'center', gap: '0.5rem',
                     padding: '0.5rem 0.75rem', background: 'var(--card-hover)',
                     borderRadius: '0.375rem', marginBottom: '0.25rem', fontSize: '0.85rem',
                   }}>
-                    <span className="badge badge-blue" style={{ fontSize: '0.65rem' }}>{leg.sport.toUpperCase()}</span>
-                    <span className="font-medium" style={{ flex: 1 }}>{leg.label}</span>
-                    <span className="mono">{leg.odds > 0 ? `+${leg.odds}` : leg.odds}</span>
+                    <span className="badge badge-blue" style={{ fontSize: '0.65rem' }}>{pl.sport.toUpperCase()}</span>
+                    <span className="font-medium" style={{ flex: 1 }}>{pl.label}</span>
+                    <span className="mono">{formatOdds(pl.odds)}</span>
                     <button onClick={() => removeParlayLeg(i)}
                       style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: '1rem' }}>
                       &#x2715;
@@ -663,7 +426,7 @@ export default function PaperTrading() {
 
                 {/* Parlay summary */}
                 <div style={{
-                  display: 'flex', gap: '1rem', alignItems: 'center', padding: '0.75rem',
+                  display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', padding: '0.75rem',
                   background: 'var(--bg)', borderRadius: '0.375rem', marginTop: '0.5rem',
                   border: '1px solid var(--border)',
                 }}>
@@ -673,12 +436,17 @@ export default function PaperTrading() {
                   </div>
                   <div>
                     <div className="text-muted" style={{ fontSize: '0.7rem' }}>Combined Odds</div>
-                    <div className="mono font-medium" style={{ color: 'var(--green)' }}>{parlayAmericanOdds}</div>
+                    <div className="mono font-medium" style={{ color: 'var(--green)' }}>
+                      {estimate ? formatOdds(estimate.american) : '—'}
+                    </div>
+                    <div className="quote-reason">estimate — confirmed when placed</div>
                   </div>
                   <div>
                     <div className="text-muted" style={{ fontSize: '0.7rem' }}>Potential Win</div>
                     <div className="mono font-medium" style={{ color: 'var(--green)' }}>
-                      ${(parlayStake * (parlayDecimalOdds - 1)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      {estimate
+                        ? `$${(parlayStake * (estimate.decimal - 1)).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                        : '—'}
                     </div>
                   </div>
                   <div style={{ minWidth: '100px' }}>

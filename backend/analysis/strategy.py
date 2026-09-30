@@ -35,6 +35,18 @@ def consensus_moneyline(prices) -> int | None:
     return Strategy._prob_to_american(sum(usable) / len(usable))
 
 
+def consensus_line(lines) -> float | None:
+    """Average point-value lines (a spread or a total) into one consensus.
+
+    Lines are points, not prices, so -- unlike :func:`consensus_moneyline` --
+    this stays arithmetic, rounded to 1 decimal. Returns None for an empty
+    list, the same "nothing to average" convention as the price consensus.
+    """
+    if not lines:
+        return None
+    return round(sum(lines) / len(lines), 1)
+
+
 def average_odds(odds) -> dict | None:
     """Average book-level odds into a single consensus quote.
 
@@ -71,18 +83,11 @@ def average_odds(odds) -> dict | None:
 
     sp_home = [o.spread_home for o in odds if o.spread_home is not None]
     sp_away = [o.spread_away for o in odds if o.spread_away is not None]
-    if sp_home:
-        result["spread_home"] = round(sum(sp_home) / len(sp_home), 1)
-        result["spread_away"] = round(sum(sp_away) / len(sp_away), 1)
-    else:
-        result["spread_home"] = None
-        result["spread_away"] = None
+    result["spread_home"] = consensus_line(sp_home)
+    result["spread_away"] = consensus_line(sp_away)
 
     ou = [o.over_under for o in odds if o.over_under is not None]
-    if ou:
-        result["over_under"] = round(sum(ou) / len(ou), 1)
-    else:
-        result["over_under"] = None
+    result["over_under"] = consensus_line(ou)
 
     # Spread and total PRICES, consensused the same way moneylines are:
     # in probability space, because American odds are non-linear around

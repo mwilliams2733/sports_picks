@@ -33,3 +33,18 @@ describe('plan 026 styles live in the loaded stylesheet', () => {
     expect(mainTsx).toContain("import './index.css'")
   })
 })
+
+describe('plan 027 styles live in the loaded stylesheet', () => {
+  it.each([
+    '.quote-sides',
+    '.quote-side',
+    '.quote-side.selected',
+    '.quote-reason',
+    '.quote-age',
+    '.prop-quote-row',
+    '.no-pin-badge',
+    '.set-pin',
+  ])('index.css defines %s', (selector) => {
+    expect(indexCss).toContain(selector)
+  })
+})

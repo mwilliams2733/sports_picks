@@ -6,7 +6,8 @@ import { getGameLockState, lockStateLabel, lockStateTooltip } from '../lib/gameL
 interface Props {
   game: GameOddsData
   picks: PickData[]
-  onBet: (pick: { pickValue: string; pickType: string; odds: number; gameId: number; edgePct?: number }) => void
+  onBet: (pick: { pickValue: string; betValue?: string; pickType: string; odds: number; gameId: number;
+    edgePct?: number; homeTeam?: string; awayTeam?: string }) => void
   onHide?: (gameId: number) => void
 }
 
@@ -125,10 +126,13 @@ export default function GameCard({ game, picks, onBet, onHide }: Props) {
             title={lockStateTooltip(lockState)}
             onClick={() => onBet({
               pickValue: topPick.pick_value,
+              betValue: topPick.stored_pick_value,
               pickType: topPick.pick_type,
               odds: topPick.odds_at_pick,
               gameId: topPick.game_id,
               edgePct: topPick.edge_pct,
+              homeTeam: game.home_team,
+              awayTeam: game.away_team,
             })}
           >
             {lockStateLabel(lockState)}

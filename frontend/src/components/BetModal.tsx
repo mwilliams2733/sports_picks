@@ -5,11 +5,18 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useToast } from '../hooks/useToast'
 import type { UserProfile } from '../types'
 import { getPin, setPin as storePin } from '../lib/secrets'
+import { useGameQuotes, usePropQuotes } from '../hooks/useQuotes'
+import { findQuote, formatOdds, legFromPick, priceMoveNote, propOutcomeLabel, resolveLabel,
+  resolveQuoteLabel } from '../lib/quotes'
 
 interface BetModalProps {
   open: boolean
   onClose: () => void
   pickValue: string
+  /** The unresolved label ("HOME ML") to key the bet off of, when it differs
+   *  from the displayed pickValue (team/fighter names). Falls back to
+   *  pickValue when not given -- e.g. prop labels, which already parse. */
+  betValue?: string
   pickType: string  // "moneyline", "spread", "over_under", "prop"
   odds: number
   gameId: number
@@ -17,11 +24,15 @@ interface BetModalProps {
   edgePct?: number
   propMarket?: string
   propPlayer?: string
+  /** Needed to resolve a game quote's HOME/AWAY side to a real team name in
+   *  the "Price now" row and the moved-line note. Unused for prop bets. */
+  homeTeam?: string
+  awayTeam?: string
 }
 
 export default function BetModal({
-  open, onClose, pickValue, pickType, odds, gameId,
-  suggestedStake = 100, edgePct, propMarket, propPlayer,
+  open, onClose, pickValue, betValue, pickType, odds, gameId,
+  suggestedStake = 100, edgePct, propMarket, propPlayer, homeTeam = '', awayTeam = '',
 }: BetModalProps) {
   const { currentUserName, setCurrentUserName } = useUserStore()
   const queryClient = useQueryClient()
@@ -51,6 +62,16 @@ export default function BetModal({
     if (userId != null) setPinInput(getPin(userId) ?? '')
   }, [userId])
 
+  // Hooks run unconditionally, before the `if (!open) return null` below.
+  const leg = legFromPick(pickType, betValue ?? pickValue, gameId, propMarket, propPlayer)
+  const isProp = leg?.pick_type === 'prop'
+  const gameQuotes = useGameQuotes(open && leg && !isProp ? gameId : null)
+  const propQuotes = usePropQuotes(open && leg && isProp ? gameId : null)
+  const quote = leg
+    ? findQuote(gameQuotes.data?.quotes ?? [], propQuotes.data?.quotes ?? [], leg)
+    : undefined
+  const quotesLoading = gameQuotes.isLoading || propQuotes.isLoading
+
   if (!open) return null
 
   const handleCreateUser = async () => {
@@ -71,22 +92,19 @@ export default function BetModal({
   }
 
   const handlePlaceBet = async () => {
-    if (!userId) return
+    if (!userId || !leg || !quote?.available) return
     setSubmitting(true)
     try {
-      const res = await api.users.placePick(userId, {
-        game_id: gameId,
-        pick_type: pickType,
-        pick_value: pickValue,
-        odds,
-        stake,
-        prop_market: propMarket,
-        prop_player: propPlayer,
-      }, pin)
+      const res = await api.users.placePick(userId, { ...leg, stake }, pin)
       setResult(res)
       storePin(userId, pin)
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      toast('Bet placed', 'success')
+      // Both sides from the server's own label through the same function, so
+      // an unmoved bet compares equal (a display label drops "ML" and would not).
+      const label = (v: string) => isProp ? propOutcomeLabel(v) : resolveLabel(v, homeTeam, awayTeam)
+      const shownLabel = label(quote.pick_value)
+      const chargedLabel = label(res.pick_value)
+      toast(priceMoveNote(shownLabel, quote.odds, chargedLabel, res.odds), 'success')
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 401) {
         storePin(userId, null)
@@ -97,8 +115,6 @@ export default function BetModal({
       setSubmitting(false)
     }
   }
-
-  const oddsStr = odds >= 0 ? `+${odds}` : `${odds}`
 
   return (
     <>
@@ -166,9 +182,33 @@ export default function BetModal({
                 <span className="bet-detail-value">{pickValue}</span>
               </div>
               <div className="bet-detail-row">
-                <span className="bet-detail-label">Odds</span>
-                <span className="bet-detail-value">{oddsStr}</span>
+                <span className="bet-detail-label">Price now</span>
+                <span className="bet-detail-value mono">
+                  {quote?.available ? (
+                    <>
+                      {(() => {
+                        const label = resolveQuoteLabel(quote, homeTeam, awayTeam)
+                        return label && <span>{label} </span>
+                      })()}
+                      <span>{formatOdds(quote.odds)}</span>
+                    </>
+                  ) : '—'}
+                </span>
               </div>
+              {quote?.available && quote.odds !== odds && (
+                <div className="quote-reason">The model priced this at {formatOdds(odds)}.</div>
+              )}
+              {quote?.available && !isProp && (betValue ?? pickValue) !== quote.pick_value && (
+                <div className="quote-reason">
+                  The line has moved from {resolveLabel(betValue ?? pickValue, homeTeam, awayTeam)} to{' '}
+                  {resolveLabel(quote.pick_value, homeTeam, awayTeam)}.
+                </div>
+              )}
+              {!leg && <div className="quote-reason">This pick can't be bet here.</div>}
+              {leg && !quotesLoading && !quote && (
+                <div className="quote-reason">No book is quoting this bet right now.</div>
+              )}
+              {quote && !quote.available && <div className="quote-reason">{quote.message}</div>}
               {edgePct != null && (
                 <div className="bet-detail-row">
                   <span className="bet-detail-label">Edge</span>
@@ -209,7 +249,7 @@ export default function BetModal({
             <button
               className="btn btn-success"
               onClick={handlePlaceBet}
-              disabled={submitting || stake <= 0}
+              disabled={submitting || stake <= 0 || !quote?.available}
               style={{ width: '100%', marginTop: '1rem' }}
             >
               {submitting ? 'Placing...' : `Confirm -- $${stake.toLocaleString()}`}

@@ -6,10 +6,11 @@ Odds box sends 0; when that bet won, ``calculate_payout(0)`` raised inside
 scout aborted before pricing the slate and the digest went out empty, every
 day, because the retries hit the same row.
 
-Three guards, each tested here: placement refuses odds that are not a real
-American price; grading books an unusable stored price at 0.0 instead of
-raising (legacy rows exist); and the owner's /users/grade route runs the same
-paper-grading code as the scheduler.
+Three guards, each tested here: placement takes its price from the books, so
+a client can no longer place a bet at an unusable price (plan 027); grading
+books an unusable stored price at 0.0 instead of raising (legacy rows exist);
+and the owner's /users/grade route runs the same paper-grading code as the
+scheduler.
 """
 import datetime
 
@@ -24,6 +25,7 @@ from backend.models import (
 from backend.pipeline.paper_settlement import settle_parlays
 from backend.pipeline.scheduler import grade_pending_picks
 from backend.tests.auth_helpers import ALL_HEADERS, OWNER_HEADERS, TEST_PIN
+from backend.tests.pricing_helpers import seed_fresh_odds
 from backend.time_utils import et_today
 
 GAME_DATE = datetime.date(2026, 9, 20)
@@ -62,40 +64,27 @@ def _user(client, name="friend"):
 
 # --- 1. placement refuses unusable odds ------------------------------------
 
-BAD_ODDS = [0, 50, -50, 20000, -20000]
-
-
-@pytest.mark.parametrize("odds", BAD_ODDS)
-def test_a_single_bet_with_unusable_odds_is_refused(odds):
+def test_a_book_price_of_zero_cannot_price_a_bet():
+    """Odds now come from the books, not the client. The successor of the old
+    placement guard: an unusable stored price is ignored, so the bet is
+    refused as unquoted rather than stored at 0 (which crashed grading)."""
     client = _client()
     [gid] = _scheduled_games(client, 1)
+    seed_fresh_odds(client.app.state.engine, gid, moneyline_home=0, moneyline_away=0)
     uid = _user(client)
     r = client.post(f"/users/{uid}/picks", json={
-        "game_id": gid, "pick_type": "moneyline", "pick_value": "HOME ML",
-        "odds": odds, "stake": 100})
-    assert r.status_code == 422, r.text
-
-
-@pytest.mark.parametrize("odds", BAD_ODDS)
-def test_a_parlay_leg_with_unusable_odds_is_refused(odds):
-    client = _client()
-    g1, g2 = _scheduled_games(client, 2)
-    uid = _user(client)
-    r = client.post(f"/users/{uid}/parlay", json={"stake": 100, "legs": [
-        {"game_id": g1, "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110},
-        {"game_id": g2, "pick_type": "moneyline", "pick_value": "HOME ML", "odds": odds},
-    ]})
-    assert r.status_code == 422, r.text
+        "game_id": gid, "pick_type": "moneyline", "side": "HOME", "stake": 100})
+    assert r.status_code == 409, r.text
 
 
 @pytest.mark.parametrize("odds", [-100, 100, -10000, 10000, -110, 250])
 def test_real_prices_are_still_accepted(odds):
     client = _client()
     [gid] = _scheduled_games(client, 1)
+    seed_fresh_odds(client.app.state.engine, gid, moneyline_home=odds)
     uid = _user(client)
     r = client.post(f"/users/{uid}/picks", json={
-        "game_id": gid, "pick_type": "moneyline", "pick_value": "HOME ML",
-        "odds": odds, "stake": 100})
+        "game_id": gid, "pick_type": "moneyline", "side": "HOME", "stake": 100})
     assert r.status_code == 200, r.text
 
 
@@ -106,14 +95,14 @@ def test_a_non_finite_stake_is_refused(stake):
     client = _client()
     g1, g2 = _scheduled_games(client, 2)
     uid = _user(client)
-    single = ('{"game_id": %d, "pick_type": "moneyline", "pick_value": "HOME ML",'
-              ' "odds": -110, "stake": %s}' % (g1, stake))
+    single = ('{"game_id": %d, "pick_type": "moneyline", "side": "HOME",'
+              ' "stake": %s}' % (g1, stake))
     r = client.post(f"/users/{uid}/picks", content=single,
                     headers={"Content-Type": "application/json"})
     assert r.status_code == 422, r.text
     parlay = ('{"stake": %s, "legs": ['
-              '{"game_id": %d, "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110},'
-              '{"game_id": %d, "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110}]}'
+              '{"game_id": %d, "pick_type": "moneyline", "side": "HOME"},'
+              '{"game_id": %d, "pick_type": "moneyline", "side": "HOME"}]}'
               % (stake, g1, g2))
     r = client.post(f"/users/{uid}/parlay", content=parlay,
                     headers={"Content-Type": "application/json"})

@@ -31,6 +31,10 @@ vi.mock('../api/client', async (importOriginal) => {
         create: vi.fn(),
         placePick: vi.fn(),
       },
+      paper: {
+        quotes: vi.fn(),
+        propQuotes: vi.fn(),
+      },
     },
   }
 })
@@ -60,6 +64,11 @@ describe('BetModal', () => {
     useUserStore.setState({ currentUserName: null, selectedUser: null })
     window.localStorage.clear()
     window.sessionStorage.clear()
+    vi.mocked(api.paper.quotes).mockResolvedValue({ game_id: 1, quotes: [
+      { pick_type: 'moneyline', side: 'HOME', available: true, pick_value: 'HOME ML', odds: -140,
+        line: null, quoted_at: new Date().toISOString(), prop_player: null, prop_market: null },
+    ] })
+    vi.mocked(api.paper.propQuotes).mockResolvedValue({ game_id: 1, quotes: [] })
   })
 
   it('prompts for a name when there is no current user', () => {
@@ -110,7 +119,7 @@ describe('BetModal', () => {
   it('disables the submit button while the bet request is in flight', async () => {
     useUserStore.setState({ currentUserName: 'Marcus' })
     vi.mocked(api.users.list).mockResolvedValue([makeUser()])
-    type PlacePickResult = { id: number; result: string | null; payout: number | null; new_balance: number }
+    type PlacePickResult = { id: number; result: string | null; payout: number | null; new_balance: number; pick_value: string; odds: number; line: number | null; quoted_at: string }
     let resolvePlacePick: (value: PlacePickResult) => void = () => {}
     vi.mocked(api.users.placePick).mockReturnValue(
       new Promise<PlacePickResult>((resolve) => { resolvePlacePick = resolve })
@@ -126,12 +135,81 @@ describe('BetModal', () => {
     expect(screen.getByRole('button', { name: /Placing/ })).toBeDisabled()
     expect(api.users.placePick).toHaveBeenCalledWith(
       1,
-      expect.objectContaining({ pick_value: 'HOME ML' }),
+      { game_id: 1, pick_type: 'moneyline', side: 'HOME', stake: 100 },
       '1234'
     )
 
-    resolvePlacePick({ id: 1, result: null, payout: null, new_balance: 9900 })
+    resolvePlacePick({ id: 1, result: null, payout: null, new_balance: 9900, pick_value: 'HOME ML', odds: -140, line: null, quoted_at: '' })
     await waitFor(() => expect(screen.getByText(/pending result/i)).toBeInTheDocument())
+  })
+
+  it('shows the current price and notes when it differs from the model price', async () => {
+    useUserStore.setState({ currentUserName: 'Marcus' })
+    vi.mocked(api.users.list).mockResolvedValue([makeUser()])
+    renderModal()          // model price -150, quote -140
+    expect(await screen.findByText('-140')).toBeInTheDocument()
+    expect(screen.getByText(/model priced this at -150/i)).toBeInTheDocument()
+  })
+
+  it('shows the current team-resolved line and notes when the line has moved (Review Focus: a line move used to be charged silently)', async () => {
+    useUserStore.setState({ currentUserName: 'Marcus' })
+    vi.mocked(api.users.list).mockResolvedValue([makeUser()])
+    vi.mocked(api.paper.quotes).mockResolvedValue({ game_id: 1, quotes: [
+      { pick_type: 'spread', side: 'AWAY', available: true, pick_value: 'AWAY +2.5', odds: -115,
+        line: 2.5, quoted_at: new Date().toISOString(), prop_player: null, prop_market: null },
+    ] })
+
+    renderModal({
+      pickValue: 'BOS +3.5', betValue: 'AWAY +3.5', pickType: 'spread', odds: -110,
+      homeTeam: 'LAL', awayTeam: 'BOS',
+    })
+
+    // Price now shows the CURRENT (quoted) line, team-resolved, not the
+    // model's stale +3.5.
+    expect(await screen.findByText('-115')).toBeInTheDocument()
+    expect(screen.getByText('BOS +2.5')).toBeInTheDocument()
+    expect(screen.getByText('The line has moved from BOS +3.5 to BOS +2.5.')).toBeInTheDocument()
+  })
+
+  it('reports no move after placing a moneyline bet at the price shown', async () => {
+    useUserStore.setState({ currentUserName: 'Marcus' })
+    vi.mocked(api.users.list).mockResolvedValue([makeUser()])
+    vi.mocked(api.users.placePick).mockResolvedValue(
+      { id: 1, result: null, payout: null, new_balance: 9900, pick_value: 'HOME ML', odds: -140, line: null, quoted_at: '' })
+    const user = userEvent.setup()
+    renderModal({ homeTeam: 'LAL', awayTeam: 'BOS' })   // quote HOME ML -140
+
+    await user.type(await screen.findByLabelText('PIN'), '1234')
+    await user.click(await screen.findByRole('button', { name: /Confirm/ }))
+
+    expect(await screen.findByText('Placed at LAL ML -140')).toBeInTheDocument()
+    expect(screen.queryByText(/when you looked/)).not.toBeInTheDocument()
+  })
+
+  it('reports the move when the server charges a different price', async () => {
+    useUserStore.setState({ currentUserName: 'Marcus' })
+    vi.mocked(api.users.list).mockResolvedValue([makeUser()])
+    vi.mocked(api.users.placePick).mockResolvedValue(
+      { id: 1, result: null, payout: null, new_balance: 9900, pick_value: 'HOME ML', odds: -150, line: null, quoted_at: '' })
+    const user = userEvent.setup()
+    renderModal({ homeTeam: 'LAL', awayTeam: 'BOS' })   // quote HOME ML -140
+
+    await user.type(await screen.findByLabelText('PIN'), '1234')
+    await user.click(await screen.findByRole('button', { name: /Confirm/ }))
+
+    expect(await screen.findByText('Placed at LAL ML -150 — was LAL ML -140 when you looked')).toBeInTheDocument()
+  })
+
+  it('cannot confirm a pick the server will not price', async () => {
+    useUserStore.setState({ currentUserName: 'Marcus' })
+    vi.mocked(api.users.list).mockResolvedValue([makeUser()])
+    vi.mocked(api.paper.quotes).mockResolvedValue({ game_id: 1, quotes: [
+      { pick_type: 'moneyline', side: 'HOME', available: false, reason: 'stale',
+        message: 'The price is stale — ask Marcus to refresh.' },
+    ] })
+    renderModal()
+    expect(await screen.findByText('The price is stale — ask Marcus to refresh.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Confirm/ })).toBeDisabled()
   })
 
   it('forgets the PIN and clears the field on a wrong-PIN 401', async () => {

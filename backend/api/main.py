@@ -114,6 +114,9 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
     from backend.api.users import router as users_router
     app.include_router(users_router, prefix="/users", tags=["users"])
 
+    from backend.api.paper import router as paper_router
+    app.include_router(paper_router, prefix="/paper", tags=["paper"])
+
     from backend.api.websocket import websocket_endpoint
     app.websocket("/ws")(websocket_endpoint)
 

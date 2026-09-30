@@ -3,6 +3,7 @@ import { api, getErrorMessage, ApiError } from '../api/client';
 import type { UserProfile } from '../types';
 import { useToast } from '../hooks/useToast';
 import { getOwnerKey, setOwnerKey } from '../lib/secrets';
+import SetPinControl from '../components/SetPinControl';
 
 export default function Admin() {
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -161,7 +162,10 @@ export default function Admin() {
             <tbody>
               {users.map(u => (
                 <tr key={u.id}>
-                  <td className="font-medium">{u.name}</td>
+                  <td className="font-medium">
+                    {u.name}
+                    {u.has_pin === false && <span className="badge badge-red no-pin-badge">No PIN</span>}
+                  </td>
                   <td className="text-muted" style={{ fontSize: '0.8rem' }}>
                     {u.created_at ? new Date(u.created_at).toLocaleDateString() : '--'}
                   </td>
@@ -181,23 +185,27 @@ export default function Admin() {
                     {u.total_wagered > 0 ? `${u.roi > 0 ? '+' : ''}${u.roi}%` : '--'}
                   </td>
                   <td>
-                    {confirmDelete === u.id ? (
-                      <div style={{ display: 'flex', gap: '0.25rem' }}>
-                        <button className="btn-bet" style={{ background: 'var(--red)', fontSize: '0.7rem' }}
-                          onClick={() => handleDelete(u.id, u.name)}>
-                          Confirm
+                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                      <SetPinControl userId={u.id} userName={u.name}
+                        hasOwnerKey={hasOwnerKey} onSaved={loadUsers} />
+                      {confirmDelete === u.id ? (
+                        <div style={{ display: 'flex', gap: '0.25rem' }}>
+                          <button className="btn-bet" style={{ background: 'var(--red)', fontSize: '0.7rem' }}
+                            onClick={() => handleDelete(u.id, u.name)}>
+                            Confirm
+                          </button>
+                          <button className="btn-bet" style={{ fontSize: '0.7rem' }}
+                            onClick={() => setConfirmDelete(null)}>
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button className="btn-bet" style={{ fontSize: '0.75rem' }}
+                          onClick={() => setConfirmDelete(u.id)}>
+                          Remove
                         </button>
-                        <button className="btn-bet" style={{ fontSize: '0.7rem' }}
-                          onClick={() => setConfirmDelete(null)}>
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <button className="btn-bet" style={{ fontSize: '0.75rem' }}
-                        onClick={() => setConfirmDelete(u.id)}>
-                        Remove
-                      </button>
-                    )}
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

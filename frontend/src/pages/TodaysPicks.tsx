@@ -46,17 +46,23 @@ export default function TodaysPicks() {
   const [teamFilter, setTeamFilter] = useState('');
   const [betModalOpen, setBetModalOpen] = useState(false);
   const [betModalData, setBetModalData] = useState<{
-    pickValue: string; pickType: string; odds: number; gameId: number;
+    pickValue: string; betValue?: string; pickType: string; odds: number; gameId: number;
     edgePct?: number; propMarket?: string; propPlayer?: string;
+    homeTeam?: string; awayTeam?: string;
   } | null>(null);
 
   const handleBetPick = (pick: PickData) => {
     setBetModalData({
       pickValue: pick.pick_value,
+      betValue: pick.stored_pick_value,
       pickType: pick.pick_type,
       odds: pick.odds_at_pick,
       gameId: pick.game_id,
       edgePct: pick.edge_pct,
+      propMarket: pick.prop_market,
+      propPlayer: pick.prop_player,
+      homeTeam: pick.home_team,
+      awayTeam: pick.away_team,
     });
     setBetModalOpen(true);
   };
@@ -74,7 +80,8 @@ export default function TodaysPicks() {
     setBetModalOpen(true);
   };
 
-  const handleBetFromCard = (bet: { pickValue: string; pickType: string; odds: number; gameId: number; edgePct?: number }) => {
+  const handleBetFromCard = (bet: { pickValue: string; betValue?: string; pickType: string; odds: number; gameId: number;
+    edgePct?: number; homeTeam?: string; awayTeam?: string }) => {
     setBetModalData(bet);
     setBetModalOpen(true);
   };
@@ -265,12 +272,15 @@ export default function TodaysPicks() {
           open={betModalOpen}
           onClose={() => setBetModalOpen(false)}
           pickValue={betModalData.pickValue}
+          betValue={betModalData.betValue}
           pickType={betModalData.pickType}
           odds={betModalData.odds}
           gameId={betModalData.gameId}
           edgePct={betModalData.edgePct}
           propMarket={betModalData.propMarket}
           propPlayer={betModalData.propPlayer}
+          homeTeam={betModalData.homeTeam}
+          awayTeam={betModalData.awayTeam}
         />
       )}
 

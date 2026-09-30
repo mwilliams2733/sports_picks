@@ -5,6 +5,11 @@ export interface PickData {
   date: string;
   pick_type: string;
   pick_value: string;
+  /** The unresolved label ("HOME ML", "AWAY +1.5") pick_value was rewritten
+   *  from -- what quotes.legFromPick needs to map the pick to a bettable
+   *  side; pick_value is display-only (team/fighter names) and cannot be
+   *  parsed back into a side. */
+  stored_pick_value?: string;
   confidence: number;
   edge_pct: number;
   odds_at_pick: number;
@@ -19,6 +24,11 @@ export interface PickData {
   home_team?: string;
   away_team?: string;
   matchup?: string;
+  /** Only for pick_type === "prop" -- the market KEY ("player_pass_yds") and
+   *  player name a prop pick needs to become a bettable leg (BetModal's
+   *  propMarket/propPlayer). Absent for every other pick_type. */
+  prop_market?: string;
+  prop_player?: string;
 }
 
 export interface RecordData {
@@ -192,6 +202,7 @@ export interface UserProfile {
   best_streak: number;
   streak_type: string;
   created_at?: string;
+  has_pin?: boolean;
 }
 
 export interface PaperPickData {
@@ -265,4 +276,39 @@ export interface EmailedTrend {
   kind: 'game' | 'prop';
   points: { date: string; units: number }[];
   max_drawdown: number; longest_losing_streak: number;
+}
+
+export type GamePickType = 'moneyline' | 'spread' | 'over_under';
+export type GameSide = 'HOME' | 'AWAY' | 'Over' | 'Under';
+
+export interface QuoteFields {
+  pick_type: string;
+  pick_value: string;
+  odds: number;
+  line: number | null;
+  quoted_at: string;
+  prop_player: string | null;
+  prop_market: string | null;
+}
+// A refusal has no price field, so reading `odds` requires narrowing on
+// `available` first -- the compiler stops a refused quote being charged.
+type Refusal = { available: false; reason: string; message: string };
+type GameKey = { pick_type: GamePickType; side: GameSide };
+type PropKey = { prop_player: string; prop_market: string; market_label: string;
+  outcome: 'Over' | 'Under'; line: number };
+
+export type AvailableGameQuote = GameKey & { available: true } & Omit<QuoteFields, 'pick_type'>;
+export type GameQuote = AvailableGameQuote | (GameKey & Refusal);
+export type AvailablePropQuote = PropKey & { available: true; pick_type: 'prop'; pick_value: string;
+  odds: number; quoted_at: string };
+export type PropQuote = AvailablePropQuote | (PropKey & Refusal);
+
+export type GameLeg = { game_id: number; pick_type: GamePickType; side: GameSide };
+export type PropLeg = { game_id: number; pick_type: 'prop'; prop_player: string; prop_market: string;
+  outcome: 'Over' | 'Under'; line: number };
+export type BetLeg = GameLeg | PropLeg;
+
+export interface PlacedPick {
+  id: number; result: string | null; payout: number | null; new_balance: number;
+  pick_value: string; odds: number; line: number | null; quoted_at: string;
 }

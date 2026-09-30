@@ -31,6 +31,68 @@ def test_get_today_picks():
     assert len(data) == 1
     assert data[0]["pick_value"] == "BOS ML"
 
+def test_get_today_picks_includes_stored_pick_value():
+    """pick_value is rewritten from HOME/AWAY to a team abbreviation for
+    display; stored_pick_value keeps the unresolved label so the frontend can
+    still map the pick to a side the server prices (see quotes.legFromPick)."""
+    app = create_app(":memory:")
+    client = TestClient(app)
+    engine = client.app.state.engine
+    Base.metadata.create_all(engine)
+    from backend.database import get_session
+    session = get_session(engine)
+    t1 = Team(id=1, name="New York Yankees", abbreviation="NYY", sport="mlb")
+    t2 = Team(id=2, name="Boston Red Sox", abbreviation="BOS", sport="mlb")
+    g = Game(id=1, sport="mlb", season="2026", date=et_today(),
+             home_team_id=1, away_team_id=2, status="scheduled")
+    s = StrategyModel(id=1, name="ensemble", config_json="{}", is_active=True)
+    p = PickModel(id=1, game_id=1, strategy_id=1, pick_type="moneyline",
+                  pick_value="HOME ML", confidence=4, edge_pct=8.2,
+                  odds_at_pick=-150, created_at=datetime.now(tz=timezone.utc))
+    session.add_all([t1, t2, g, s, p])
+    session.commit()
+    session.close()
+
+    response = client.get("/picks/today")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["pick_value"] == "NYY ML"
+    assert data[0]["stored_pick_value"] == "HOME ML"
+
+
+def test_get_today_picks_includes_prop_fields_for_a_prop_pick():
+    """A prop pick's prop_market/prop_player must round-trip through
+    /picks/today -- without them the frontend can't build a bettable leg
+    (BetModal's propMarket/propPlayer) and Today's Picks prop rows can't
+    be bet (plan 027 final fix, MINOR 2)."""
+    app = create_app(":memory:")
+    client = TestClient(app)
+    engine = client.app.state.engine
+    Base.metadata.create_all(engine)
+    from backend.database import get_session
+    session = get_session(engine)
+    t1 = Team(id=1, name="Kansas City Chiefs", abbreviation="KC", sport="nfl")
+    t2 = Team(id=2, name="Buffalo Bills", abbreviation="BUF", sport="nfl")
+    g = Game(id=1, sport="nfl", season="2026", date=et_today(),
+             home_team_id=1, away_team_id=2, status="scheduled")
+    s = StrategyModel(id=1, name="ensemble", config_json="{}", is_active=True)
+    p = PickModel(id=1, game_id=1, strategy_id=1, pick_type="prop",
+                  pick_value="Patrick Mahomes Over 275.5", confidence=4, edge_pct=8.2,
+                  odds_at_pick=-110, created_at=datetime.now(tz=timezone.utc),
+                  prop_market="player_pass_yds", prop_player="Patrick Mahomes")
+    session.add_all([t1, t2, g, s, p])
+    session.commit()
+    session.close()
+
+    response = client.get("/picks/today")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["prop_market"] == "player_pass_yds"
+    assert data[0]["prop_player"] == "Patrick Mahomes"
+
+
 def test_get_today_picks_filter_by_sport():
     app = create_app(":memory:")
     client = TestClient(app)

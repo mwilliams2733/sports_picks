@@ -221,3 +221,120 @@ def test_today_last_meeting_is_null_when_no_prior_history():
     assert g["last_meeting"] is None
     assert g["home_l10_record"] == "0-0"
     assert g["away_l10_record"] == "0-0"
+
+
+def _seed_today_game_with_two_books(app):
+    """A scheduled game with two books' moneylines (dk -110/+100, fd
+    -130/+110), so the consensus (-120) differs from either book alone."""
+    today = et_today()
+    _seed(app, [
+        Team(id=3, name="Rockets", abbreviation="HOU", sport="nba"),
+        Team(id=4, name="Spurs", abbreviation="SAS", sport="nba"),
+        Game(id=900, sport="nba", season="2025-26", date=today,
+             home_team_id=3, away_team_id=4, status="scheduled",
+             start_time=None),
+        Odds(game_id=900, bookmaker="dk",
+             moneyline_home=-110, moneyline_away=+100,
+             timestamp=datetime.now(timezone.utc)),
+        Odds(game_id=900, bookmaker="fd",
+             moneyline_home=-130, moneyline_away=+110,
+             timestamp=datetime.now(timezone.utc)),
+    ])
+    return 900
+
+
+def test_today_shows_the_consensus_not_the_first_book():
+    """dk -110 and fd -130 on the home side -> consensus -120 (hand-computed
+    in test_paper_pricing). The first book's -110 must not be shown."""
+    app = create_app(":memory:")
+    gid = _seed_today_game_with_two_books(app)
+    [game] = [g for g in TestClient(app).get("/games/today").json() if g["id"] == gid]
+    assert game["moneyline_home"] == -120
+    assert game["bookmaker"] == "consensus"
+    assert game["odds_count"] == 2
+
+
+def _seed_today_game_with_one_fresh_and_one_stale_book(app):
+    """A scheduled game with a FRESH book at -110 and a STALE (7h old, never
+    deleted) book at -300 -- the stale book must not pull the displayed
+    price, exactly like /paper/quotes (plan 027's pricing.MAX_QUOTE_AGE is
+    6h)."""
+    today = et_today()
+    now = datetime.now(timezone.utc)
+    _seed(app, [
+        Team(id=5, name="Nets", abbreviation="BKN", sport="nba"),
+        Team(id=6, name="Cavaliers", abbreviation="CLE", sport="nba"),
+        Game(id=950, sport="nba", season="2025-26", date=today,
+             home_team_id=5, away_team_id=6, status="scheduled", start_time=None),
+        Odds(game_id=950, bookmaker="fresh",
+             moneyline_home=-110, moneyline_away=+100,
+             spread_home=-3.5, spread_away=3.5, spread_home_price=-110, spread_away_price=-110,
+             over_under=220.5, over_price=-110, under_price=-110,
+             timestamp=now - timedelta(hours=1)),
+        Odds(game_id=950, bookmaker="stale",
+             moneyline_home=-300, moneyline_away=+250,
+             spread_home=-10.0, spread_away=10.0, spread_home_price=-300, spread_away_price=-300,
+             over_under=250.5, over_price=-300, under_price=-300,
+             timestamp=now - timedelta(hours=7)),
+    ])
+    return 950
+
+
+def test_today_matches_paper_quotes_when_a_book_is_stale():
+    """/games/today must equal /paper/quotes for every priced field -- the
+    fresh book's -110, never a blend with the stale -300 (Review Focus:
+    the two endpoints used to disagree)."""
+    app = create_app(":memory:")
+    gid = _seed_today_game_with_one_fresh_and_one_stale_book(app)
+    client = TestClient(app)
+    [game] = [g for g in client.get("/games/today").json() if g["id"] == gid]
+    quotes = {(q["pick_type"], q["side"]): q for q in client.get(f"/paper/quotes?game_id={gid}").json()["quotes"]}
+
+    assert game["moneyline_home"] == quotes[("moneyline", "HOME")]["odds"] == -110
+    # A single +100 book round-trips to -100 through consensus_moneyline's
+    # implied-probability formula (p == 0.5 takes the >=0.5 branch) -- the
+    # point here is only that the two endpoints AGREE, not the exact number.
+    assert game["moneyline_away"] == quotes[("moneyline", "AWAY")]["odds"]
+    assert game["spread_home"] == quotes[("spread", "HOME")]["line"] == -3.5
+    assert game["over_under"] == quotes[("over_under", "Over")]["line"] == 220.5
+    assert game["bookmaker"] == "consensus"
+
+
+def test_a_live_game_keeps_its_last_consensus_on_the_card():
+    """An in-progress game has no bettable quote (pricing refuses every side),
+    so the card shows the last consensus over its rows instead of going
+    blank: dk -110 and fd -130 -> -120, as in the scheduled case."""
+    app = create_app(":memory:")
+    gid = _seed_today_game_with_two_books(app)
+    session = get_session(app.state.engine)
+    try:
+        session.get(Game, gid).status = "in_progress"
+        session.commit()
+    finally:
+        session.close()
+    client = TestClient(app)
+    [game] = [g for g in client.get("/games/today").json() if g["id"] == gid]
+    assert game["moneyline_home"] == -120
+    assert game["bookmaker"] == "consensus"
+    quotes = client.get(f"/paper/quotes?game_id={gid}").json()["quotes"]
+    assert not any(q["available"] for q in quotes)
+
+
+def test_today_shows_no_price_when_the_only_book_is_stale():
+    """A game whose only book is a stale row shows None, not a stale price."""
+    today = et_today()
+    now = datetime.now(timezone.utc)
+    app = create_app(":memory:")
+    _seed(app, [
+        Team(id=7, name="Jazz", abbreviation="UTA", sport="nba"),
+        Team(id=8, name="Kings", abbreviation="SAC", sport="nba"),
+        Game(id=960, sport="nba", season="2025-26", date=today,
+             home_team_id=7, away_team_id=8, status="scheduled", start_time=None),
+        Odds(game_id=960, bookmaker="stale",
+             moneyline_home=-140, moneyline_away=+120,
+             timestamp=now - timedelta(hours=7)),
+    ])
+    [game] = [g for g in TestClient(app).get("/games/today").json() if g["id"] == 960]
+    assert game["moneyline_home"] is None
+    assert game["moneyline_away"] is None
+    assert game["bookmaker"] is None
