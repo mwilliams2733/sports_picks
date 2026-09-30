@@ -97,4 +97,10 @@ describe('PicksTable', () => {
 
     expect(screen.getByRole('button', { name: 'Bet This' })).not.toBeDisabled()
   })
+
+  it('renders no confidence stars and no Confidence column (owner decision 2026-09-28)', () => {
+    const { container } = render(<PicksTable picks={[makePick()]} />)
+    expect(container.textContent).not.toMatch(/[★☆]/)
+    expect(screen.queryByText('Confidence')).toBeNull()
+  })
 })

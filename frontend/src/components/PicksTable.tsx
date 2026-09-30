@@ -1,6 +1,7 @@
 import type { PickData, GameOddsData } from '../types';
 import ConfidenceStars from './ConfidenceStars';
 import { EDGE_TOOLTIP, CONFIDENCE_TOOLTIP } from '../constants/tooltips';
+import { SHOW_STARS } from '../lib/display';
 import { getGameLockState, lockStateLabel, lockStateTooltip } from '../lib/gameLock';
 
 interface Props {
@@ -50,7 +51,7 @@ export default function PicksTable({ picks, showResult = false, onBet, games }: 
             <th>Pick</th>
             <th>Type</th>
             <th title={EDGE_TOOLTIP}>Edge</th>
-            <th title={CONFIDENCE_TOOLTIP}>Confidence</th>
+            {SHOW_STARS && <th title={CONFIDENCE_TOOLTIP}>Confidence</th>}
             <th>Odds</th>
             {showResult && <th>Result</th>}
             {onBet && <th>Action</th>}
@@ -80,7 +81,7 @@ export default function PicksTable({ picks, showResult = false, onBet, games }: 
               <td className="mono" style={{ color: pick.edge_pct >= 10 ? 'var(--green)' : undefined }}>
                 +{pick.edge_pct}%
               </td>
-              <td><ConfidenceStars rating={pick.confidence} /></td>
+              {SHOW_STARS && <td><ConfidenceStars rating={pick.confidence} /></td>}
               <td className="mono">{formatOdds(pick.odds_at_pick)}</td>
               {showResult && (
                 <td>

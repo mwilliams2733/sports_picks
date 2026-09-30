@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SHOW_STARS } from '../lib/display';
 
 interface FAQItem {
   question: string;
@@ -350,9 +351,11 @@ export default function FAQ() {
             <span className="section-divider" />
           </div>
           <div className="faq-list">
-            {section.items.map(item => (
-              <Accordion key={item.question} item={item} />
-            ))}
+            {section.items
+              .filter(item => SHOW_STARS || item.question !== 'What do the confidence stars mean?')
+              .map(item => (
+                <Accordion key={item.question} item={item} />
+              ))}
           </div>
         </div>
       ))}

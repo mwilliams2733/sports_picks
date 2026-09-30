@@ -7,6 +7,7 @@ import ConfidenceStars from '../components/ConfidenceStars';
 import BetModal from '../components/BetModal';
 import { SPORTS } from '../constants/sports';
 import { EDGE_TOOLTIP, CONFIDENCE_TOOLTIP } from '../constants/tooltips';
+import { SHOW_STARS } from '../lib/display';
 
 function formatOdds(odds: number): string {
   return odds > 0 ? `+${odds}` : `${odds}`;
@@ -146,12 +147,14 @@ export default function PlayerProps() {
         )}
         <select className="select" value={sortBy} onChange={e => { if (isSortKey(e.target.value)) setSortBy(e.target.value); }}>
           <option value="edge">Sort: Edge %</option>
-          <option value="confidence">Sort: Confidence</option>
+          {SHOW_STARS && <option value="confidence">Sort: Confidence</option>}
           <option value="name">Sort: Player Name</option>
         </select>
-        <select className="select" value={minConfidence} onChange={e => setMinConfidence(Number(e.target.value))}>
-          {[0, 1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}+ Stars</option>)}
-        </select>
+        {SHOW_STARS && (
+          <select className="select" value={minConfidence} onChange={e => setMinConfidence(Number(e.target.value))}>
+            {[0, 1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}+ Stars</option>)}
+          </select>
+        )}
       </div>
 
       {props.isLoading ? (
@@ -171,7 +174,7 @@ export default function PlayerProps() {
                 <th>Line</th>
                 <th>Projection</th>
                 <th title={EDGE_TOOLTIP}>Edge</th>
-                <th title={CONFIDENCE_TOOLTIP}>Confidence</th>
+                {SHOW_STARS && <th title={CONFIDENCE_TOOLTIP}>Confidence</th>}
                 <th>Odds</th>
                 <th>Action</th>
               </tr>
@@ -194,7 +197,7 @@ export default function PlayerProps() {
                   <td style={{ color: prop.edge_pct && prop.edge_pct > 0 ? 'var(--green)' : undefined, fontFamily: 'var(--font-mono)' }}>
                     {prop.edge_pct != null ? `${prop.edge_pct > 0 ? '+' : ''}${prop.edge_pct.toFixed(1)}%` : '—'}
                   </td>
-                  <td><ConfidenceStars rating={prop.confidence ?? 0} /></td>
+                  {SHOW_STARS && <td><ConfidenceStars rating={prop.confidence ?? 0} /></td>}
                   <td style={{ fontFamily: 'var(--font-mono)' }}>{formatOdds(prop.odds)}</td>
                   <td>
                     <button className="btn-bet" onClick={() => handleBetProp(prop)}>Bet This</button>
