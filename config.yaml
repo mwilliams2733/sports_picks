@@ -31,7 +31,9 @@ odds_budget:
 digest:
   enabled: true
   send_hour_et: 11
-  sports: ["ncaaf", "nfl", "nba", "mlb"]
+  # Owner's enabled sports (2026-09-28): NFL, MLB, UFC ("mma" is the UFC key).
+  # Around NBA opening night (2026-10-20) the plan is to swap mlb for nba.
+  sports: ["nfl", "mlb", "mma"]
   send_bar:            # frozen 2026-09-29 (owner decision 2026-09-28); change only with a dated note
     min_shrunk_edge_pp: 3.0
     min_odds: -150
