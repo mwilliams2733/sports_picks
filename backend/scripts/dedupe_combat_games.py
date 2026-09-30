@@ -61,7 +61,7 @@ from backend.time_utils import et_today
 logger = logging.getLogger(__name__)
 
 #: Sports whose Elo is binary and grader-owned.
-COMBAT_SPORTS = ("mma", "boxing")
+from backend.pipeline.team_stats import COMBAT_SPORTS  # the one definition
 
 SEED_RATING = 1500.0
 
