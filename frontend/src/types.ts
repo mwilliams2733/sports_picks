@@ -192,6 +192,7 @@ export interface UserProfile {
   best_streak: number;
   streak_type: string;
   created_at?: string;
+  has_pin?: boolean;
 }
 
 export interface PaperPickData {
@@ -265,4 +266,40 @@ export interface EmailedTrend {
   kind: 'game' | 'prop';
   points: { date: string; units: number }[];
   max_drawdown: number; longest_losing_streak: number;
+}
+
+export type GamePickType = 'moneyline' | 'spread' | 'over_under';
+export type GameSide = 'HOME' | 'AWAY' | 'Over' | 'Under';
+
+export interface QuoteFields {
+  pick_type: string;
+  pick_value: string;
+  odds: number;
+  line: number | null;
+  quoted_at: string;
+  prop_player: string | null;
+  prop_market: string | null;
+}
+// `odds` is optional here (never actually set) only so that
+// `findQuote(...)?.odds` type-checks without first narrowing on
+// `available` -- a refusal never carries a price.
+type Refusal = { available: false; reason: string; message: string; odds?: number };
+type GameKey = { pick_type: GamePickType; side: GameSide };
+type PropKey = { prop_player: string; prop_market: string; market_label: string;
+  outcome: 'Over' | 'Under'; line: number };
+
+export type AvailableGameQuote = GameKey & { available: true } & Omit<QuoteFields, 'pick_type'>;
+export type GameQuote = AvailableGameQuote | (GameKey & Refusal);
+export type AvailablePropQuote = PropKey & { available: true; pick_type: 'prop'; pick_value: string;
+  odds: number; quoted_at: string };
+export type PropQuote = AvailablePropQuote | (PropKey & Refusal);
+
+export type GameLeg = { game_id: number; pick_type: GamePickType; side: GameSide };
+export type PropLeg = { game_id: number; pick_type: 'prop'; prop_player: string; prop_market: string;
+  outcome: 'Over' | 'Under'; line: number };
+export type BetLeg = GameLeg | PropLeg;
+
+export interface PlacedPick {
+  id: number; result: string | null; payout: number | null; new_balance: number;
+  pick_value: string; odds: number; line: number | null; quoted_at: string;
 }

@@ -16,6 +16,9 @@ export default defineConfig({
       '/health': 'http://localhost:8000',
       '/pipeline': 'http://localhost:8000',
       '/users': 'http://localhost:8000',
+      // A regex key: a plain '/paper' prefix would also proxy the
+      // /paper-trading page to the API.
+      '^/paper/': 'http://localhost:8000',
       '/ws': {
         target: 'ws://localhost:8000',
         ws: true,
