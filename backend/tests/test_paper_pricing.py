@@ -82,6 +82,13 @@ def test_three_books(session):
     assert _price(session, g, GameBet(g.id, "moneyline", "HOME")).odds == -113
 
 
+def test_a_stale_moneyline_book_does_not_pull_the_price(session):
+    g = _game(session)
+    _odds(session, g, "stale", age=timedelta(hours=7), moneyline_home=-300, moneyline_away=250)
+    _odds(session, g, "fresh", age=timedelta(hours=1), moneyline_home=-110, moneyline_away=100)
+    assert _price(session, g, GameBet(g.id, "moneyline", "HOME")).odds == -110
+
+
 def test_spread_uses_the_consensus_line_and_price(session):
     """Review Focus 3: books at -3 and -4 -> the bet is at -3.5."""
     g = _game(session)
@@ -169,6 +176,32 @@ def test_freshness_is_judged_per_market(session):
     assert err.value.reason == "stale"
 
 
+def test_a_stale_book_does_not_pull_the_line_or_price(session):
+    """Review finding: Odds rows are upserted per book and never deleted, so
+    a book that dropped out of the feed keeps its last row forever. A stale
+    row must not move a market a fresh book is already quoting."""
+    g = _game(session)
+    _odds(session, g, "stale", age=timedelta(hours=7), moneyline_home=-110, moneyline_away=100,
+          spread_home=-3.0, spread_away=3.0, spread_home_price=-110, spread_away_price=-110)
+    _odds(session, g, "fresh", age=timedelta(hours=1), moneyline_home=-110, moneyline_away=100,
+          spread_home=-7.0, spread_away=7.0, spread_home_price=-110, spread_away_price=-110)
+    away = _price(session, g, GameBet(g.id, "spread", "AWAY"))
+    assert (away.pick_value, away.line, away.odds) == ("AWAY +7", 7.0, -110)
+    assert away.quoted_at == NOW - timedelta(hours=1)
+
+
+def test_a_line_without_a_price_does_not_count_toward_the_line(session):
+    """A row with the spread's line but no spread price never quoted this
+    bet -- it must not out-vote the line the priced row actually carries."""
+    g = _game(session)
+    _odds(session, g, "line_only", moneyline_home=-110, moneyline_away=100,
+          spread_home=-10.0, spread_away=10.0)   # no spread_home_price/spread_away_price
+    _odds(session, g, "priced", moneyline_home=-110, moneyline_away=100,
+          spread_home=-3.0, spread_away=3.0, spread_home_price=-110, spread_away_price=-110)
+    home = _price(session, g, GameBet(g.id, "spread", "HOME"))
+    assert home.line == -3.0
+
+
 @pytest.mark.parametrize("overrides", [
     {"start_time": datetime(2026, 10, 4, 14, 0)},                  # kicked off an hour ago
     {"status": "final"},
@@ -227,6 +260,14 @@ def test_a_stale_prop_is_refused(session):
     assert err.value.reason == "stale"
 
 
+def test_a_stale_prop_book_does_not_pull_the_price(session):
+    g = _game(session)
+    _prop(session, g, "stale", -300, age=timedelta(hours=7))
+    _prop(session, g, "fresh", -110, age=timedelta(hours=1))
+    q = _price(session, g, PropBet(g.id, "Jalen Hurts", "player_pass_yds", "Over", 225.5))
+    assert q.odds == -110
+
+
 def test_prop_quotes_lists_only_gradeable_over_under_lines(session):
     """Review Focus 1: anytime-TD rows (outcome Yes, no line) are left out."""
     g = _game(session)
@@ -266,6 +307,11 @@ def test_combine_two_minus_110_legs():
 def test_combine_short_parlay_stays_negative():
     # (1 + 100/400) * (1 + 100/500) = 1.25 * 1.2 = 1.5 -> -round(100/0.5) = -200
     assert pricing.combine([-400, -500])[0] == -200
+
+
+def test_combine_empty_list_raises():
+    with pytest.raises(ValueError):
+        pricing.combine([])
 
 
 # --- round trip: every label the module writes, the grader reads ------------

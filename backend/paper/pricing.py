@@ -7,9 +7,18 @@ review). Since plan 027 every bet route and every quote endpoint calls
 :func:`price`, so the price a player is shown is produced by the same
 function that prices the bet.
 
-Consensus is :func:`backend.analysis.strategy.average_odds` /
-:func:`consensus_moneyline` -- the definition the Model's own picks use --
-never a second averager.
+Consensus is :func:`backend.analysis.strategy.consensus_moneyline` for
+prices and :func:`backend.analysis.strategy.consensus_line` for spread/total
+lines -- the same two functions ``average_odds`` (the Model's own picks) is
+built from -- never a second averager.
+
+Unlike ``average_odds``, a paper bet's consensus is taken over only the
+rows that are both usable and fresh for the exact market being priced:
+``Odds``/``PlayerProp`` rows are upserted per book and never deleted, so a
+book that drops out of the feed keeps its last row forever, and averaging
+every row in regardless of age lets one stale book quietly move the price
+(or, for a line, lets the line come from a row that never quoted a price
+for it at all).
 """
 from __future__ import annotations
 
@@ -18,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 
 from backend.analysis.odds_utils import InvalidOddsError, american_to_implied_prob
 from backend.analysis.prop_markets import MARKET_STAT_MAP, market_label
-from backend.analysis.strategy import average_odds, consensus_moneyline
+from backend.analysis.strategy import consensus_line, consensus_moneyline
 from backend.models import Odds, PlayerProp
 from backend.time_utils import ET, game_start_utc
 
@@ -34,8 +43,7 @@ _MESSAGES = {
     "not_gradeable": "This market can't be graded, so it can't be bet.",
 }
 
-#: (pick_type, side) -> (consensus price key, consensus line key or None).
-#: The keys are both ``Odds`` columns and ``average_odds`` result keys.
+#: (pick_type, side) -> (price column, line column or None) on ``Odds``.
 GAME_MARKETS: dict[tuple[str, str], tuple[str, str | None]] = {
     ("moneyline", "HOME"): ("moneyline_home", None),
     ("moneyline", "AWAY"): ("moneyline_away", None),
@@ -125,9 +133,9 @@ def open_for_betting(game, now: datetime | None = None) -> bool:
     return start > now
 
 
-def _check_fresh(quoted_at: datetime, now: datetime) -> None:
-    if now - quoted_at > MAX_QUOTE_AGE:
-        raise PricingError("stale")
+def _fresh(rows, timestamp_attr: str, now: datetime):
+    """Rows whose timestamp is within MAX_QUOTE_AGE of ``now``."""
+    return [r for r in rows if now - _utc(getattr(r, timestamp_attr)) <= MAX_QUOTE_AGE]
 
 
 def _price_game(session, game, bet: GameBet, now: datetime) -> Quote:
@@ -136,14 +144,19 @@ def _price_game(session, game, bet: GameBet, now: datetime) -> Quote:
     except KeyError:
         raise ValueError(f"not a game bet: {bet.pick_type}/{bet.side}") from None
     rows = session.query(Odds).filter(Odds.game_id == game.id).all()
-    consensus = average_odds(rows) or {}
-    odds = consensus.get(price_key)
-    line = consensus.get(line_key) if line_key else None
-    if odds is None or (line_key is not None and line is None):
+    # Usable at ANY age, so a book that dropped out of the feed and never
+    # gets deleted (upsert-per-book, no delete) doesn't get to set the
+    # clock: it must first clear the bar of quoting this market at all.
+    usable = [r for r in rows if _usable(getattr(r, price_key))
+              and (line_key is None or getattr(r, line_key) is not None)]
+    if not usable:
         raise PricingError("not_quoted")
-    contributing = [r for r in rows if _usable(getattr(r, price_key))]
-    quoted_at = max(_utc(r.timestamp) for r in contributing)
-    _check_fresh(quoted_at, now)
+    fresh = _fresh(usable, "timestamp", now)
+    if not fresh:
+        raise PricingError("stale")
+    odds = consensus_moneyline([getattr(r, price_key) for r in fresh])
+    line = consensus_line([getattr(r, line_key) for r in fresh]) if line_key else None
+    quoted_at = max(_utc(r.timestamp) for r in fresh)
     if bet.pick_type == "moneyline":
         label = f"{bet.side} ML"
     elif bet.pick_type == "spread":
@@ -165,12 +178,14 @@ def _price_prop(session, game, bet: PropBet, now: datetime) -> Quote:
                     PlayerProp.outcome == bet.outcome,
                     PlayerProp.line.isnot(None))
             .all())
-    rows = [r for r in rows if abs(r.line - bet.line) < 1e-9 and _usable(r.odds)]
-    odds = consensus_moneyline([r.odds for r in rows])
-    if odds is None:
+    usable = [r for r in rows if abs(r.line - bet.line) < 1e-9 and _usable(r.odds)]
+    if not usable:
         raise PricingError("not_quoted")
-    quoted_at = max(_utc(r.fetched_at) for r in rows)
-    _check_fresh(quoted_at, now)
+    fresh = _fresh(usable, "fetched_at", now)
+    if not fresh:
+        raise PricingError("stale")
+    odds = consensus_moneyline([r.odds for r in fresh])
+    quoted_at = max(_utc(r.fetched_at) for r in fresh)
     label = f"{bet.prop_player} {bet.outcome} {bet.line:g} {market_label(bet.prop_market)}"
     return Quote("prop", label, odds, bet.line, quoted_at,
                  prop_player=bet.prop_player, prop_market=bet.prop_market)
@@ -188,6 +203,8 @@ def price(session, game, bet: GameBet | PropBet, now: datetime | None = None) ->
 
 def combine(odds: list[int]) -> tuple[int, float]:
     """A parlay's price from its legs' prices: (American, decimal)."""
+    if not odds:
+        raise ValueError("a parlay needs at least one leg")
     decimal = 1.0
     for o in odds:
         decimal *= (1 + 100 / abs(o)) if o < 0 else (1 + o / 100)
