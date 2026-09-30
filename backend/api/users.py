@@ -502,16 +502,26 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
         if body.stake <= 0:
             raise HTTPException(status_code=400, detail="Stake must be positive")
 
-        # Two legs on the same game are correlated (or, worst case, the same
-        # outcome twice), and combine() treats every leg as independent --
-        # that let a parlay of {game, moneyline HOME} x2 price at +264 for
-        # what is one -110 outcome (Fix round 1). Checked before pricing or
-        # any row is written, and it applies across leg types (a prop leg and
-        # a game leg on the same game_id are also a same-game correlation).
-        game_ids = [leg.game_id for leg in body.legs]
-        if len(set(game_ids)) != len(game_ids):
+        # Same-game parlays are allowed (owner ruling, fix round 2) -- a
+        # HOME ML + Over total on one game are independent enough markets.
+        # But two legs on the *same market* are not: combine() treats every
+        # leg as independent, so a duplicate leg would multiply one outcome's
+        # price (fix round 1's {game, moneyline HOME} x2 at +264 for what is
+        # one -110 outcome), and opposite sides of the same market (HOME and
+        # AWAY ML, Over and Under on the same prop) are the same outcome
+        # priced twice, not two independent ones -- both are rejected. A
+        # market is (game, pick_type) for a game leg, or (game, player,
+        # market) for a prop leg -- the side/outcome is deliberately left out
+        # of the key so both sides of one market collide.
+        market_keys = [
+            ("prop", leg.game_id, leg.prop_player, leg.prop_market)
+            if leg.pick_type == "prop"
+            else ("game", leg.game_id, leg.pick_type)
+            for leg in body.legs
+        ]
+        if len(set(market_keys)) != len(market_keys):
             raise HTTPException(status_code=400,
-                                 detail="A parlay can have only one leg per game.")
+                                 detail="A parlay can't have two legs on the same market.")
 
         # Check balance
         current_balance = balance_of(session, user)

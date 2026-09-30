@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from backend.api.main import create_app
 from backend.database import get_session
 from backend.models import Base, Game, Odds, PaperPick, Parlay, Team
+from backend.paper import pricing
 from backend.tests.auth_helpers import ALL_HEADERS, OWNER_HEADERS, TEST_PIN
 from backend.tests.pricing_helpers import seed_fresh_odds, seed_fresh_prop
 from backend.time_utils import et_today
@@ -207,7 +208,7 @@ def test_a_parlay_with_one_unpriceable_leg_is_refused_whole():
     s.close()
 
 
-# --- Fix round 1: same-game legs are correlated, never independent ----------
+# --- Fix round 2: same-game parlays are allowed; same-market legs are not --
 
 def test_two_identical_legs_on_one_game_are_rejected():
     client = _client()
@@ -218,28 +219,62 @@ def test_two_identical_legs_on_one_game_are_rejected():
         {"game_id": gid, "pick_type": "moneyline", "side": "HOME"},
         {"game_id": gid, "pick_type": "moneyline", "side": "HOME"}]})
     assert r.status_code == 400
-    assert r.json()["detail"] == "A parlay can have only one leg per game."
+    assert r.json()["detail"] == "A parlay can't have two legs on the same market."
     s = get_session(client.app.state.engine)
     assert s.query(Parlay).count() == 0 and s.query(PaperPick).count() == 0
     s.close()
 
 
-def test_a_moneyline_leg_and_a_spread_leg_on_one_game_are_rejected():
+def test_home_ml_and_away_ml_on_one_game_are_rejected():
     client = _client()
     gid = _game(client)
     seed_fresh_odds(client.app.state.engine, gid)
     uid = _user(client)
     r = client.post(f"/users/{uid}/parlay", json={"stake": 100, "legs": [
         {"game_id": gid, "pick_type": "moneyline", "side": "HOME"},
-        {"game_id": gid, "pick_type": "spread", "side": "HOME"}]})
+        {"game_id": gid, "pick_type": "moneyline", "side": "AWAY"}]})
     assert r.status_code == 400
-    assert r.json()["detail"] == "A parlay can have only one leg per game."
+    assert r.json()["detail"] == "A parlay can't have two legs on the same market."
     s = get_session(client.app.state.engine)
     assert s.query(Parlay).count() == 0 and s.query(PaperPick).count() == 0
     s.close()
 
 
-def test_a_prop_leg_and_a_moneyline_leg_on_one_game_are_rejected():
+def test_the_same_player_and_market_over_and_under_are_rejected():
+    client = _client()
+    gid = _game(client)
+    seed_fresh_prop(client.app.state.engine, gid, outcome="Over")
+    seed_fresh_prop(client.app.state.engine, gid, outcome="Under")
+    uid = _user(client)
+    r = client.post(f"/users/{uid}/parlay", json={"stake": 100, "legs": [
+        {"game_id": gid, "pick_type": "prop", "prop_player": "QB One",
+         "prop_market": "player_pass_yds", "outcome": "Over", "line": 225.5},
+        {"game_id": gid, "pick_type": "prop", "prop_player": "QB One",
+         "prop_market": "player_pass_yds", "outcome": "Under", "line": 225.5}]})
+    assert r.status_code == 400
+    assert r.json()["detail"] == "A parlay can't have two legs on the same market."
+    s = get_session(client.app.state.engine)
+    assert s.query(Parlay).count() == 0 and s.query(PaperPick).count() == 0
+    s.close()
+
+
+def test_home_ml_and_over_total_on_one_game_are_accepted():
+    client = _client()
+    gid = _game(client)
+    seed_fresh_odds(client.app.state.engine, gid)
+    uid = _user(client)
+    quoted = {(q["pick_type"], q["side"]): q
+              for q in client.get(f"/paper/quotes?game_id={gid}").json()["quotes"]}
+    r = client.post(f"/users/{uid}/parlay", json={"stake": 100, "legs": [
+        {"game_id": gid, "pick_type": "moneyline", "side": "HOME"},
+        {"game_id": gid, "pick_type": "over_under", "side": "Over"}]})
+    assert r.status_code == 200, r.text
+    expected_odds, _ = pricing.combine([
+        quoted[("moneyline", "HOME")]["odds"], quoted[("over_under", "Over")]["odds"]])
+    assert r.json()["combined_odds"] == expected_odds
+
+
+def test_a_prop_leg_and_a_moneyline_leg_on_one_game_are_accepted():
     client = _client()
     gid = _game(client)
     seed_fresh_odds(client.app.state.engine, gid)
@@ -249,11 +284,20 @@ def test_a_prop_leg_and_a_moneyline_leg_on_one_game_are_rejected():
         {"game_id": gid, "pick_type": "prop", "prop_player": "QB One",
          "prop_market": "player_pass_yds", "outcome": "Over", "line": 225.5},
         {"game_id": gid, "pick_type": "moneyline", "side": "HOME"}]})
-    assert r.status_code == 400
-    assert r.json()["detail"] == "A parlay can have only one leg per game."
-    s = get_session(client.app.state.engine)
-    assert s.query(Parlay).count() == 0 and s.query(PaperPick).count() == 0
-    s.close()
+    assert r.status_code == 200, r.text
+
+
+def test_home_ml_and_home_spread_on_one_game_are_accepted():
+    """Same-game parlays are allowed even when the legs are correlated
+    (owner ruling, fix round 2)."""
+    client = _client()
+    gid = _game(client)
+    seed_fresh_odds(client.app.state.engine, gid)
+    uid = _user(client)
+    r = client.post(f"/users/{uid}/parlay", json={"stake": 100, "legs": [
+        {"game_id": gid, "pick_type": "moneyline", "side": "HOME"},
+        {"game_id": gid, "pick_type": "spread", "side": "HOME"}]})
+    assert r.status_code == 200, r.text
 
 
 # --- round trip through settlement -------------------------------------------
