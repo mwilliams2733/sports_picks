@@ -47,6 +47,7 @@ def get_today_picks(request: Request, sport: str | None = None, min_confidence: 
                 "stored_pick_value": pick.pick_value,
                 "confidence": pick.confidence, "edge_pct": pick.edge_pct, "odds_at_pick": pick.odds_at_pick,
                 "suggested_unit_size": pick.suggested_unit_size,
+                "prop_market": pick.prop_market, "prop_player": pick.prop_player,
                 "home_team": home_team.abbreviation, "away_team": away_team.abbreviation,
                 "matchup": f"{away_team.abbreviation} @ {home_team.abbreviation}"})
         return results
@@ -90,6 +91,7 @@ def get_picks_history(request: Request, sport: str | None = None, page: int = 1,
                 "payout": result_row.payout if result_row else None,
                 "clv_pct": round(clv_pct, 2) if clv_pct is not None else None,
                 "clv_points": round(clv_points, 2) if clv_points is not None else None,
+                "prop_market": pick.prop_market, "prop_player": pick.prop_player,
                 "home_team": home_team.abbreviation, "away_team": away_team.abbreviation,
                 "matchup": f"{away_team.abbreviation} @ {home_team.abbreviation}"})
         return results

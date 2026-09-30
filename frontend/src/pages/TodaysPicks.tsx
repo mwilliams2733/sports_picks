@@ -48,6 +48,7 @@ export default function TodaysPicks() {
   const [betModalData, setBetModalData] = useState<{
     pickValue: string; betValue?: string; pickType: string; odds: number; gameId: number;
     edgePct?: number; propMarket?: string; propPlayer?: string;
+    homeTeam?: string; awayTeam?: string;
   } | null>(null);
 
   const handleBetPick = (pick: PickData) => {
@@ -58,6 +59,10 @@ export default function TodaysPicks() {
       odds: pick.odds_at_pick,
       gameId: pick.game_id,
       edgePct: pick.edge_pct,
+      propMarket: pick.prop_market,
+      propPlayer: pick.prop_player,
+      homeTeam: pick.home_team,
+      awayTeam: pick.away_team,
     });
     setBetModalOpen(true);
   };
@@ -75,7 +80,8 @@ export default function TodaysPicks() {
     setBetModalOpen(true);
   };
 
-  const handleBetFromCard = (bet: { pickValue: string; betValue?: string; pickType: string; odds: number; gameId: number; edgePct?: number }) => {
+  const handleBetFromCard = (bet: { pickValue: string; betValue?: string; pickType: string; odds: number; gameId: number;
+    edgePct?: number; homeTeam?: string; awayTeam?: string }) => {
     setBetModalData(bet);
     setBetModalOpen(true);
   };
@@ -273,6 +279,8 @@ export default function TodaysPicks() {
           edgePct={betModalData.edgePct}
           propMarket={betModalData.propMarket}
           propPlayer={betModalData.propPlayer}
+          homeTeam={betModalData.homeTeam}
+          awayTeam={betModalData.awayTeam}
         />
       )}
 

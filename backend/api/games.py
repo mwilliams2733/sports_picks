@@ -2,9 +2,9 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Request, HTTPException
 from sqlalchemy import or_, and_, select
 from sqlalchemy.orm import aliased
-from backend.analysis.strategy import average_odds
 from backend.database import get_session
 from backend.models import Game, Odds, Team
+from backend.paper import pricing
 from backend.time_utils import et_today
 
 router = APIRouter()
@@ -55,10 +55,16 @@ def get_today_games(request: Request, sport: str | None = None):
         results = []
         for game, home, away in query.all():
             odds_rows = session.query(Odds).filter(Odds.game_id == game.id).all()
-            # The same consensus the paper-bet quotes use (plan 027), so every
-            # price on screen agrees. It used to show whichever book's row came
-            # back first.
-            consensus = average_odds(odds_rows) or {}
+            # The same quotes /paper/quotes prices a bet from (plan 027's
+            # pricing.game_quotes), so a displayed price and a charged price
+            # never disagree -- it used to average every Odds row in,
+            # including a stale book that never gets deleted.
+            by_market = {(q["pick_type"], q["side"]): q for q in pricing.game_quotes(session, game)}
+
+            def _quoted(pick_type: str, side: str, field: str):
+                q = by_market.get((pick_type, side))
+                return q[field] if q and q["available"] else None
+
             results.append({
                 "id": game.id,
                 "sport": game.sport,
@@ -71,11 +77,11 @@ def get_today_games(request: Request, sport: str | None = None):
                 "away_team_name": away.name,
                 "home_score": game.home_score,
                 "away_score": game.away_score,
-                "moneyline_home": consensus.get("moneyline_home"),
-                "moneyline_away": consensus.get("moneyline_away"),
-                "spread_home": consensus.get("spread_home"),
-                "over_under": consensus.get("over_under"),
-                "bookmaker": "consensus" if odds_rows else None,
+                "moneyline_home": _quoted("moneyline", "HOME", "odds"),
+                "moneyline_away": _quoted("moneyline", "AWAY", "odds"),
+                "spread_home": _quoted("spread", "HOME", "line"),
+                "over_under": _quoted("over_under", "Over", "line"),
+                "bookmaker": "consensus" if any(q["available"] for q in by_market.values()) else None,
                 "odds_count": len(odds_rows),
                 "last_meeting": _last_meeting(session, game),
                 "home_l10_record": _l10_record(session, game.home_team_id, game.sport, game.date),

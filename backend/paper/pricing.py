@@ -186,8 +186,13 @@ def _price_prop(session, game, bet: PropBet, now: datetime) -> Quote:
         raise PricingError("stale")
     odds = consensus_moneyline([r.odds for r in fresh])
     quoted_at = max(_utc(r.fetched_at) for r in fresh)
-    label = f"{bet.prop_player} {bet.outcome} {bet.line:g} {market_label(bet.prop_market)}"
-    return Quote("prop", label, odds, bet.line, quoted_at,
+    # The matched book row's own line, not the client's bet.line float: a
+    # request of 225.5000000001 (within the 1e-9 tolerance above) must be
+    # answered with the book's clean 225.5, not echo the client's noise back
+    # as the stored/displayed line.
+    line = fresh[0].line
+    label = f"{bet.prop_player} {bet.outcome} {line:g} {market_label(bet.prop_market)}"
+    return Quote("prop", label, odds, line, quoted_at,
                  prop_player=bet.prop_player, prop_market=bet.prop_market)
 
 

@@ -6,7 +6,8 @@ import { useToast } from '../hooks/useToast'
 import type { UserProfile } from '../types'
 import { getPin, setPin as storePin } from '../lib/secrets'
 import { useGameQuotes, usePropQuotes } from '../hooks/useQuotes'
-import { findQuote, formatOdds, legFromPick, priceMoveNote } from '../lib/quotes'
+import { findQuote, formatOdds, legFromPick, priceMoveNote, propOutcomeLabel, resolveLabel,
+  resolveQuoteLabel } from '../lib/quotes'
 
 interface BetModalProps {
   open: boolean
@@ -23,11 +24,15 @@ interface BetModalProps {
   edgePct?: number
   propMarket?: string
   propPlayer?: string
+  /** Needed to resolve a game quote's HOME/AWAY side to a real team name in
+   *  the "Price now" row and the moved-line note. Unused for prop bets. */
+  homeTeam?: string
+  awayTeam?: string
 }
 
 export default function BetModal({
   open, onClose, pickValue, betValue, pickType, odds, gameId,
-  suggestedStake = 100, edgePct, propMarket, propPlayer,
+  suggestedStake = 100, edgePct, propMarket, propPlayer, homeTeam = '', awayTeam = '',
 }: BetModalProps) {
   const { currentUserName, setCurrentUserName } = useUserStore()
   const queryClient = useQueryClient()
@@ -94,7 +99,9 @@ export default function BetModal({
       setResult(res)
       storePin(userId, pin)
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      toast(priceMoveNote(quote.odds, res.odds), 'success')
+      const shownLabel = resolveQuoteLabel(quote, homeTeam, awayTeam)
+      const chargedLabel = isProp ? propOutcomeLabel(res.pick_value) : resolveLabel(res.pick_value, homeTeam, awayTeam)
+      toast(priceMoveNote(shownLabel, quote.odds, chargedLabel, res.odds), 'success')
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 401) {
         storePin(userId, null)
@@ -174,11 +181,25 @@ export default function BetModal({
               <div className="bet-detail-row">
                 <span className="bet-detail-label">Price now</span>
                 <span className="bet-detail-value mono">
-                  {quote?.available ? formatOdds(quote.odds) : '—'}
+                  {quote?.available ? (
+                    <>
+                      {(() => {
+                        const label = resolveQuoteLabel(quote, homeTeam, awayTeam)
+                        return label && <span>{label} </span>
+                      })()}
+                      <span>{formatOdds(quote.odds)}</span>
+                    </>
+                  ) : '—'}
                 </span>
               </div>
               {quote?.available && quote.odds !== odds && (
                 <div className="quote-reason">The model priced this at {formatOdds(odds)}.</div>
+              )}
+              {quote?.available && !isProp && (betValue ?? pickValue) !== quote.pick_value && (
+                <div className="quote-reason">
+                  The line has moved from {resolveLabel(betValue ?? pickValue, homeTeam, awayTeam)} to{' '}
+                  {resolveLabel(quote.pick_value, homeTeam, awayTeam)}.
+                </div>
               )}
               {!leg && <div className="quote-reason">This pick can't be bet here.</div>}
               {leg && !quotesLoading && !quote && (

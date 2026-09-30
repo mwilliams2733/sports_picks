@@ -268,6 +268,17 @@ def test_a_stale_prop_book_does_not_pull_the_price(session):
     assert q.odds == -110
 
 
+def test_a_prop_line_is_the_book_row_not_the_client_float(session):
+    """The bet carries the CLIENT's float (225.5000000001, within the 1e-9
+    match tolerance) -- the stored/displayed line must be the book's clean
+    225.5, not echo the client's noise back (plan 027 final fix, MINOR 3)."""
+    g = _game(session)
+    _prop(session, g, "dk", -110, line=225.5)
+    q = _price(session, g, PropBet(g.id, "Jalen Hurts", "player_pass_yds", "Over", 225.5000000001))
+    assert q.line == 225.5
+    assert q.pick_value == "Jalen Hurts Over 225.5 Pass Yards"
+
+
 def test_prop_quotes_lists_only_gradeable_over_under_lines(session):
     """Review Focus 1: anytime-TD rows (outcome Yes, no line) are left out."""
     g = _game(session)

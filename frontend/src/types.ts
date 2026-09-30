@@ -24,6 +24,11 @@ export interface PickData {
   home_team?: string;
   away_team?: string;
   matchup?: string;
+  /** Only for pick_type === "prop" -- the market KEY ("player_pass_yds") and
+   *  player name a prop pick needs to become a bettable leg (BetModal's
+   *  propMarket/propPlayer). Absent for every other pick_type. */
+  prop_market?: string;
+  prop_player?: string;
 }
 
 export interface RecordData {

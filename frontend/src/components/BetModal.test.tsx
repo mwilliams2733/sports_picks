@@ -151,6 +151,26 @@ describe('BetModal', () => {
     expect(screen.getByText(/model priced this at -150/i)).toBeInTheDocument()
   })
 
+  it('shows the current team-resolved line and notes when the line has moved (Review Focus: a line move used to be charged silently)', async () => {
+    useUserStore.setState({ currentUserName: 'Marcus' })
+    vi.mocked(api.users.list).mockResolvedValue([makeUser()])
+    vi.mocked(api.paper.quotes).mockResolvedValue({ game_id: 1, quotes: [
+      { pick_type: 'spread', side: 'AWAY', available: true, pick_value: 'AWAY +2.5', odds: -115,
+        line: 2.5, quoted_at: new Date().toISOString(), prop_player: null, prop_market: null },
+    ] })
+
+    renderModal({
+      pickValue: 'BOS +3.5', betValue: 'AWAY +3.5', pickType: 'spread', odds: -110,
+      homeTeam: 'LAL', awayTeam: 'BOS',
+    })
+
+    // Price now shows the CURRENT (quoted) line, team-resolved, not the
+    // model's stale +3.5.
+    expect(await screen.findByText('-115')).toBeInTheDocument()
+    expect(screen.getByText('BOS +2.5')).toBeInTheDocument()
+    expect(screen.getByText('The line has moved from BOS +3.5 to BOS +2.5.')).toBeInTheDocument()
+  })
+
   it('cannot confirm a pick the server will not price', async () => {
     useUserStore.setState({ currentUserName: 'Marcus' })
     vi.mocked(api.users.list).mockResolvedValue([makeUser()])

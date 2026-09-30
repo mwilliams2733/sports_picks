@@ -1,5 +1,5 @@
 import type { AvailableGameQuote, GamePickType, GameQuote, GameSide } from '../types'
-import { formatOdds } from '../lib/quotes'
+import { formatOdds, resolveQuoteLabel } from '../lib/quotes'
 
 interface Props {
   quotes: GameQuote[]
@@ -8,13 +8,6 @@ interface Props {
   awayName: string
   selected: GameSide | null
   onSelect: (quote: AvailableGameQuote) => void
-}
-
-function sideLabel(q: GameQuote, homeName: string, awayName: string): string {
-  const team = q.side === 'HOME' ? homeName : q.side === 'AWAY' ? awayName : q.side
-  if (!q.available || q.line === null) return team
-  if (q.pick_type === 'spread') return `${team} ${q.line > 0 ? '+' : ''}${q.line}`
-  return `${team} ${q.line}`
 }
 
 export default function QuotePicker({ quotes, pickType, homeName, awayName, selected, onSelect }: Props) {
@@ -30,7 +23,7 @@ export default function QuotePicker({ quotes, pickType, homeName, awayName, sele
             aria-pressed={selected === q.side}
             onClick={() => { if (q.available) onSelect(q) }}
           >
-            <span>{sideLabel(q, homeName, awayName)}</span>{' '}
+            <span>{resolveQuoteLabel(q, homeName, awayName)}</span>{' '}
             <span className="mono">{q.available ? formatOdds(q.odds) : '—'}</span>
           </button>
           {!q.available && <div className="quote-reason">{q.message}</div>}

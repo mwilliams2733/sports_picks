@@ -98,7 +98,8 @@ export default function PaperTrading() {
       const res = await api.users.placePick(selectedUser.id,
         { ...legFromQuote(selectedGame, chosen), stake }, betPin);
       setPin(selectedUser.id, betPin);
-      toast(`${priceMoveNote(chosen.odds, res.odds)}. Balance: $${res.new_balance.toLocaleString()}`, 'success');
+      toast(`${priceMoveNote(chosen.pick_value, chosen.odds, res.pick_value, res.odds)}. `
+        + `Balance: $${res.new_balance.toLocaleString()}`, 'success');
       queryClient.invalidateQueries({ queryKey: ['users'] });
       setChosen(null);
     } catch (e) {

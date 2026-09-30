@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { formatOdds, legFromPick, priceMoveNote, parlayEstimate, ageLabel, findQuote, addOrReplaceLeg } from './quotes'
+import { formatOdds, legFromPick, priceMoveNote, parlayEstimate, ageLabel, findQuote, addOrReplaceLeg,
+  resolveLabel, resolveQuoteLabel, propOutcomeLabel } from './quotes'
 import type { GameQuote, PropQuote, BetLeg } from '../types'
 
 describe('legFromPick', () => {
@@ -27,11 +28,59 @@ describe('legFromPick', () => {
 })
 
 describe('priceMoveNote', () => {
-  it('says the price when it did not move', () => {
-    expect(priceMoveNote(-110, -110)).toBe('Placed at -110')
+  it('says just the placement when neither the label nor the price moved', () => {
+    expect(priceMoveNote('AWAY +2.5', -110, 'AWAY +2.5', -110)).toBe('Placed at AWAY +2.5 -110')
   })
-  it('says what it was when it moved (Review Focus 5)', () => {
-    expect(priceMoveNote(-110, -115)).toBe('Placed at -115 — was -110 when you looked')
+  it('notes a price-only move', () => {
+    expect(priceMoveNote('AWAY +2.5', -110, 'AWAY +2.5', -115))
+      .toBe('Placed at AWAY +2.5 -115 — was AWAY +2.5 -110 when you looked')
+  })
+  it('notes a line-only move (Review Focus: a moved line used to be charged silently)', () => {
+    expect(priceMoveNote('AWAY +3.5', -110, 'AWAY +2.5', -110))
+      .toBe('Placed at AWAY +2.5 -110 — was AWAY +3.5 -110 when you looked')
+  })
+  it('notes both a line and a price move', () => {
+    expect(priceMoveNote('AWAY +3.5', -110, 'AWAY +2.5', -115))
+      .toBe('Placed at AWAY +2.5 -115 — was AWAY +3.5 -110 when you looked')
+  })
+})
+
+describe('resolveLabel', () => {
+  it('replaces HOME/AWAY tokens with team names, mirroring the backend', () => {
+    expect(resolveLabel('AWAY +3.5', 'LAL', 'BOS')).toBe('BOS +3.5')
+    expect(resolveLabel('HOME ML', 'LAL', 'BOS')).toBe('LAL ML')
+  })
+  it('leaves a label with no HOME/AWAY token unchanged', () => {
+    expect(resolveLabel('Over 7.5', 'LAL', 'BOS')).toBe('Over 7.5')
+  })
+})
+
+describe('propOutcomeLabel', () => {
+  it('strips the player name and market label from a prop pick_value', () => {
+    expect(propOutcomeLabel('Jalen Hurts Over 225.5 Pass Yards')).toBe('Over 225.5')
+  })
+  it('falls back to the raw string when it does not parse', () => {
+    expect(propOutcomeLabel('A.J. Brown Yes')).toBe('A.J. Brown Yes')
+  })
+})
+
+describe('resolveQuoteLabel', () => {
+  const spread: GameQuote = { pick_type: 'spread', side: 'AWAY', available: true, pick_value: 'AWAY +2.5',
+    odds: -110, line: 2.5, quoted_at: '2026-10-04T14:00:00+00:00', prop_player: null, prop_market: null }
+  const moneyline: GameQuote = { pick_type: 'moneyline', side: 'HOME', available: true, pick_value: 'HOME ML',
+    odds: -140, line: null, quoted_at: '2026-10-04T14:00:00+00:00', prop_player: null, prop_market: null }
+  const prop: PropQuote = { prop_player: 'QB', prop_market: 'player_pass_yds', market_label: 'Pass Yards',
+    outcome: 'Over', line: 225.5, available: true, pick_type: 'prop', pick_value: 'QB Over 225.5 Pass Yards',
+    odds: -110, quoted_at: '2026-10-04T14:00:00+00:00' }
+
+  it('shows a spread with its signed line', () => {
+    expect(resolveQuoteLabel(spread, 'LAL', 'BOS')).toBe('BOS +2.5')
+  })
+  it('shows a moneyline with no line at all', () => {
+    expect(resolveQuoteLabel(moneyline, 'LAL', 'BOS')).toBe('LAL')
+  })
+  it('shows a prop as its bare outcome and line', () => {
+    expect(resolveQuoteLabel(prop, 'LAL', 'BOS')).toBe('Over 225.5')
   })
 })
 

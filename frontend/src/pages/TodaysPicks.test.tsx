@@ -149,6 +149,34 @@ describe('TodaysPicks -> GameCard -> BetModal wiring', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /Confirm/ })).not.toBeDisabled())
   })
 
+  // The GameCard's own "Bet This" button is the FIRST one in the DOM (Today's
+  // Games renders above the AI Picks table); the picks-table row's button is
+  // the second. Earlier wiring tests only ever clicked betButtons[0] -- this
+  // exercises the other wiring path (PicksTable -> handleBetPick), which has
+  // its own team-name label -> betValue plumbing.
+  it('bets a spread pick from the picks-table row, not just the GameCard button', async () => {
+    picksData = [makePick({
+      pick_type: 'spread', pick_value: 'BOS +3.5', stored_pick_value: 'AWAY +3.5', odds_at_pick: -110,
+      home_team: 'NYY', away_team: 'BOS',
+    })]
+    gamesData = [makeGame()]
+    vi.mocked(api.paper.quotes).mockResolvedValue({ game_id: 1, quotes: [
+      { pick_type: 'spread', side: 'AWAY', available: true, pick_value: 'AWAY +3.5', odds: -105,
+        line: 3.5, quoted_at: new Date().toISOString(), prop_player: null, prop_market: null },
+    ] })
+
+    const user = userEvent.setup()
+    renderPage()
+
+    const betButtons = await screen.findAllByRole('button', { name: 'Bet This' })
+    expect(betButtons.length).toBeGreaterThan(1)
+    await user.click(betButtons[1])
+    expect(await screen.findByText('-105')).toBeInTheDocument()
+
+    await user.type(await screen.findByLabelText('PIN'), '1234')
+    expect(screen.getByRole('button', { name: /Confirm/ })).not.toBeDisabled()
+  })
+
   it('cannot bet without the stored label (mutation check): dropping betValue disables Confirm', async () => {
     // This mirrors what happens if the betValue pass-through were removed:
     // BetModal falls back to the display pickValue, which legFromPick can't
