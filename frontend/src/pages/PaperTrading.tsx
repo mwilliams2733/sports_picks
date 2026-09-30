@@ -425,7 +425,7 @@ export default function PaperTrading() {
 
                 {/* Parlay summary */}
                 <div style={{
-                  display: 'flex', gap: '1rem', alignItems: 'center', padding: '0.75rem',
+                  display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', padding: '0.75rem',
                   background: 'var(--bg)', borderRadius: '0.375rem', marginTop: '0.5rem',
                   border: '1px solid var(--border)',
                 }}>
