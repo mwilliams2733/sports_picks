@@ -10,9 +10,10 @@ from backend.api.main import create_app
 from backend.database import get_session
 from backend.models import Base, Game, Team, UserProfile
 from backend.tests.auth_helpers import OWNER_HEADERS
+from backend.tests.pricing_helpers import seed_fresh_odds
 from backend.time_utils import et_today
 
-BET = {"pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110, "stake": 10}
+BET = {"pick_type": "moneyline", "side": "HOME", "stake": 10}
 
 
 def _setup(pin="1234", db_path=":memory:"):
@@ -26,6 +27,7 @@ def _setup(pin="1234", db_path=":memory:"):
                away_team_id=2, status="scheduled"))
     s.commit()
     s.close()
+    seed_fresh_odds(app.state.engine, 1)
     uid = client.post("/users/", json={"name": "friend", "pin": pin}).json()["id"]
     return client, uid
 

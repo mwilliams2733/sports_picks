@@ -1,6 +1,7 @@
-from datetime import datetime, timezone, date, timedelta
+from datetime import timedelta
+from typing import Annotated, Literal, Union
 from fastapi import APIRouter, Request, HTTPException, Query, Depends
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 from sqlalchemy import func
 from backend.api.auth import require_owner
 from backend.api.pins import PIN_PATTERN, guard as pin_guard, hash_pin, require_player_pin
@@ -8,14 +9,15 @@ from backend.database import get_session
 from backend.models import UserProfile, PaperPick, Game, ActivityFeed, Parlay
 from backend.pipeline import paper_settlement
 from backend.pipeline.paper_settlement import settle_parlays
-from backend.analysis.odds_utils import InvalidOddsError, _validate_american_odds
+from backend.paper import pricing
+from backend.paper.pricing import PricingError
 from backend.analysis.paper_bets import player_bets
 from backend.analysis.scorecard import summarize, effective_bets
 from backend.digest.record import emailed_bets
 import json
 import asyncio
 import logging
-from backend.time_utils import et_today, game_start_utc
+from backend.time_utils import et_today
 
 logger = logging.getLogger(__name__)
 
@@ -75,61 +77,68 @@ class SetPinRequest(BaseModel):
         return _check_pin(v)
 
 
-#: The largest |American odds| a paper bet may carry. Real books do not
-#: quote past this; anything beyond it is a typo, not a price.
-MAX_ABS_ODDS = 10000
+class _Strict(BaseModel):
+    # Unknown keys are refused, not ignored: an old client sending `odds` or
+    # `pick_value` gets a 422 rather than a bet at a price it did not choose.
+    model_config = ConfigDict(extra="forbid")
 
 
-def _check_odds(value: int) -> int:
-    """Refuse a price grading could not pay out.
+class GameLeg(_Strict):
+    game_id: int
+    pick_type: Literal["moneyline", "spread", "over_under"]
+    side: Literal["HOME", "AWAY", "Over", "Under"]
 
-    A cleared Odds box arrives as 0. Stored, that row raised out of grading
-    when it won and took the morning scout (and the digest) down with it.
-    The validity rule is odds_utils', not restated here.
-    """
+    @model_validator(mode="after")
+    def _side_fits_market(self):
+        allowed = ("Over", "Under") if self.pick_type == "over_under" else ("HOME", "AWAY")
+        if self.side not in allowed:
+            raise ValueError(f"side for {self.pick_type} must be {' or '.join(allowed)}")
+        return self
+
+    def to_bet(self) -> pricing.GameBet:
+        return pricing.GameBet(self.game_id, self.pick_type, self.side)
+
+
+class PropLeg(_Strict):
+    game_id: int
+    pick_type: Literal["prop"]
+    prop_player: str = Field(min_length=1, max_length=100)
+    prop_market: str = Field(min_length=1, max_length=64)
+    outcome: Literal["Over", "Under"]
+    line: float = Field(allow_inf_nan=False)
+
+    def to_bet(self) -> pricing.PropBet:
+        return pricing.PropBet(self.game_id, self.prop_player, self.prop_market,
+                               self.outcome, self.line)
+
+
+Leg = Annotated[Union[GameLeg, PropLeg], Field(discriminator="pick_type")]
+
+
+class GameBetRequest(GameLeg):
+    stake: float = Field(allow_inf_nan=False)
+
+
+class PropBetRequest(PropLeg):
+    stake: float = Field(allow_inf_nan=False)
+
+
+class PlacePickRequest(RootModel[Annotated[Union[GameBetRequest, PropBetRequest],
+                                           Field(discriminator="pick_type")]]):
+    pass
+
+
+class PlaceParlayRequest(_Strict):
+    legs: list[Leg]
+    stake: float = Field(allow_inf_nan=False)
+
+
+def _priced(session, game, leg) -> pricing.Quote:
+    """Price one bet or leg, turning a refusal into its HTTP status."""
     try:
-        _validate_american_odds(value)
-    except InvalidOddsError as e:
-        raise ValueError(str(e)) from None
-    if abs(value) > MAX_ABS_ODDS:
-        raise ValueError(f"Odds must be within +/-{MAX_ABS_ODDS}")
-    return value
-
-
-class PlacePickRequest(BaseModel):
-    game_id: int
-    pick_type: str
-    pick_value: str
-    odds: int
-    # Non-positive stakes are refused in the route (400, a readable detail);
-    # NaN/Infinity parse as valid JSON floats and must be refused here.
-    stake: float = Field(allow_inf_nan=False)
-    prop_market: str | None = None
-    prop_player: str | None = None
-
-    @field_validator("odds")
-    @classmethod
-    def _odds(cls, v: int) -> int:
-        return _check_odds(v)
-
-
-class ParlayLeg(BaseModel):
-    game_id: int
-    pick_type: str
-    pick_value: str
-    odds: int
-    prop_market: str | None = None
-    prop_player: str | None = None
-
-    @field_validator("odds")
-    @classmethod
-    def _odds(cls, v: int) -> int:
-        return _check_odds(v)
-
-
-class PlaceParlayRequest(BaseModel):
-    legs: list[ParlayLeg]
-    stake: float = Field(allow_inf_nan=False)
+        return pricing.price(session, game, leg.to_bet())
+    except PricingError as e:
+        raise HTTPException(status_code=e.status, detail=e.message) from None
 
 
 def balance_of(session, user) -> float:
@@ -147,18 +156,8 @@ def balance_of(session, user) -> float:
 
 
 def _open_for_betting(game) -> bool:
-    """Only games that have not started. A missing start_time is not past
-    for a same-day game (the project-wide convention for unknown data), but
-    ingestion never writes an in-progress status, so a 'scheduled' game
-    dated before today with no start_time is a stale row for a game that
-    already happened -- 82 such rows (59 MMA, 23 boxing) exist in the live
-    db with public results. A status past 'scheduled' is always closed."""
-    if game.status != "scheduled":
-        return False
-    start = game_start_utc(game)
-    if start is None:
-        return game.date >= et_today()
-    return start > datetime.now(timezone.utc)
+    """See backend.paper.pricing.open_for_betting -- the one definition."""
+    return pricing.open_for_betting(game)
 
 
 @router.get("/")
@@ -382,6 +381,7 @@ def get_user(request: Request, user_id: int):
 @router.post("/{user_id}/picks", dependencies=[Depends(require_player_pin)])
 def place_pick(request: Request, user_id: int, body: PlacePickRequest):
     """Place a paper pick for a user."""
+    bet = body.root
     session = get_session(request.app.state.engine)
     try:
         user = session.get(UserProfile, user_id)
@@ -390,13 +390,13 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
 
         current_balance = balance_of(session, user)
 
-        if body.stake > current_balance:
+        if bet.stake > current_balance:
             raise HTTPException(status_code=400, detail="Insufficient balance")
-        if body.stake <= 0:
+        if bet.stake <= 0:
             raise HTTPException(status_code=400, detail="Stake must be positive")
 
         # Check if the game exists
-        game = session.get(Game, body.game_id)
+        game = session.get(Game, bet.game_id)
         if not game:
             raise HTTPException(status_code=404, detail="Game not found")
 
@@ -404,20 +404,19 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
             raise HTTPException(status_code=400,
                                  detail="Betting has closed: this game has already started")
 
-        result = None
-        payout = None
+        quote = _priced(session, game, bet)
 
         pick = PaperPick(
             user_id=user_id,
-            game_id=body.game_id,
-            pick_type=body.pick_type,
-            pick_value=body.pick_value,
-            odds=body.odds,
-            stake=body.stake,
-            result=result,
-            payout=payout,
-            prop_market=body.prop_market,
-            prop_player=body.prop_player,
+            game_id=bet.game_id,
+            pick_type=quote.pick_type,
+            pick_value=quote.pick_value,
+            odds=quote.odds,
+            stake=bet.stake,
+            result=None,
+            payout=None,
+            prop_market=quote.prop_market,
+            prop_player=quote.prop_player,
         )
         session.add(pick)
         session.commit()
@@ -426,20 +425,22 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
         loop = request.app.state.loop
         user = session.query(UserProfile).get(user_id)
         user_name = user.name if user else "Unknown"
-        odds_str = f"{body.odds:+d}" if body.odds >= 0 else str(body.odds)
+        odds_str = f"{quote.odds:+d}" if quote.odds >= 0 else str(quote.odds)
         _log_feed_event(session, loop, user_id, "pick_placed", {
             "user_name": user_name,
-            "message": f"{user_name} bet {body.pick_value} {odds_str} — ${body.stake:,.0f}",
-            "pick_value": body.pick_value,
-            "odds": body.odds,
-            "stake": body.stake,
+            "message": f"{user_name} bet {quote.pick_value} {odds_str} — ${bet.stake:,.0f}",
+            "pick_value": quote.pick_value,
+            "odds": quote.odds,
+            "stake": bet.stake,
         })
 
         return {
             "id": pick.id,
-            "result": result,
-            "payout": payout,
-            "new_balance": round(current_balance + (payout or 0), 2),
+            "result": None,
+            "payout": None,
+            "new_balance": round(current_balance, 2),
+            **{k: v for k, v in quote.as_dict().items()
+               if k in ("pick_value", "odds", "line", "quoted_at")},
         }
     finally:
         session.close()
@@ -506,19 +507,19 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
         if body.stake > current_balance:
             raise HTTPException(status_code=400, detail="Insufficient balance")
 
-        # Calculate combined decimal odds (multiply all legs)
-        combined_decimal = 1.0
+        # Price every leg before creating the Parlay, so a refusal writes nothing.
+        quotes = []
         for leg in body.legs:
-            if leg.odds < 0:
-                combined_decimal *= 1 + (100 / abs(leg.odds))
-            else:
-                combined_decimal *= 1 + (leg.odds / 100)
+            game = session.get(Game, leg.game_id)
+            if not game:
+                raise HTTPException(status_code=404, detail=f"Game {leg.game_id} not found")
+            if not _open_for_betting(game):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Betting has closed: game {leg.game_id} has already started")
+            quotes.append((leg, _priced(session, game, leg)))
 
-        # Convert back to American odds
-        if combined_decimal >= 2.0:
-            combined_american = int(round((combined_decimal - 1) * 100))
-        else:
-            combined_american = int(round(-100 / (combined_decimal - 1)))
+        combined_american, combined_decimal = pricing.combine([q.odds for _, q in quotes])
 
         # Create parlay record
         parlay = Parlay(
@@ -531,34 +532,23 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
 
         # Create individual legs as PaperPick entries linked to this parlay
         leg_results = []
-
-        for leg in body.legs:
-            game = session.get(Game, leg.game_id)
-            if not game:
-                raise HTTPException(status_code=404, detail=f"Game {leg.game_id} not found")
-
-            if not _open_for_betting(game):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Betting has closed: game {leg.game_id} has already started")
-
-            result = None
-
-            pick = PaperPick(
+        for leg, quote in quotes:
+            session.add(PaperPick(
                 user_id=user_id,
                 game_id=leg.game_id,
-                pick_type=leg.pick_type,
-                pick_value=leg.pick_value,
-                odds=leg.odds,
+                pick_type=quote.pick_type,
+                pick_value=quote.pick_value,
+                odds=quote.odds,
                 stake=0,  # Individual legs have 0 stake; parlay has the stake
-                result=result,
+                result=None,
                 payout=0,
-                prop_market=leg.prop_market,
-                prop_player=leg.prop_player,
+                prop_market=quote.prop_market,
+                prop_player=quote.prop_player,
                 parlay_id=parlay.id,
-            )
-            session.add(pick)
-            leg_results.append({"pick_value": leg.pick_value, "odds": leg.odds, "result": result})
+            ))
+            leg_results.append({"pick_value": quote.pick_value, "odds": quote.odds,
+                                "line": quote.line,
+                                "quoted_at": quote.quoted_at.isoformat(), "result": None})
 
         parlay_payout = None
 
@@ -568,7 +558,7 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
         loop = request.app.state.loop
         user = session.query(UserProfile).get(user_id)
         user_name = user.name if user else "Unknown"
-        legs_str = " + ".join(leg.pick_value for leg in body.legs)
+        legs_str = " + ".join(q.pick_value for _, q in quotes)
         _log_feed_event(session, loop, user_id, "pick_placed", {
             "user_name": user_name,
             "message": f"{user_name} placed {len(body.legs)}-leg parlay: {legs_str} — ${body.stake:,.0f} to win ${body.stake * (combined_decimal - 1):,.0f}",

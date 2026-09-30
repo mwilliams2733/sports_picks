@@ -8,6 +8,7 @@ from backend.api.websocket import ConnectionManager
 from backend.database import get_session
 from backend.models import Base, Team, Game
 from backend.tests.auth_helpers import TEST_PIN
+from backend.tests.pricing_helpers import seed_fresh_odds
 from backend.time_utils import et_today
 
 # Starlette's WebSocketTestSession.receive() has no internal timeout, so a
@@ -69,6 +70,7 @@ def _seed_scheduled_game(client):
     game_id = game.id
     session.commit()
     session.close()
+    seed_fresh_odds(engine, game_id)
     return game_id
 
 
@@ -105,8 +107,7 @@ def test_pick_placed_broadcasts_frame():
                 json={
                     "game_id": game_id,
                     "pick_type": "moneyline",
-                    "pick_value": "Home ML",
-                    "odds": -110,
+                    "side": "HOME",
                     "stake": 100,
                 },
                 headers={"X-Player-Pin": TEST_PIN},

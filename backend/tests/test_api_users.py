@@ -7,6 +7,7 @@ from backend.api.main import create_app
 from backend.database import get_session
 from backend.models import Base, Team, Game, Parlay, PaperPick
 from backend.tests.auth_helpers import ALL_HEADERS, TEST_PIN
+from backend.tests.pricing_helpers import seed_fresh_odds
 from backend.time_utils import et_today
 
 
@@ -41,6 +42,9 @@ def _seed_games(client, specs):
         game_ids.append(game.id)
     session.commit()
     session.close()
+    for gid, spec in zip(game_ids, specs):
+        if spec.get("status", "scheduled") == "scheduled":
+            seed_fresh_odds(engine, gid)
     return game_ids
 
 
@@ -103,8 +107,7 @@ def test_delete_user_removes_picks():
     pick_response = client.post(f"/users/{user_id}/picks", json={
         "game_id": game_ids[0],
         "pick_type": "moneyline",
-        "pick_value": "HOME ML",
-        "odds": -110,
+        "side": "HOME",
         "stake": 100,
     })
     assert pick_response.status_code == 200
@@ -128,8 +131,7 @@ def test_list_users_sorted_by_balance_desc():
     winner_pick = client.post(f"/users/{winner_id}/picks", json={
         "game_id": game_ids[0],
         "pick_type": "moneyline",
-        "pick_value": "HOME ML",
-        "odds": -110,
+        "side": "HOME",
         "stake": 100,
     })
     assert winner_pick.status_code == 200
@@ -160,8 +162,7 @@ def test_place_pick_on_scheduled_game_is_pending():
     response = client.post(f"/users/{user_id}/picks", json={
         "game_id": game_ids[0],
         "pick_type": "moneyline",
-        "pick_value": "HOME ML",
-        "odds": -110,
+        "side": "HOME",
         "stake": 100,
     })
     assert response.status_code == 200
@@ -177,7 +178,7 @@ def test_a_bet_on_a_finished_game_is_refused():
     user_id = _make_user(client)
     response = client.post(f"/users/{user_id}/picks", json={
         "game_id": game_ids[0], "pick_type": "moneyline",
-        "pick_value": "HOME ML", "odds": -110, "stake": 100})
+        "side": "HOME", "stake": 100})
     assert response.status_code == 400
 
 
@@ -194,7 +195,7 @@ def test_a_bet_on_a_started_game_is_refused():
     user_id = _make_user(client)
     response = client.post(f"/users/{user_id}/picks", json={
         "game_id": game_ids[0], "pick_type": "moneyline",
-        "pick_value": "HOME ML", "odds": -110, "stake": 100})
+        "side": "HOME", "stake": 100})
     assert response.status_code == 400
 
 
@@ -216,7 +217,7 @@ def test_a_stale_scheduled_game_from_before_today_is_refused():
     user_id = _make_user(client)
     response = client.post(f"/users/{user_id}/picks", json={
         "game_id": game_ids[0], "pick_type": "moneyline",
-        "pick_value": "HOME ML", "odds": -110, "stake": 100})
+        "side": "HOME", "stake": 100})
     assert response.status_code == 400
 
 
@@ -233,7 +234,7 @@ def test_a_bet_on_a_not_yet_started_game_is_accepted():
     user_id = _make_user(client)
     response = client.post(f"/users/{user_id}/picks", json={
         "game_id": game_ids[0], "pick_type": "moneyline",
-        "pick_value": "HOME ML", "odds": -110, "stake": 100})
+        "side": "HOME", "stake": 100})
     assert response.status_code == 200
 
 
@@ -244,7 +245,7 @@ def test_a_settled_win_pays_at_the_price():
     user_id = _make_user(client)
     pick = client.post(f"/users/{user_id}/picks", json={
         "game_id": game_ids[0], "pick_type": "moneyline",
-        "pick_value": "HOME ML", "odds": -110, "stake": 100}).json()
+        "side": "HOME", "stake": 100}).json()
     assert pick["result"] is None
     _finish(client, game_ids[0])
     _grade(client)
@@ -260,8 +261,7 @@ def test_place_pick_zero_stake_rejected():
     response = client.post(f"/users/{user_id}/picks", json={
         "game_id": game_ids[0],
         "pick_type": "moneyline",
-        "pick_value": "HOME ML",
-        "odds": -110,
+        "side": "HOME",
         "stake": 0,
     })
     assert response.status_code == 400
@@ -276,8 +276,7 @@ def test_place_pick_unknown_game_404():
     response = client.post(f"/users/{user_id}/picks", json={
         "game_id": 9999,
         "pick_type": "moneyline",
-        "pick_value": "HOME ML",
-        "odds": -110,
+        "side": "HOME",
         "stake": 100,
     })
     assert response.status_code == 404
@@ -291,8 +290,7 @@ def test_place_pick_exceeding_balance_rejected():
     response = client.post(f"/users/{user_id}/picks", json={
         "game_id": game_ids[0],
         "pick_type": "moneyline",
-        "pick_value": "HOME ML",
-        "odds": -110,
+        "side": "HOME",
         "stake": 10001,
     })
     assert response.status_code == 400
@@ -316,8 +314,7 @@ def test_pending_stakes_are_not_reserved():
         response = client.post(f"/users/{user_id}/picks", json={
             "game_id": game_ids[0],
             "pick_type": "moneyline",
-            "pick_value": "HOME ML",
-            "odds": -110,
+            "side": "HOME",
             "stake": 10000,
         })
         assert response.status_code == 200
@@ -338,7 +335,7 @@ def test_parlay_requires_two_legs():
     response = client.post(f"/users/{user_id}/parlay", json={
         "stake": 100,
         "legs": [
-            {"game_id": game_ids[0], "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110},
+            {"game_id": game_ids[0], "pick_type": "moneyline", "side": "HOME"},
         ],
     })
     assert response.status_code == 400
@@ -356,8 +353,8 @@ def test_parlay_combined_odds_two_minus_110_legs():
     response = client.post(f"/users/{user_id}/parlay", json={
         "stake": 500,
         "legs": [
-            {"game_id": game_ids[0], "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110},
-            {"game_id": game_ids[1], "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110},
+            {"game_id": game_ids[0], "pick_type": "moneyline", "side": "HOME"},
+            {"game_id": game_ids[1], "pick_type": "moneyline", "side": "HOME"},
         ],
     })
     assert response.status_code == 200
@@ -381,8 +378,8 @@ def test_a_winning_parlay_reaches_the_balance():
     parlay_response = client.post(f"/users/{user_id}/parlay", json={
         "stake": 500,
         "legs": [
-            {"game_id": game_ids[0], "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110},
-            {"game_id": game_ids[1], "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110},
+            {"game_id": game_ids[0], "pick_type": "moneyline", "side": "HOME"},
+            {"game_id": game_ids[1], "pick_type": "moneyline", "side": "HOME"},
         ],
     })
     assert parlay_response.status_code == 200
@@ -411,8 +408,8 @@ def test_a_parlay_settles_when_its_last_leg_finishes():
     parlay_response = client.post(f"/users/{user_id}/parlay", json={
         "stake": 100,
         "legs": [
-            {"game_id": game_ids[0], "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110},
-            {"game_id": game_ids[1], "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110},
+            {"game_id": game_ids[0], "pick_type": "moneyline", "side": "HOME"},
+            {"game_id": game_ids[1], "pick_type": "moneyline", "side": "HOME"},
         ],
     })
     assert parlay_response.status_code == 200
@@ -440,8 +437,8 @@ def test_parlay_legs_stored_with_zero_stake():
     parlay_response = client.post(f"/users/{user_id}/parlay", json={
         "stake": 500,
         "legs": [
-            {"game_id": game_ids[0], "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110},
-            {"game_id": game_ids[1], "pick_type": "moneyline", "pick_value": "HOME ML", "odds": -110},
+            {"game_id": game_ids[0], "pick_type": "moneyline", "side": "HOME"},
+            {"game_id": game_ids[1], "pick_type": "moneyline", "side": "HOME"},
         ],
     })
     assert parlay_response.status_code == 200
@@ -466,8 +463,7 @@ def test_grade_endpoint_grades_pending_picks():
     pick_response = client.post(f"/users/{user_id}/picks", json={
         "game_id": game_ids[0],
         "pick_type": "moneyline",
-        "pick_value": "HOME ML",
-        "odds": -110,
+        "side": "HOME",
         "stake": 100,
     })
     assert pick_response.status_code == 200
@@ -500,8 +496,7 @@ def test_grade_endpoint_skips_games_without_scores():
     pick_response = client.post(f"/users/{user_id}/picks", json={
         "game_id": game_ids[0],
         "pick_type": "moneyline",
-        "pick_value": "HOME ML",
-        "odds": -110,
+        "side": "HOME",
         "stake": 100,
     })
     assert pick_response.status_code == 200
@@ -532,8 +527,7 @@ def test_win_streak_counted():
         response = client.post(f"/users/{user_id}/picks", json={
             "game_id": game_id,
             "pick_type": "moneyline",
-            "pick_value": "HOME ML",
-            "odds": -110,
+            "side": "HOME",
             "stake": 100,
         })
         assert response.status_code == 200
