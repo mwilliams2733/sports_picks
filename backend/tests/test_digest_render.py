@@ -464,3 +464,9 @@ def test_reason_text_never_mentions_model_weight_or_a_bar():
     assert "model weight" not in reason
     assert "bar" not in reason
     assert "0.00" not in reason
+
+
+def test_empty_day_subject_starts_with_the_product_name():
+    section = DigestSection(sport="nfl", picks=[], props=[])
+    subject, _, _ = render_empty_day_digest([section], date(2026, 9, 20), -150, 150)
+    assert subject.startswith("Metric Edge — No qualifying picks — ")
