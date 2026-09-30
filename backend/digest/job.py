@@ -66,12 +66,11 @@ def send_daily_digest(config: dict, engine, target_date=None) -> dict:
                 return result
 
             empty_day = True
-            min_shrunk_edge_pp = send_bar["min_shrunk_edge_pp"]
             min_odds = send_bar["min_odds"]
             max_odds = send_bar["max_odds"]
             for section in sections:
                 logger.info("Digest for %s: %s", target_date,
-                           empty_day_reason(section, min_shrunk_edge_pp, min_odds, max_odds))
+                           empty_day_reason(section, min_odds, max_odds))
 
             # A distinct marker, logged ONLY when every in-season sport that
             # had games today generated zero picks -- the 2026-09-28 class
@@ -89,7 +88,7 @@ def send_daily_digest(config: dict, engine, target_date=None) -> dict:
                            target_date)
 
             subject, html, text = render_empty_day_digest(sections, target_date,
-                                                           min_shrunk_edge_pp, min_odds, max_odds)
+                                                           min_odds, max_odds)
 
         if not subject:
             logger.info("Digest for %s is empty; nothing sent", target_date)

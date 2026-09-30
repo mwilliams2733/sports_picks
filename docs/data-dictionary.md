@@ -1,0 +1,448 @@
+# Data dictionary: pick export
+
+This documents the CSV export produced by
+`python -m backend.scripts.export_picks --db <path> --out <dir> [--since YYYY-MM-DD] [--sport nfl ...]`
+(see the module docstring in `backend/scripts/export_picks.py` for the exact
+invocation). It is written for a reader who has never seen this project.
+
+The exporter is read-only (opens the database `mode=ro`) and excludes
+`paper_picks` and `user_profiles` -- both are private data about the owner
+and paper-trading users, not data about the model, and are not needed for
+model analysis.
+
+**Every date and timestamp in this document, and every timestamp column in
+both CSVs, is UTC.** Timestamps are written ISO-8601 with a `Z` suffix
+(e.g. `2026-09-18T18:00:00Z`); dates (`game_date`, `emailed_digest_date`,
+`season`) have no time component and need no timezone. Where this
+dictionary cites a git commit's authored time, that time is in the
+committer's local zone (Pacific) unless converted to UTC and said so
+explicitly -- several dates below (stars hidden, the send bar) were authored
+late at night Pacific and land on the *next* calendar day in UTC, which is
+the date this dictionary uses throughout.
+
+## What a "pick" is
+
+A pick is one row this project's model generated and stored, before it is
+known whether it won. Every pick lives in the `picks` table and gets one row
+in `picks.csv`, whether or not it was ever graded or emailed.
+
+There are two kinds, distinguished by `pick_type`:
+
+- **Game picks** -- `moneyline`, `spread`, `over_under`. These are about the
+  outcome of a whole game: who wins, who covers a line, whether the total
+  goes over or under a number. `edge_pct` on a game pick is the model's win
+  probability minus the market's no-vig win probability, in percentage
+  points (moneyline), or measured against a flat 0.5 fair value
+  (spread/over_under) -- see `market_prob_novig` below.
+- **Props** -- `pick_type == "prop"`. These are about one player's
+  statistic in one game (e.g. "Over 275.5 passing yards"). A prop's
+  `edge_pct` is **not** a probability difference -- see "Known traps" below,
+  this is the single most important trap in this dataset.
+
+Game picks and props share the same table and the same columns, but several
+columns mean different things (or are blank) depending on which kind a row
+is. Always filter or group by `pick_type` before comparing edges, CLV, or
+anything price-derived.
+
+## `picks.csv` columns
+
+| Column | Meaning |
+|---|---|
+| `pick_id` | Primary key of `picks`. Stable identifier for one pick. |
+| `created_at` | **Not when the pick was first made -- when it was last REFRESHED.** A game pick is rewritten in place until kickoff (`backend/pipeline/pick_generator.py`'s `_refresh_pick`, lines 422-441): `pick_value`, `confidence`, `edge_pct`, `odds_at_pick`, `model_prob`, `suggested_unit_size` and `created_at` are all overwritten on each refresh, so `created_at` answers "when was this version of the advice formed", not "when did this row first appear". The side or price a reader sees here can therefore differ from what an earlier snapshot (or an email) showed for the same `pick_id` -- see `emailed_pick_value` below for one way to recover what was actually sent. **`rationale_json` (-> `factors`) and `strategy_id` (-> `strategy`) are NOT refreshed** -- they still describe whichever side/model the pick FIRST had, so `factors` can describe the opposite side from the current `pick_value` after a flip. This is a pre-existing characteristic of the live pipeline, not introduced by the export; the export is simply where it becomes visible to an outside reader. |
+| `game_id` | Foreign key to `games`. |
+| `sport` | `nfl`, `mlb`, `nba`, `ncaaf`, `ncaab`, `boxing`, or `mma`. |
+| `season` | The season string stored on the game (e.g. `"2026"`). |
+| `game_date` | The game's calendar date (project convention -- see "collection start" below for how this date can predate real collection via backfill). |
+| `start_time_utc` | The game's scheduled start, UTC, where known. Nullable. |
+| `game_status` | `scheduled`, `final`, etc., as stored on `games.status`. |
+| `home_team` / `away_team` | Full team names (`teams.name`), not abbreviations. |
+| `home_score` / `away_score` | Final score, null until the game is graded. |
+| `strategy` | The strategy that produced the pick, e.g. `ensemble`, `combat_sports`, `prop_value`. Blank if the strategy row is missing. |
+| `pick_type` | `moneyline`, `spread`, `over_under`, or `prop`. |
+| `pick_value` | The raw stored label, e.g. `"HOME ML"`, `"AWAY -1.5"`, `"Over 8.5"`. For a prop, a player-and-line string that sometimes ends in the raw API market key rather than a display label -- e.g. `"Zach Ertz Over 10.5 player_reception_yds"` -- see `pick_label` for the resolved form, and "known traps" for why. |
+| `pick_label` | A human-readable label with HOME/AWAY resolved to the real team name (e.g. `"Pittsburgh Pirates to win"`), and a prop's trailing market key (if any) swapped for its display label. This reuses the same resolvers the daily email and the picks API already use (`backend/digest/render.py`'s `_selection_label` / `_prop_label`) -- there is deliberately no third, independent label function. |
+| `side` | `HOME` / `AWAY` / `Over` / `Under` for a game pick; for a prop, `Over` / `Under` when present in the pick value, or `Yes` / `No` for a binary outcome (see "prop outcome shapes" below); blank if unparseable. |
+| `line` | The numeric line parsed out of `pick_value` (e.g. `-1.5`, `8.5`), blank for a moneyline pick (there is no line) or when nothing parses. |
+| `odds_at_pick` | The American price stored at pick time -- or, for a refreshed game pick, at the time of the **last refresh before kickoff** (see "known traps: picks are refreshed in place"). Null for a small number of legacy rows. |
+| `implied_prob_raw` | What `odds_at_pick` implies, vig included (not de-vigged). Computed with `backend.analysis.odds_utils.american_to_implied_prob`. Blank if `odds_at_pick` is null or not a valid American price. |
+| `model_prob` | The model's own win probability for the pick, where stored. Nullable, especially for props and older rows. |
+| `edge_pct` | The stored edge in percentage points. **See "Known traps": a prop's `edge_pct` is on a completely different, incompatible scale from a game pick's.** |
+| `market_prob_novig` | See below. |
+| `confidence` | The stored star rating (1-5), still recorded even though stars are hidden from users in the email and frontend (see "known traps"). |
+| `suggested_unit_size` | Kelly stake in units, where one unit is 1% of bankroll. Null for picks made before this was persisted (not a computed 0); 0.0 means the sizer looked at the bet and declined it. **See "known traps": the sizer returned a constant 0.5 internally before 2026-09-20, but that value was never persisted -- every pick before 2026-09-21 is NULL here, not 0.5.** |
+| `factors` | The rationale's factor codes, `;`-joined as `code:side:strength`, e.g. `rating_gap:home:strong;pitcher_edge:away:moderate`. Blank if `rationale_json` is missing or malformed. |
+| `prop_player` / `prop_market` | Only populated for `pick_type == "prop"`: the player's name and the market key (e.g. `player_pass_yds`), not the display label. |
+| `result` | `win` / `loss` / `push`, or blank if the pick has not been graded yet. A push means the bet is void -- see "How grading works". |
+| `payout` | Net units from `backend.pipeline.grader.payout_for(result, odds_at_pick)`, **for a flat 1-unit stake** -- it is NOT scaled by `suggested_unit_size`. A pick sized at 0.3 units by Kelly and a pick sized at 2.0 units show the identical `payout` for the identical price and result; multiply by `suggested_unit_size` yourself if you want bankroll-scaled P&L. Blank if ungraded. |
+| `odds_at_close` / `line_at_close` | The price/line at game close, captured for CLV. Blank if never captured (see "line snapshots" below). **For `spread` and `over_under` picks, `odds_at_close` is a deliberate copy of `odds_at_pick`, not a real closing price** -- see "What CLV means here". |
+| `clv_price_pp` / `clv_line_pts` | Closing line value for this pick, split by unit -- see "What CLV means here" below. Exactly one is filled per row (or neither, if there is no close); **never pool the two columns together.** |
+| `series_depth` | The deepest per-bookmaker observation count `line_snapshots` has for this pick's game (see `line_history.csv` below). `0` means the game has no line snapshots at all (most games before 2026-09-22). `1` means no book was ever seen to change its price for that game, so any `odds_at_close`/`line_at_close`/CLV value drawn from it is the SAME observation as the opening price, not a real close. `backend.analysis.clv_report.measurable()` keeps only `series_depth > 1`, so it drops both `0` and `1` rows from its own reporting; use this column to reproduce that filter here. |
+| `odds_reconstructed` | `True` when `odds_at_pick` was rebuilt afterwards from surviving book rows rather than recorded live (`backend/scripts/repair_invalid_odds.py`). Treat these as an approximation in any ROI/CLV figure. `backend.analysis.clv_report.usable()` excludes these by default too (`include_reconstructed=False`). |
+| `emailed` | `True` if this pick appears at least once in `emailed_picks`. |
+| `emailed_odds` / `emailed_at` / `emailed_pick_value` / `emailed_digest_date` / `emailed_confidence` | What the email actually said, at the time it was sent, for the **most recent** digest that included this pick -- not what the pick's own (possibly since-refreshed) columns say now. A pick can be emailed on more than one digest date (the uniqueness constraint on `emailed_picks` is per `(digest_date, pick_id)`, not per pick); this export keeps the row with the latest `sent_at` and folds the rest away, so one `pick_id` is always exactly one `picks.csv` row. `emailed_pick_value` and `emailed_odds` are the side/price as displayed that day and can differ from the current `pick_value`/`odds_at_pick` if the pick was refreshed after sending (see `created_at` above). `emailed_confidence` is the star rating as sent (nullable -- rows recorded before 2026-09-29 don't always carry it). All five are blank before 2026-09-28, when `emailed_picks` recording began (nothing before that date was recorded, regardless of whether it was actually emailed). |
+
+### `market_prob_novig`
+
+This is the fair (no-vig) market probability the pick's `edge_pct` was
+measured against -- not an independently computed number:
+
+- **moneyline**: `model_prob - edge_pct / 100`. `edge_pct = (model_prob -
+  market_prob) * 100`, so this is arithmetic on the two stored columns, not
+  a re-derivation from raw odds -- but it is **not bit-exact**: both inputs
+  are themselves rounded before storage (`edge_pct` to 0.1 percentage
+  points, `model_prob` to 4 decimal places, see
+  `backend/analysis/variants/ensemble.py:284-285` and `:292-293`), so the
+  recovered value is accurate to within roughly ±0.0005 of what the
+  strategy actually computed internally.
+- **spread / over_under**: `0.5` **only when `model_prob` is itself
+  present** on the row. The model does not store a de-vigged market win
+  probability for a line pick; `edge_pct` for these is measured against a
+  flat 0.5 fair-coin value when a real pick was made, and `0.5` here
+  documents that convention rather than computing anything. A row with no
+  `model_prob` at all -- every one of the 284 legacy spread/over_under
+  picks from before 2026-09-17 (see "known traps" below) -- gets a **blank**
+  here instead: writing `0.5` for those would claim their edge was measured
+  against a fair coin flip when nothing on the row says it was.
+- **prop**: blank. Props are never de-vigged against a market probability
+  at all (see "known traps").
+
+## `line_history.csv` columns
+
+One row per `line_snapshots` row -- the append-only price series (see
+"known traps: odds is overwritten" below). Columns: `game_id`, `sport`,
+`home_team`, `away_team`, `game_date` and `start_time_utc` (for joining back
+to `picks.csv`, and for locating the pre-kickoff close for a game that has
+no pick of its own at all -- without a start time there is no way to know
+which snapshot was "the close"), every price field (`bookmaker`,
+`moneyline_home`, `moneyline_away`, `spread_home`, `spread_away`,
+`over_under`, `spread_home_price`, `spread_away_price`, `over_price`,
+`under_price`), `captured_at` / `last_seen_at`, and `series_depth`. This is
+**per-game, not per-row**: it is the deepest observation count any single
+bookmaker has for that `game_id` (the same definition, and the same value,
+`picks.csv`'s `series_depth` column carries for a pick on that game --
+joinable on `game_id`, not on `(game_id, bookmaker)`). A specific row's own
+bookmaker may have fewer observations than this number; `series_depth`
+answers "did ANY book watch this game's line move", which is what
+`backend.analysis.clv_report.measurable()` gates on, not "did THIS
+bookmaker's line move". `1` means no book was ever seen to change its price
+for the game at all. A row is written only when a price DIFFERS from the
+latest row for the same `(game_id, bookmaker)`; an unchanged re-observation
+extends `last_seen_at` on the existing row rather than adding a new one.
+
+## `manifest.txt`
+
+Records when the export ran, the db path, the git commit (`HEAD`) the
+export script was run from, row counts per file and per sport, the
+`--since`/`--sport` filters applied, and a pointer back to this file.
+
+## How grading works
+
+- A pick is graded once its game finishes and `backend.pipeline.grader`
+  processes it; until then `result`/`payout` are blank.
+- `payout_for(result, odds_at_pick)` in `backend/pipeline/grader.py` is the
+  one place payout is computed from a result and a price -- this export does
+  not recompute it. **It is a flat 1-unit stake**, always -- it is not
+  scaled by `suggested_unit_size`. A 0.3-unit Kelly stake and a 2.0-unit
+  Kelly stake on the same price and result show the identical `payout`;
+  multiply by `suggested_unit_size` yourself for bankroll-scaled P&L.
+- **A push is a void bet, not a loss.** It should be excluded from any
+  win-rate denominator (wins / (wins + losses), never wins /
+  (wins + losses + pushes)) and its payout is 0.
+
+## What CLV means here
+
+CLV ("closing line value") compares the price a pick was taken at to the
+price the market closed at. It is computed by
+`backend.analysis.odds_utils.compute_pick_clv` -- this export calls that
+function directly and writes back its two return values into
+`clv_price_pp` and `clv_line_pts`; it does not recompute CLV independently.
+This is the same function `backend.analysis.clv_report.load_samples` calls
+internally, with the same five inputs from the same columns.
+
+**The two columns are genuinely different units, which is why they are two
+columns and not one: never pool or average them together.**
+
+- **moneyline**: `clv_price_pp` is filled, in **implied-probability
+  percentage points** (closing implied prob minus pick-time implied prob,
+  ×100). Positive means the bettor's price beat the close. `clv_line_pts`
+  is always blank for a moneyline pick.
+- **spread / over_under**: `clv_line_pts` is filled, in **line points** (how
+  many points the bettor beat the close by). Positive means a better line
+  at pick time. `clv_price_pp` is always blank for these -- and see the
+  next paragraph for why `odds_at_close` on these rows is not a real price
+  to begin with.
+- **prop**: both columns are always blank -- CLV is not computed for props.
+
+Both are blank whenever there is no closing price/line on record for that
+pick (absent is not the same as zero -- counting a missing close as 0 CLV
+would bias every average toward "no edge").
+
+**Three further caveats, all of which `backend.analysis.clv_report`
+applies when it computes its own CLV summaries, and which this export does
+NOT apply for you -- filter for them yourself if you want a comparable
+number:**
+
+1. **For `spread` and `over_under` picks, `odds_at_close` is a deliberate
+   copy of `odds_at_pick`, not a real closing price.** `grader.py`'s
+   `capture_closing_odds` sets `odds_at_close = odds_at_pick` for these two
+   pick types (the juice on a line bet is rarely tracked historically and
+   barely moves; the real CLV for these is in `line_at_close` /
+   `clv_line_pts`). This is why `clv_price_pp` is never filled for a
+   spread/over_under row -- computing one against a copied price would
+   fabricate movement that never happened.
+2. **Before 2026-09-23, the stored close was one arbitrary bookmaker's last
+   write, not a consensus.** `capture_closing_odds`'s own docstring
+   describes the earlier behavior (reading `Odds` ordered by timestamp and
+   taking the first row) as comparing "the gap between one arbitrary book
+   and the field" rather than real market movement. CLV on picks graded
+   before that date should be treated as noisier than CLV after it.
+3. **A `series_depth` of 1 means the "close" is the same observation as the
+   price the pick was made from -- not a real close at all.** If a
+   bookmaker's price for a game was only ever seen once, any CLV computed
+   against it is structurally near zero and is not evidence the bettor beat
+   (or lost to) anything; it is evidence of not having watched the line
+   long enough. `backend.analysis.clv_report.measurable()` drops these rows
+   entirely from its own reporting (`series_depth > 1` only) -- do the same
+   here using the `series_depth` column before treating a `clv_price_pp` or
+   `clv_line_pts` value as meaningful. Relatedly, `clv_report.usable()`
+   also excludes `odds_reconstructed` rows by default -- see that column
+   above.
+
+## Known traps
+
+Each bullet below was checked against the code, docs, or git history in
+this repository as of 2026-09-30 (commit `1c81e33` and this branch's work
+on top of it). Where a check could not be made from the code alone, that is
+stated explicitly rather than left silent.
+
+- **The generator only stores a game pick with `edge_pct >= 3.0`.** Every
+  team-sport strategy (`ensemble.py`, `recent_form.py`, `sport_specific.py`,
+  `combat_sports.py`) reads a `min_edge` from its strategy's stored config
+  and refuses to emit a pick below it (`ensemble.py:241/250`'s `_takeable`:
+  `if edge < min_edge: return False`). The live `ensemble` strategy's config
+  is `{"min_edge": 3, ...}` (documented directly in
+  `plans/007-measure-calibration-before-retuning-min-edge.md:152-153`, and
+  matching the same `3.0` the `combat_sports` strategy is seeded with in
+  `backend/database.py:471`). On 2026-09-30 the live db's minimum
+  `edge_pct` was at least 3.0 in every sport (exactly 3.0 in mlb/nba/ncaaf, up to 17.2 in boxing), consistent with this floor. **The edge
+  distribution in this export is truncated at +3.0 by construction -- there
+  is no lower tail below it to find, and its absence is not a finding.**
+  (`value_only.py`'s own `min_edge` default is 10.0, higher still, for
+  whichever sports use that strategy instead.)
+- **284 picks predate 2026-09-17** (2026-03-14 through 2026-05-24, before
+  collection effectively began -- see the next bullet). None of them have
+  `model_prob` or `suggested_unit_size` populated. The "collection starts
+  2026-09-17" bullet below explains why these rows exist at all; it does
+  not by itself explain why they are missing these two columns specifically
+  -- they simply predate the features that would have populated them.
+- **Every totals (`over_under`) pick with a non-null `model_prob` has
+  `model_prob = 1.0`** (46 of 46, as measured against the live db
+  2026-09-30). This is not a coincidence: `ensemble.py`'s totals section
+  (lines ~354-376) documents its own history in a lengthy comment --
+  `_predicted_total` depends on `offensive_rating`, `defensive_rating` and
+  `pace`, none of which any collector in this repo ever supplied, so all
+  three silently fell back to 100.0 and `_predicted_total` came out to
+  exactly 200.0 for every game in every sport, regardless of the real line.
+  Against real market totals (6.5-20.5 mlb, 36.5-76.5 ncaaf, 130-172.5
+  ncaab, 208.5-255.5 nba), that one constant decided the side by itself and
+  saturated the CDF, giving `model_prob` exactly 1.0 and `edge_pct` exactly
+  50.0 on every one of these picks. Graded, the set came out at 52% over 50
+  picks at -110 -- a coin flip paying the vig, not a signal. `ensemble.py`'s
+  current code gates all totals picks on `TOTALS_VALIDATED_SPORTS`, which is
+  presently empty, so no NEW totals picks are generated this way -- but the
+  46 already-stored rows remain in this export and would read as a striking
+  "pattern" (`model_prob` always exactly 1.0) to an analyst who has not seen
+  this comment.
+- **Collection effectively starts 2026-09-17.** Verified directly in code:
+  `backend/scripts/backfill_date_range.py` states "Game collection began on
+  2026-09-17, and nothing ever fetched what came [before]". Earlier rows
+  exist only where backfilled (e.g. NFL history imported from nflverse --
+  see `backend/analysis/epa_ratings.py` and
+  `backend/scripts/backfill_line_snapshots.py`, which both reference
+  nflverse imports). **Backfilled `captured_at` values in `line_history.csv`
+  cannot answer "when did the line move" questions** -- they reflect when
+  the backfill ran or an approximated import timestamp, not a real
+  observation time.
+- **The `odds` table is overwritten in place; `line_snapshots` is the only
+  price history.** Verified directly in code:
+  `backend/models.py`'s `LineSnapshot` docstring states "`Odds` holds the
+  CURRENT price and is upserted in place, so every quote this project has
+  seen except the latest is discarded." This is why `line_history.csv`
+  comes from `line_snapshots`, not `odds`.
+- **Picks on the same game are correlated.** Not independently re-verified
+  this session beyond the structural fact that multiple `picks` rows share
+  one `game_id` (visible directly in the schema) -- the statistical
+  consequence (effective sample size well below row count) follows from
+  that structure. Aggregate to one row per game before treating a count of
+  picks as a sample size.
+- **Kelly sizing returned a constant 0.5 until 2026-09-20 -- but that value
+  never reached this export.** Verified via git history: commits `92e5f50`
+  ("feat(kelly): wire the three adjusters, and persist the stake they
+  produce") and `cdfd160` ("fix(kelly): let the sizer decline a bet, and
+  stop the backtester undoing it") are both dated 2026-09-20. The constant
+  `0.5` was never itself *persisted* to `suggested_unit_size`, though: every
+  pick before 2026-09-21 in the live db has `suggested_unit_size` **NULL**,
+  not `0.5`. `picks.csv` will show a blank for these rows, not a `0.5` value
+  -- do not go looking for a literal 0.5 in the column as a regime marker;
+  use `created_at` against the date instead.
+- **Prop picks were re-inserted about 18x per run until a dedupe on
+  2026-09-28.** The dedupe date is confirmed via git history: `d8191aa`
+  ("fix(props): one pick per player-market, refreshed in place, never
+  re-added") and `9c5f4ef` ("fix(props): remove the duplicate prop picks
+  stored before d8191aa") are both dated 2026-09-28. The "about 18x"
+  multiplier itself is carried over from project memory
+  (`sports-picks-prop-duplicate-picks`) and was not independently
+  re-counted against the database this session.
+- **MMA duplicate bouts were merged 2026-09-20.** Verified via git history:
+  commits `91fdd7a` ("fix(mma): merge the date splits, void the bouts that
+  moved") and `b0d4f1b` ("fix(mma): one bout stored twice was one bout
+  counted twice") are both dated 2026-09-20.
+- **Stuck boxing bouts were voided 2026-09-20 (as push).** The date and the
+  general action are verified via git history (`97ca42f`, "feat(boxing):
+  void the bouts no source can ever settle", dated 2026-09-20). **The
+  count needs a correction**: "110" (as commonly quoted) counts stuck
+  BOUTS, not picks -- only 36 boxing PICKS are actually pushes as a result.
+  If you are counting rows in `picks.csv`, expect 36, not 110.
+- **MMA "Over 0" totals were voided 2026-09-30 (as push), phantom wins from
+  the team model grading 0/1 bout scores.** The date and the mechanism are
+  verified via git history and this repository's own recent commits:
+  `b63c506` ("feat(scripts): void every combat spread/total already
+  stored; one COMBAT_SPORTS") and `72e92cf` ("fix(combat): grader.grade_pick
+  voids a combat spread/total as push") are both dated 2026-09-30, and
+  `backend/scripts/audit_combat_grading.py`'s own `OU_ON_COMBAT` flag
+  documents the same mechanism ("Our 'score' for a bout is a 0/1 pair ...
+  so `home_score + away_score` is always 1 and `grade_pick` settles any
+  'Over x' with x < 1 as a win"). **The count needs a correction**: there
+  are 14 MMA `over_under` pushes from this voiding, not 13 as sometimes
+  quoted -- 14 is the number to expect if you count rows.
+- **Combat sports have been picked by `combat_sports` instead of
+  `ensemble` since 2026-09-30.** Verified via git history: `a2c6011`
+  ("fix(combat): route combat games to combat_sports, never ensemble") is
+  dated 2026-09-30, and this branch itself descends from the merge commit
+  (`1c81e33`) that includes this fix.
+- **All dates in this dictionary are UTC (see the note at the top of this
+  file). Stars (`confidence`) were hidden from users 2026-09-30 UTC, and
+  the 3-point shrunk-edge send bar was both introduced AND removed within
+  that same UTC day.** Verified precisely via git history, resolving an
+  apparent conflict between the brief and `docs/review-remediation.md`'s
+  own (Pacific-dated) section headers:
+  - `a1d1949` (introduces the 3-point send bar), `867af4f` (hides stars in
+    the frontend) and `d677582` (the digest-side stars/wording fix) were
+    all authored late on 2026-09-29 **Pacific time** (`23:06:29`,
+    `23:06:45` and `23:49:26` respectively, `-07:00`) -- which is
+    **2026-09-30, 06:06-06:49 UTC**. The merge, `f7a3bee`, is
+    `2026-09-30T00:06:47-07:00` = **2026-09-30T07:06:47Z**.
+  - `docs/review-remediation.md`'s section header says "2026-09-29", which
+    is correct in the *author's local time* but not in UTC -- the
+    convention this export and dictionary use throughout. Since every
+    timestamp column in the CSVs is UTC, **2026-09-30** is the date that
+    actually matches the data, and is used here instead of the doc
+    header's Pacific date.
+  - This branch's own two commits (`de0e349`, `0ab3fd6`, removing the
+    3-point bar and adding this export) are also dated 2026-09-30 UTC
+    (`17:06` UTC). The 3-point bar went live 2026-09-30 ~07:06Z (merge
+    `f7a3bee`) and stays in force until the first digest after this branch
+    merges -- provisionally 2026-10-01 (see the next bullet).
+  - **As of this branch, the 3-point bar removal is NOT YET merged to
+    master or deployed.** "Every priced game pick is emailed" is only true
+    starting with the first digest run AFTER this branch merges and the
+    scheduler restarts -- see the note under "Emailed picks have only been
+    recorded since 2026-09-28" below for the equivalent caveat on
+    `emailed_picks`. Provisionally: if merged promptly, that would be the
+    morning of 2026-10-01; treat that date as pending confirmation, not a
+    fact already in the data.
+- **Emailed picks have only been recorded since 2026-09-28.** Verified via
+  git history: `697d6fc` ("feat(digest): record the picks each email sent,
+  and grade them as sent") is dated 2026-09-28 (23:07 UTC).
+- **Prop `edge_pct` is NOT a probability difference.** Verified by code
+  intent: `backend/digest/selector.py`'s docstring (in the notes on prop
+  ranking, not `render.py`) states explicitly that a prop's edge is
+  price-blind and "not comparable to a game pick's de-vigged edge", which
+  is also why the daily email never shows a prop's edge (see this branch's
+  own change removing edge display for props while adding it for game
+  picks). It is a stat-unit gap (e.g. projected yards minus line) stored in
+  the same numeric column as a game pick's percentage-point edge. A raw
+  stored prop `pick_value` ends in the API market key when `market_label`
+  does not recognize it -- e.g. `"Zach Ertz Over 10.5 player_reception_yds"`
+  (`backend/digest/render.py:94`, `backend/tests/test_prop_market_labels.py`)
+  -- which `pick_label` resolves to `"Zach Ertz Over 10.5 Receiving Yards"`.
+  **Never compare `edge_pct` across `pick_type` values.**
+- **MLB props and anytime-TD props cannot be graded reliably; excluded
+  from emails.** Partially verified: `backend/analysis/prop_markets.py`
+  explicitly documents that MLB props (`batter_hits`, `batter_home_runs`,
+  `batter_total_bases`, `pitcher_strikeouts`) have no `PlayerStat` column
+  to grade against and are "fetched and stored and can then be neither
+  analysed nor graded" -- this is directly confirmed in code.
+  `player_anytime_td` **is** handled by `grade_prop_pick` in
+  `backend/pipeline/grader.py` when the stored `pick_value` is in
+  "Over/Under N" form, but project memory
+  (`sports-picks-prop-outcome-shapes`) states some anytime-TD rows are
+  stored as a bare `Yes`/`No` outcome with a null line, which the grader's
+  `Over/Under` regex cannot parse -- making those specific rows
+  ungradeable in practice. This export's `side` column surfaces that shape
+  directly (`Yes`/`No` instead of `Over`/`Under`) so it can be checked
+  per-row rather than assumed.
+- **The model's blend weight against the market was measured at 0.00 for
+  NFL (1,184 games) and MLB (127) on 2026-09-29.** Verified directly:
+  `config.yaml`'s `digest.send_bar.blend_weight` and
+  `docs/review-remediation.md` both record this measurement, including the
+  Brier scores (market alone beats model alone: 0.2109 vs 0.2258 NFL;
+  0.2216 vs 0.2438 MLB). This is an **in-sample** bound, not a held-out
+  result -- see `docs/review-remediation.md` for why that distinction
+  matters before treating either sport's edges as validated.
+- **An MLB pitcher score of 0.5 means both "league average" and
+  "unknown".** Verified directly in code:
+  `backend/pipeline/scheduler.py` states "`pitcher_skill_score` returns 0.5
+  both for a [league-average pitcher and an unknown one]", and
+  `backend/analysis/pitcher.py` documents ERA 4.00 -> ~0.50 as league
+  average. There is no way to tell the two apart from `model_prob` alone
+  for an MLB pick influenced by pitcher skill.
+- **ncaab `neutral_site`: the great majority of games are neutral, which
+  explains the home rate.** The count has moved as more games were
+  collected: earlier project memory recorded 71 of 72; the live db on
+  2026-09-30 shows **73 of 86**. Treat any specific count as a snapshot of
+  a growing table, not a fixed fact -- re-count against a current export
+  rather than citing either number going forward. The mechanism
+  (`games.neutral_site`, sourced from ESPN's `competitions[0].neutralSite`)
+  is confirmed to exist in `backend/models.py`.
+- **Team `abbreviation` holds display names for some sports.** Not
+  independently re-verified this session beyond confirming the column
+  exists (`teams.abbreviation`, `nullable=False`). Carried over from
+  project memory (`sports-picks-team-identity`).
+- **MMA/UFC is quarantined from headline records pending a larger sample.**
+  Not independently re-verified this session (would require re-running the
+  same record computation against a live or snapshotted db, which this
+  pass did not do). Carried over from project memory
+  (`sports-picks-review-remediation-decisions` /
+  `sports-picks-mma-duplicate-bouts`): moneyline record 14-25, +19.09u on
+  39 picks over 3 fight nights, described there as real but thin and
+  driven by one +1000 winner.
+
+## How to not fool yourself
+
+- **Group by game for tests.** Multiple picks share a `game_id`; treat
+  `game_id`, not `pick_id`, as the unit of an independent observation when
+  testing anything about the model's edge or calibration.
+- **Compare against the market, not against 50%.** A 55% "win rate" on
+  picks whose market price implied 58% is a loss, not an edge. Use
+  `implied_prob_raw` / `market_prob_novig` as the baseline, not a flat coin
+  flip.
+- **Label regimes by the change dates above.** Kelly sizing, prop dedupe,
+  MMA/boxing voids, the combat-vs-ensemble routing switch, and the send-bar
+  change each split this data into a "before" that should not be pooled
+  with an "after" without accounting for the change.
+- **Use ROI and CLV, not win %.** Win rate ignores price -- a -110 win and
+  a +300 win are not the same size. Units won (`payout`) and CLV
+  (`clv_price_pp` / `clv_line_pts` -- never pool the two) are the
+  measurements this project otherwise relies on; see
+  `backend/analysis/clv_report.py` for why CLV in particular resolves
+  faster than waiting for results.
+
+## See also
+
+- `backend/scripts/export_picks.py` -- the export script itself.
+- `backend/analysis/clv_report.py` -- the CLV methodology this export
+  reuses, and why CLV is trusted over raw results in this project.
+- `docs/review-remediation.md` -- the dated history of send-bar, edge-gate,
+  and combat-grading decisions referenced throughout this file.
