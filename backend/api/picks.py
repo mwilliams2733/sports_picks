@@ -44,6 +44,7 @@ def get_today_picks(request: Request, sport: str | None = None, min_confidence: 
             pick_display = _resolve_pick_value(pick.pick_value, home_team.abbreviation, away_team.abbreviation)
             results.append({"id": pick.id, "game_id": pick.game_id, "sport": game.sport,
                 "date": str(game.date), "pick_type": pick.pick_type, "pick_value": pick_display,
+                "stored_pick_value": pick.pick_value,
                 "confidence": pick.confidence, "edge_pct": pick.edge_pct, "odds_at_pick": pick.odds_at_pick,
                 "suggested_unit_size": pick.suggested_unit_size,
                 "home_team": home_team.abbreviation, "away_team": away_team.abbreviation,
@@ -81,6 +82,7 @@ def get_picks_history(request: Request, sport: str | None = None, page: int = 1,
                 )
             results.append({"id": pick.id, "game_id": pick.game_id, "sport": game.sport,
                 "date": str(game.date), "pick_type": pick.pick_type, "pick_value": pick_display,
+                "stored_pick_value": pick.pick_value,
                 "confidence": pick.confidence, "edge_pct": pick.edge_pct,
                 "odds_at_pick": pick.odds_at_pick,
                 "suggested_unit_size": pick.suggested_unit_size,

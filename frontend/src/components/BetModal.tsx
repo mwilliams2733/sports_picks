@@ -12,6 +12,10 @@ interface BetModalProps {
   open: boolean
   onClose: () => void
   pickValue: string
+  /** The unresolved label ("HOME ML") to key the bet off of, when it differs
+   *  from the displayed pickValue (team/fighter names). Falls back to
+   *  pickValue when not given -- e.g. prop labels, which already parse. */
+  betValue?: string
   pickType: string  // "moneyline", "spread", "over_under", "prop"
   odds: number
   gameId: number
@@ -22,7 +26,7 @@ interface BetModalProps {
 }
 
 export default function BetModal({
-  open, onClose, pickValue, pickType, odds, gameId,
+  open, onClose, pickValue, betValue, pickType, odds, gameId,
   suggestedStake = 100, edgePct, propMarket, propPlayer,
 }: BetModalProps) {
   const { currentUserName, setCurrentUserName } = useUserStore()
@@ -54,7 +58,7 @@ export default function BetModal({
   }, [userId])
 
   // Hooks run unconditionally, before the `if (!open) return null` below.
-  const leg = legFromPick(pickType, pickValue, gameId, propMarket, propPlayer)
+  const leg = legFromPick(pickType, betValue ?? pickValue, gameId, propMarket, propPlayer)
   const isProp = leg?.pick_type === 'prop'
   const gameQuotes = useGameQuotes(open && leg && !isProp ? gameId : null)
   const propQuotes = usePropQuotes(open && leg && isProp ? gameId : null)

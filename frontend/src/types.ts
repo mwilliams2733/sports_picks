@@ -5,6 +5,11 @@ export interface PickData {
   date: string;
   pick_type: string;
   pick_value: string;
+  /** The unresolved label ("HOME ML", "AWAY +1.5") pick_value was rewritten
+   *  from -- what quotes.legFromPick needs to map the pick to a bettable
+   *  side; pick_value is display-only (team/fighter names) and cannot be
+   *  parsed back into a side. */
+  stored_pick_value?: string;
   confidence: number;
   edge_pct: number;
   odds_at_pick: number;
