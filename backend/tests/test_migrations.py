@@ -8,9 +8,11 @@ insert inside `_run_window` died inside a broad `except`. Both entry points
 now derive their migration set from the same function.
 """
 import inspect
+import json
 
 import pytest
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.orm import Session
 
 from backend.database import (
     ALLOW_DESTRUCTIVE_ENV,
@@ -237,3 +239,54 @@ def test_every_destructive_migration_is_listed_and_accepts_the_flag():
         params = inspect.signature(migration).parameters
         assert "allow_destructive" in params, migration.__name__
         assert params["allow_destructive"].default is False, migration.__name__
+
+
+def test_run_migrations_seeds_a_combat_sports_strategy_row_on_a_fresh_db():
+    """Without this row CombatSportsStrategy has nothing to store picks
+    under, which is how every combat pick in production was generated and
+    graded as `ensemble` instead."""
+    from backend.models import StrategyModel
+
+    engine = get_engine(":memory:")
+    run_migrations(engine)
+
+    with Session(engine) as session:
+        rows = session.query(StrategyModel).filter(
+            StrategyModel.name == "combat_sports").all()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.strategy_type == "game"
+        # NOT active: `api/pipeline_api.py` and `pipeline/scheduler.py` each
+        # pick "the" active game strategy for the whole run with
+        # `.filter(is_active==True, strategy_type=="game").first()`. An
+        # active combat_sports row can win that query when no other game
+        # strategy happens to be active, generating zero NBA/NFL/etc. picks
+        # for a run that should have none active at all
+        # (test_pipeline_api.py::test_no_game_strategy_means_no_game_picks).
+        # generate_and_store_picks itself looks combat_sports up BY NAME
+        # regardless of this flag, so combat routing is unaffected.
+        assert row.is_active is False
+        assert json.loads(row.config_json) == {"min_edge": 3.0}
+
+
+def test_run_migrations_seeding_the_combat_sports_row_is_idempotent():
+    """Running twice -- every process start -- must create exactly one row,
+    and must not overwrite a hand-edited config on an existing one."""
+    from backend.models import StrategyModel
+
+    engine = get_engine(":memory:")
+    run_migrations(engine)
+    with Session(engine) as session:
+        row = session.query(StrategyModel).filter(
+            StrategyModel.name == "combat_sports").one()
+        row.config_json = '{"min_edge": 7.5}'
+        session.commit()
+
+    run_migrations(engine)
+
+    with Session(engine) as session:
+        rows = session.query(StrategyModel).filter(
+            StrategyModel.name == "combat_sports").all()
+        assert len(rows) == 1
+        assert json.loads(rows[0].config_json) == {"min_edge": 7.5}, \
+            "an existing row's config must survive a second migration run"
