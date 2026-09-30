@@ -76,7 +76,8 @@ def grade_emailed(session: Session, row: EmailedPick, game: Game):
         result = outcome[0]
     else:
         outcome = grade_pick(row.pick_type, row.pick_value,
-                             game.home_score, game.away_score, row.odds)
+                             game.home_score, game.away_score, row.odds,
+                             sport=row.sport)
         if outcome is None:
             return None
         result = outcome[0]

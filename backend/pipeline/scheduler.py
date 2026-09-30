@@ -649,7 +649,8 @@ def grade_pending_picks(session) -> dict:
                 payout = payout_for(result, pick.odds_at_pick or -110)
             else:
                 grade_outcome = grade_pick(pick.pick_type, pick.pick_value,
-                    game.home_score, game.away_score, pick.odds_at_pick or -110)
+                    game.home_score, game.away_score, pick.odds_at_pick or -110,
+                    sport=game.sport)
                 if grade_outcome is None:
                     # grade_pick has no branch for this type. Leave it
                     # ungraded rather than record an invented result.

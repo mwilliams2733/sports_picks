@@ -8,6 +8,44 @@ def test_grade_moneyline_home_win():
     assert result == "win"
     assert abs(payout - calculate_payout(-150)) < 0.01
 
+
+# --- Fix 2: totals can never exist for a combat sport -----------------------
+
+def test_grade_pick_voids_a_combat_over_under_as_push_never_win():
+    """A combat game's score is a 0/1 win/loss pair. actual_total = home +
+    away is always 1, so "Over 0" would always be graded a win without this
+    guard -- exactly how 13 mma totals were emitted and graded on
+    2026-03-21 (see backend/scripts/audit_combat_grading.py)."""
+    result, payout = grade_pick("over_under", "Over 0", 1, 0, -110, sport="mma")
+    assert result == "push"
+    assert payout == 0.0
+    # Home 0 / away 1 (away won) must push identically -- the bug is in the
+    # market, not in which side won.
+    result2, payout2 = grade_pick("over_under", "Over 0", 0, 1, -110, sport="mma")
+    assert result2 == "push"
+    assert payout2 == 0.0
+
+
+def test_grade_pick_voids_a_combat_spread_as_push():
+    result, payout = grade_pick("spread", "HOME -1.5", 1, 0, -110, sport="boxing")
+    assert result == "push"
+    assert payout == 0.0
+
+
+def test_grade_pick_still_grades_an_nfl_total_normally():
+    """The sport-aware guard must not touch a sport it was never meant for."""
+    result, payout = grade_pick("over_under", "Over 45.5", 24, 21, -110, sport="nfl")
+    assert result == "loss"   # 45 points, under the 45.5 line
+    result2, _ = grade_pick("over_under", "Over 218.5", 115, 110, -110, sport="nfl")
+    assert result2 == "win"
+
+
+def test_grade_pick_combat_moneyline_is_unaffected_by_the_guard():
+    """Only spread/over_under are voided for a combat sport -- moneyline,
+    the only market CombatSportsStrategy ever emits, must grade normally."""
+    result, payout = grade_pick("moneyline", "HOME ML", 1, 0, -150, sport="mma")
+    assert result == "win"
+
 def test_grade_moneyline_away_win():
     result, payout = grade_pick("moneyline", "AWAY ML", 100, 110, 130)
     assert result == "win"

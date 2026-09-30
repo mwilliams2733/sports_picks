@@ -2,6 +2,7 @@ import logging
 import re
 from backend.analysis.odds_utils import calculate_payout, InvalidOddsError
 from backend.analysis.prop_markets import MARKET_STAT_MAP
+from backend.pipeline.team_stats import COMBAT_SPORTS
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def payout_for(result: str, odds_at_pick: int) -> float:
 
 
 def grade_pick(pick_type: str, pick_value: str, home_score: int, away_score: int,
-               odds_at_pick: int) -> tuple[str, float] | None:
+               odds_at_pick: int, sport: str | None = None) -> tuple[str, float] | None:
     """Grade a game-level pick from the final score.
 
     Returns ``(result, payout_ratio)``, or ``None`` when ``pick_type`` is not
@@ -46,7 +47,24 @@ def grade_pick(pick_type: str, pick_value: str, home_score: int, away_score: int
     as "leave this pick ungraded" and must not substitute a default: an
     invented result is indistinguishable from a measured one once it is in
     ``pick_results``.
+
+    ``sport`` is optional -- most callers grade a market where it does not
+    matter -- but for a combat sport (mma, boxing) a ``spread`` or
+    ``over_under`` pick is voided as a push rather than settled, because the
+    stored score is a 0/1 win/loss pair, not points. ``home_score +
+    away_score`` is always 1, so "Over 0" always won: 13 mma totals were
+    emitted and graded exactly that way on 2026-03-21. Pushed, not skipped,
+    to match the project's existing void convention (`void_stuck_bouts`,
+    `dedupe_combat_games.void_reschedules`): a push returns the stake and is
+    excluded from the win-rate denominator (`decided = total - pushes` in
+    `recalibrator`), while leaving it ungraded would misreport an open
+    position that can in fact never resolve.
     """
+    if sport in COMBAT_SPORTS and pick_type in ("spread", "over_under"):
+        logger.warning(
+            "Refusing to settle a %s pick for a combat sport (sport=%r); "
+            "voiding as push instead", pick_type, sport)
+        return "push", 0.0
     if pick_type == "moneyline":
         if "HOME" in pick_value:
             won = home_score > away_score
