@@ -34,7 +34,8 @@ def _build_fixture_db(path: str) -> None:
               status="final"))
     s.flush()
 
-    # Pick 1: moneyline, graded, emailed once.
+    # Pick 10: moneyline, graded, emailed TWICE (two digest dates below) --
+    # the export must still emit one row, carrying the latest emailing.
     s.add(PickModel(id=10, game_id=1, strategy_id=1, pick_type="moneyline",
                     pick_value="HOME ML", confidence=4, edge_pct=6.0,
                     odds_at_pick=-130, model_prob=0.62,
@@ -53,16 +54,45 @@ def _build_fixture_db(path: str) -> None:
                     prop_player="Paul Goldschmidt", prop_market="batter_total_bases",
                     confidence=3, edge_pct=25.0, odds_at_pick=-115,
                     created_at=datetime(2026, 9, 18, 18, 0)))
+    # Pick 13: a spread pick, graded, with a real line_at_close -- exercises
+    # clv_line_pts (not clv_price_pp).
+    s.add(PickModel(id=13, game_id=1, strategy_id=1, pick_type="spread",
+                    pick_value="HOME -1.5", confidence=3, edge_pct=4.0,
+                    odds_at_pick=-110, model_prob=0.54,
+                    created_at=datetime(2026, 9, 18, 18, 0)))
+    # Pick 14: moneyline, graded, but no close ever captured on either
+    # column -- both clv columns must be blank, not a fabricated 0.
+    s.add(PickModel(id=14, game_id=1, strategy_id=1, pick_type="moneyline",
+                    pick_value="HOME ML", confidence=3, edge_pct=3.0,
+                    odds_at_pick=-120, model_prob=0.56,
+                    created_at=datetime(2026, 9, 18, 18, 0)))
+    # Pick 15: a legacy spread pick with no model_prob at all (predates the
+    # column being populated) -- market_prob_novig must be blank, not 0.5.
+    s.add(PickModel(id=15, game_id=1, strategy_id=1, pick_type="spread",
+                    pick_value="AWAY +1.5", confidence=3, edge_pct=62.0,
+                    odds_at_pick=-110, model_prob=None,
+                    created_at=datetime(2026, 3, 14, 12, 0)))
     s.commit()
 
     s.add(PickResult(pick_id=10, result="win", payout=0.769,
                      odds_at_close=-145, line_at_close=None))
+    s.add(PickResult(pick_id=13, result="win", payout=0.909,
+                     odds_at_close=-110, line_at_close=-2.5))
+    s.add(PickResult(pick_id=14, result="win", payout=0.833,
+                     odds_at_close=None, line_at_close=None))
     s.commit()
 
+    # Pick 10 is emailed on two different digest dates. The export must
+    # still yield exactly one row for it, carrying the LATER emailing's
+    # values (odds/pick_value/confidence), not the first.
     s.add(EmailedPick(digest_date=date(2026, 9, 18), pick_id=10, game_id=1,
                       sport="mlb", pick_type="moneyline", pick_value="HOME ML",
                       odds=-130, confidence=4,
                       sent_at=datetime(2026, 9, 18, 16, 0)))
+    s.add(EmailedPick(digest_date=date(2026, 9, 19), pick_id=10, game_id=1,
+                      sport="mlb", pick_type="moneyline", pick_value="HOME ML",
+                      odds=-135, confidence=5,
+                      sent_at=datetime(2026, 9, 19, 16, 0)))
     s.commit()
 
     # Data that must NEVER appear in the export.
@@ -117,7 +147,7 @@ def test_export_writes_three_files_and_excludes_user_data(tmp_path, fixture_db):
     assert os.path.exists(counts["line_history_path"])
 
     rows = _read_csv(counts["picks_path"])
-    assert len(rows) == 3
+    assert len(rows) == 6
     header = set(rows[0].keys())
     assert "paper_picks" not in " ".join(header).lower()
     assert not any("user" in col.lower() for col in header), (
@@ -151,6 +181,30 @@ def test_moneyline_market_prob_novig_equals_model_minus_edge_over_100(tmp_path, 
     assert abs(float(row["market_prob_novig"]) - expected) < 1e-9
 
 
+def test_spread_market_prob_novig_is_05_when_model_prob_present(tmp_path, fixture_db):
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    rows = {r["pick_id"]: r for r in _read_csv(counts["picks_path"])}
+    assert rows["13"]["market_prob_novig"] == "0.5"
+
+
+def test_legacy_spread_with_no_model_prob_gets_blank_market_prob_novig(tmp_path, fixture_db):
+    """Pick 15 predates model_prob being populated on spread/over_under
+    picks. Writing 0.5 anyway would claim its edge was measured against a
+    fair coin flip when nothing says it was."""
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    rows = {r["pick_id"]: r for r in _read_csv(counts["picks_path"])}
+    assert rows["15"]["model_prob"] == ""
+    assert rows["15"]["market_prob_novig"] == ""
+
+
 def test_prop_market_prob_novig_is_blank(tmp_path, fixture_db):
     conn = export_picks._connect_ro(fixture_db)
     try:
@@ -176,7 +230,42 @@ def test_clv_matches_odds_utils_compute_pick_clv(tmp_path, fixture_db):
     expected_pct, expected_points = compute_pick_clv(
         "moneyline", "HOME ML", -130, -145, None)
     assert expected_points is None
-    assert abs(float(row["clv"]) - expected_pct) < 1e-9
+    assert abs(float(row["clv_price_pp"]) - expected_pct) < 1e-9
+    assert row["clv_line_pts"] == "", "a moneyline pick must never carry a line-points CLV"
+
+
+def test_spread_clv_is_line_points_not_price(tmp_path, fixture_db):
+    """Pick 13 is a spread pick with a real line_at_close. Its CLV belongs
+    in clv_line_pts, in line points, and clv_price_pp (a different unit)
+    must stay blank -- the two must never land in the same column."""
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    rows = {r["pick_id"]: r for r in _read_csv(counts["picks_path"])}
+    row = rows["13"]
+    expected_pct, expected_points = compute_pick_clv(
+        "spread", "HOME -1.5", -110, -110, -2.5)
+    assert expected_pct is None
+    assert row["clv_price_pp"] == ""
+    assert abs(float(row["clv_line_pts"]) - expected_points) < 1e-9
+
+
+def test_no_close_gives_blank_clv_in_both_columns(tmp_path, fixture_db):
+    """Pick 14 is graded but has no odds_at_close or line_at_close on
+    record. Absent must stay absent in both clv columns, not become a
+    fabricated 0 -- the same rule clv_report.py applies (`usable` drops a
+    None clv rather than averaging it in as 0)."""
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    rows = {r["pick_id"]: r for r in _read_csv(counts["picks_path"])}
+    row = rows["14"]
+    assert row["clv_price_pp"] == ""
+    assert row["clv_line_pts"] == ""
 
 
 def test_pick_label_resolves_team_names(tmp_path, fixture_db):
@@ -198,9 +287,28 @@ def test_emailed_is_true_only_for_the_emailed_pick(tmp_path, fixture_db):
         conn.close()
     rows = {r["pick_id"]: r for r in _read_csv(counts["picks_path"])}
     assert rows["10"]["emailed"] == "True"
-    assert rows["10"]["emailed_odds"] == "-130"
     assert rows["11"]["emailed"] == "False"
     assert rows["12"]["emailed"] == "False"
+
+
+def test_pick_emailed_on_two_dates_gives_one_row_with_latest_values(tmp_path, fixture_db):
+    """Pick 10 was emailed on 2026-09-18 (odds -130, confidence 4) and again
+    on 2026-09-19 (odds -135, confidence 5). The export must emit exactly
+    one row for pick_id 10, carrying the LATER emailing's odds/confidence/
+    digest_date, not the first -- per the owner's ruling, not an arbitrary
+    "first seen" choice."""
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    rows = [r for r in _read_csv(counts["picks_path"]) if r["pick_id"] == "10"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["emailed_odds"] == "-135"
+    assert row["emailed_confidence"] == "5"
+    assert row["emailed_digest_date"] == "2026-09-19"
+    assert row["emailed_pick_value"] == "HOME ML"
 
 
 def test_line_history_has_one_row_per_snapshot(tmp_path, fixture_db):
@@ -226,6 +334,57 @@ def test_line_history_has_one_row_per_snapshot(tmp_path, fixture_db):
     assert len(rows) == 1
     assert rows[0]["bookmaker"] == "draftkings"
     assert rows[0]["moneyline_home"] == "-130"
+
+
+def test_line_history_carries_start_time_and_series_depth(tmp_path, fixture_db):
+    """Without start_time_utc, the pre-kickoff close cannot be located for a
+    game with no pick at all. series_depth (the max per-bookmaker
+    observation count for the game) lets a reader reproduce clv_report's
+    `measurable()` population -- a depth-1 series never moved."""
+    engine = get_engine(fixture_db)
+    from backend.models import LineSnapshot
+    s = get_session(engine)
+    s.add_all([
+        LineSnapshot(game_id=1, bookmaker="draftkings",
+                    moneyline_home=-130, moneyline_away=110,
+                    captured_at=datetime(2026, 9, 18, 12, 0),
+                    last_seen_at=datetime(2026, 9, 18, 14, 0)),
+        LineSnapshot(game_id=1, bookmaker="draftkings",
+                    moneyline_home=-135, moneyline_away=115,
+                    captured_at=datetime(2026, 9, 18, 18, 0),
+                    last_seen_at=datetime(2026, 9, 18, 20, 0)),
+    ])
+    s.commit()
+    s.close()
+    with engine.connect() as conn:
+        conn.exec_driver_sql("PRAGMA wal_checkpoint(FULL)")
+    engine.dispose()
+
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(fixture_db + ".out2"))
+    finally:
+        conn.close()
+    rows = _read_csv(counts["line_history_path"])
+    assert len(rows) == 2
+    assert all(r["start_time_utc"] == "2026-09-18T23:05:00Z" for r in rows)
+    assert all(r["series_depth"] == "2" for r in rows)
+
+
+def test_timestamps_are_iso8601_with_z_suffix(tmp_path, fixture_db):
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    rows = {r["pick_id"]: r for r in _read_csv(counts["picks_path"])}
+    row = rows["10"]
+    assert row["created_at"] == "2026-09-18T18:00:00Z"
+    assert row["start_time_utc"] == "2026-09-18T23:05:00Z"
+    assert row["emailed_at"] == "2026-09-19T16:00:00Z"
+    for col in ("created_at", "start_time_utc", "emailed_at"):
+        assert row[col].endswith("Z")
+        assert "+" not in row[col]
 
 
 def test_since_filter_excludes_earlier_games(tmp_path, fixture_db):
@@ -258,7 +417,22 @@ def test_manifest_lists_counts_and_exclusion_note(tmp_path, fixture_db):
         str(tmp_path), db_path=fixture_db, repo_root=os.getcwd(),
         since=None, sports=None, counts=counts)
     text = open(manifest_path, encoding="utf-8").read()
-    assert "picks.csv: 3 rows" in text
-    assert "mlb: 3" in text
+    assert "picks.csv: 6 rows" in text
+    assert "mlb: 6" in text
     assert "paper_picks" in text and "user_profiles" in text
     assert "data-dictionary.md" in text
+
+
+def test_manifest_timestamp_is_iso8601_with_z_suffix(tmp_path, fixture_db):
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    manifest_path = export_picks.write_manifest(
+        str(tmp_path), db_path=fixture_db, repo_root=os.getcwd(),
+        since=None, sports=None, counts=counts)
+    text = open(manifest_path, encoding="utf-8").read()
+    first_line = text.splitlines()[0]
+    assert first_line.endswith("Z")
+    assert "+00:00" not in first_line

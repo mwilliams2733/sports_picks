@@ -58,20 +58,23 @@ PICKS_FIELDS = [
     "factors",
     "prop_player", "prop_market",
     "result", "payout",
-    "odds_at_close", "line_at_close", "clv",
+    "odds_at_close", "line_at_close",
+    "clv_price_pp", "clv_line_pts",
+    "series_depth",
     "odds_reconstructed",
     "emailed", "emailed_odds", "emailed_at",
+    "emailed_pick_value", "emailed_digest_date", "emailed_confidence",
 ]
 
 LINE_HISTORY_FIELDS = [
-    "game_id", "sport", "home_team", "away_team", "game_date",
+    "game_id", "sport", "home_team", "away_team", "game_date", "start_time_utc",
     "bookmaker",
     "moneyline_home", "moneyline_away",
     "spread_home", "spread_away",
     "over_under",
     "spread_home_price", "spread_away_price",
     "over_price", "under_price",
-    "captured_at", "last_seen_at",
+    "captured_at", "last_seen_at", "series_depth",
 ]
 
 
@@ -127,6 +130,31 @@ def _pick_label(pick_type: str, pick_value: str, sport: str,
     return _selection_label(stub)
 
 
+def _iso_z(raw) -> str:
+    """Normalize a stored timestamp to ISO-8601 with a `Z` suffix.
+
+    Every datetime column in this schema (`created_at`, `start_time`,
+    `captured_at`, `last_seen_at`, `sent_at`) is written naive by SQLAlchemy
+    as `"YYYY-MM-DD HH:MM:SS[.ffffff]"`, and the project convention is that
+    every naive stored datetime IS UTC (see `backend/time_utils.py`'s
+    `game_start_utc`, which does exactly this normalization for
+    `start_time`). This does the same thing for every timestamp column in
+    the export, so a reader never has to guess a timezone or reimplement
+    that convention. Blank in, blank out. An already-aware value (e.g. one
+    read back through the ORM rather than raw sqlite3) is converted to UTC
+    first rather than assumed.
+    """
+    if raw is None or raw == "":
+        return ""
+    if isinstance(raw, datetime):
+        dt = raw
+    else:
+        dt = datetime.fromisoformat(str(raw).replace(" ", "T"))
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.isoformat() + "Z"
+
+
 def _implied_prob_raw(odds: int | None) -> float | None:
     if odds is None:
         return None
@@ -142,14 +170,23 @@ def _market_prob_novig(pick_type: str, model_prob: float | None,
     against.
 
     - moneyline: back out of edge_pct's own definition (edge_pct = (model -
-      market) * 100, see backend/analysis/variants/ensemble.py), so
-      market = model - edge_pct/100. Exact by construction, not an
-      independent re-derivation.
+      market) * 100, see backend/analysis/variants/ensemble.py:284-285/
+      292-293), so market = model - edge_pct/100. Arithmetic on the two
+      stored columns, not an independent re-derivation -- but both are
+      themselves rounded before storage (edge_pct to 0.1 percentage points,
+      model_prob to 4 decimal places), so this is accurate to within about
+      +/-0.0005 of what the strategy computed internally, not bit-exact.
     - spread / over_under: edge_pct is measured against a flat 0.5 (the
       fair coin-flip value the model used for a line pick), not a de-vigged
       market probability -- there is no market-side win probability stored
       for a spread/total pick. 0.5 is the documented convention, not a
-      computed value.
+      computed value, and is written only when `model_prob` is itself
+      present -- a pick with no stored `model_prob` (all 284 legacy
+      spread/over_under picks from before 2026-09-17; see
+      docs/data-dictionary.md's known traps) gets a blank here rather than
+      a fabricated 0.5, since 0.5 documents what a REAL pick's edge was
+      measured against and a legacy row's edge was not necessarily measured
+      against anything at all.
     - prop: props are never de-vigged against a market probability at all
       (edge_pct is a stat-unit gap -- see docs/data-dictionary.md's known
       traps). Blank.
@@ -161,7 +198,7 @@ def _market_prob_novig(pick_type: str, model_prob: float | None,
             return None
         return model_prob - edge_pct / 100.0
     if pick_type in ("spread", "over_under"):
-        return 0.5
+        return 0.5 if model_prob is not None else None
     return None
 
 
@@ -201,6 +238,30 @@ def _git_head(repo_root: str) -> str:
         return out.stdout.strip()
     except Exception as e:
         return f"(unavailable: {type(e).__name__})"
+
+
+def _series_depth(conn: sqlite3.Connection) -> dict[int, int]:
+    """game_id -> the most line_snapshots rows any single bookmaker has on
+    it. Same definition as `backend.analysis.line_snapshots.series_depth`
+    (game_id -> max per-bookmaker observation count), reimplemented against
+    a raw sqlite3 connection here because that function takes a SQLAlchemy
+    session and this script deliberately never opens one (see the module
+    docstring: read-only mode=ro only).
+
+    1 means no book was ever seen to change its price for that game -- the
+    "closing" price on record is the same observation as the opening one,
+    not a real close. `clv_report.measurable()` drops these; this column
+    lets the export reproduce that same population instead of treating
+    every row with a non-blank clv_* column as equally trustworthy.
+    """
+    counts: dict[tuple[int, str], int] = {}
+    for game_id, bookmaker in conn.execute(
+            "SELECT game_id, bookmaker FROM line_snapshots"):
+        counts[(game_id, bookmaker)] = counts.get((game_id, bookmaker), 0) + 1
+    out: dict[int, int] = {}
+    for (game_id, _), n in counts.items():
+        out[game_id] = max(out.get(game_id, 0), n)
+    return out
 
 
 def export(conn: sqlite3.Connection, out_dir: str, *,
@@ -251,8 +312,13 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
     # pick_results.pick_id; emailed_picks is unique per (digest_date,
     # pick_id) but a pick can be re-emailed on a later date), so a SQL JOIN
     # against either could silently multiply picks.csv's rows. "First seen"
-    # is used for both ties, arbitrarily but deterministically (lowest id /
-    # earliest sent_at), and is documented in docs/data-dictionary.md.
+    # (lowest id) is used for pick_results, an arbitrary but deterministic
+    # tie-break -- a pick should only ever have one result row in practice.
+    # emailed_picks instead keeps the LATEST emailing (highest sent_at) when
+    # a pick was emailed on more than one digest date: a data scientist
+    # asking "was this emailed, and what did the reader see" almost always
+    # wants the most recent send, not the first. Both choices are documented
+    # in docs/data-dictionary.md.
     results_by_pick: dict[int, sqlite3.Row] = {}
     for row in conn.execute("SELECT * FROM pick_results ORDER BY id"):
         if row["pick_id"] in pick_id_set:
@@ -261,7 +327,9 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
     emailed_by_pick: dict[int, sqlite3.Row] = {}
     for row in conn.execute("SELECT * FROM emailed_picks ORDER BY sent_at"):
         if row["pick_id"] in pick_id_set:
-            emailed_by_pick.setdefault(row["pick_id"], row)
+            emailed_by_pick[row["pick_id"]] = row  # last write wins: latest sent_at
+
+    depth_by_game = _series_depth(conn)
 
     picks_path = os.path.join(out_dir, "picks.csv")
     sport_counts: Counter = Counter()
@@ -278,16 +346,15 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
                 clv_pct, clv_points = compute_pick_clv(
                     r["pick_type"], r["pick_value"], r["odds_at_pick"],
                     result_row["odds_at_close"], result_row["line_at_close"])
-            clv = clv_pct if clv_pct is not None else clv_points
 
             w.writerow({
                 "pick_id": r["pick_id"],
-                "created_at": r["created_at"],
+                "created_at": _iso_z(r["created_at"]),
                 "game_id": r["game_id"],
                 "sport": r["sport"],
                 "season": r["season"],
                 "game_date": r["game_date"],
-                "start_time_utc": r["start_time"],
+                "start_time_utc": _iso_z(r["start_time"]),
                 "game_status": r["game_status"],
                 "home_team": r["home_name"],
                 "away_team": r["away_name"],
@@ -315,15 +382,23 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
                 "payout": result_row["payout"] if result_row else "",
                 "odds_at_close": result_row["odds_at_close"] if result_row else "",
                 "line_at_close": result_row["line_at_close"] if result_row else "",
-                "clv": clv if clv is not None else "",
+                "clv_price_pp": clv_pct if clv_pct is not None else "",
+                "clv_line_pts": clv_points if clv_points is not None else "",
+                "series_depth": depth_by_game.get(r["game_id"], 0),
                 "odds_reconstructed": bool(r["odds_reconstructed"]),
                 "emailed": emailed_row is not None,
                 "emailed_odds": emailed_row["odds"] if emailed_row else "",
-                "emailed_at": emailed_row["sent_at"] if emailed_row else "",
+                "emailed_at": _iso_z(emailed_row["sent_at"]) if emailed_row else "",
+                "emailed_pick_value": emailed_row["pick_value"] if emailed_row else "",
+                "emailed_digest_date": emailed_row["digest_date"] if emailed_row else "",
+                "emailed_confidence": (
+                    emailed_row["confidence"] if emailed_row and emailed_row["confidence"] is not None
+                    else ""
+                ),
             })
 
     all_line_rows = conn.execute("""
-        SELECT ls.game_id, g.sport, g.date AS game_date,
+        SELECT ls.game_id, g.sport, g.date AS game_date, g.start_time,
                ht.name AS home_name, at.name AS away_name,
                ls.bookmaker,
                ls.moneyline_home, ls.moneyline_away,
@@ -348,6 +423,7 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
                 "game_id": r["game_id"], "sport": r["sport"],
                 "home_team": r["home_name"], "away_team": r["away_name"],
                 "game_date": r["game_date"],
+                "start_time_utc": _iso_z(r["start_time"]),
                 "bookmaker": r["bookmaker"],
                 "moneyline_home": r["moneyline_home"],
                 "moneyline_away": r["moneyline_away"],
@@ -356,7 +432,9 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
                 "spread_home_price": r["spread_home_price"],
                 "spread_away_price": r["spread_away_price"],
                 "over_price": r["over_price"], "under_price": r["under_price"],
-                "captured_at": r["captured_at"], "last_seen_at": r["last_seen_at"],
+                "captured_at": _iso_z(r["captured_at"]),
+                "last_seen_at": _iso_z(r["last_seen_at"]),
+                "series_depth": depth_by_game.get(r["game_id"], 0),
             })
 
     return {
@@ -372,7 +450,9 @@ def write_manifest(out_dir: str, *, db_path: str, repo_root: str,
                    since: str | None, sports: list[str] | None,
                    counts: dict) -> str:
     manifest_path = os.path.join(out_dir, "manifest.txt")
-    now = datetime.now(tz=timezone.utc).isoformat()
+    # ISO-8601 UTC with a Z suffix, same convention as every timestamp
+    # column in the two CSVs (see `_iso_z`).
+    now = datetime.now(tz=timezone.utc).replace(tzinfo=None).isoformat() + "Z"
     lines = [
         f"sports_picks pick export -- {now}",
         f"db path: {db_path}",

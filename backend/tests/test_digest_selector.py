@@ -660,7 +660,7 @@ def test_suppression_fires_below_the_floor():
 
 # --- the send bar fails closed, not open ------------------------------------
 
-def test_the_real_config_send_bar_passes_zero_game_picks_at_lambda_zero():
+def test_the_real_config_send_bar_shows_all_three_picks_ranked_by_raw_edge():
     """Loads config.yaml's actual digest.send_bar through backend.config's
     real loader -- the same one backend/digest/job.py uses. Since the
     shrunk-edge gate was removed 2026-09-30, lambda=0.00 (recorded, not

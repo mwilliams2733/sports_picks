@@ -106,14 +106,21 @@ on raw edges is knowingly set aside by the owner.
 `min_shrunk_edge_pp` is removed from `config.yaml`'s `digest.send_bar` and
 from the selector's required keys. `blend_weight` stays in config as the
 recorded 2026-09-29 market-shrinkage measurement (see the section above),
-but it no longer filters or ranks picks -- every priced game pick (price in
-[min_odds, max_odds], same as before) is now emailed, ranked by raw
-`edge_pct` descending, up to `max_game_picks`. The email shows each game
-pick's edge (e.g. "Edge +6.2 pts") and a footer line explaining what it
-means and that it is not a validated signal. Props still show no edge --
-prop `edge_pct` is a stat-unit gap, not a probability difference, and
-remains not comparable to a game pick's edge (see the "known traps" section
-of `docs/data-dictionary.md`).
+but it no longer filters or ranks picks -- in this code, every priced game
+pick (price in [min_odds, max_odds], same as before) is emailed, ranked by
+raw `edge_pct` descending, up to `max_game_picks`. **This is not yet live**:
+as of this section, the change exists only on branch `feat/edge-and-export`
+and has not been merged to `master` or deployed. "Every priced game pick is
+emailed" becomes true starting with the first digest run after this branch
+merges and the scheduler restarts -- provisionally the morning of
+2026-10-01 if merged promptly, but that date is not yet a fact, only a
+projection; see `docs/data-dictionary.md`'s "known traps" for the same
+caveat stated against the data itself. The email shows each game pick's
+edge (e.g. "Edge +6.2 pts") and a footer line explaining what it means and
+that it is not a validated signal. Props still show no edge -- prop
+`edge_pct` is a stat-unit gap, not a probability difference, and remains
+not comparable to a game pick's edge (see the "known traps" section of
+`docs/data-dictionary.md`).
 
 A leftover `min_shrunk_edge_pp` key in `send_bar` is ignored with a WARNING
 log rather than raising, since the key is now inert either way and raising
