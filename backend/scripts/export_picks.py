@@ -5,12 +5,20 @@ Read-only: the database is opened ``mode=ro`` (the same URI pattern as
 -- or be blamed for corrupting -- the live database. It never grades,
 selects or sends anything; it only reads and writes CSV files.
 
-Writes three files into ``--out``:
+Writes four files into ``--out``:
 
 ``picks.csv``
-    One row per stored pick (game AND prop, graded AND ungraded).
+    One row per stored pick (game AND prop, graded AND ungraded). Also
+    carries ``first_seen_at``, ``n_versions`` and ``flipped_side``, derived
+    from ``pick_versions.csv`` -- see that file below.
 ``line_history.csv``
     One row per ``line_snapshots`` row (the append-only price series).
+``pick_versions.csv``
+    One row per ``pick_versions`` row (the append-only pick-revision
+    series) -- every stored version of every pick, not just its current
+    state. See ``docs/data-dictionary.md`` for the backfill caveat: a
+    backfilled version 1 is a pick's LAST known pre-kickoff state, not its
+    first.
 ``manifest.txt``
     When the export ran, the db path, the git HEAD, row counts per file and
     sport, the filters applied, and a pointer to ``docs/data-dictionary.md``.
@@ -47,6 +55,7 @@ from backend.digest.selector import DigestPick
 
 PICKS_FIELDS = [
     "pick_id", "created_at",
+    "first_seen_at", "n_versions", "flipped_side",
     "game_id", "sport", "season", "game_date", "start_time_utc", "game_status",
     "home_team", "away_team",
     "home_score", "away_score",
@@ -76,6 +85,12 @@ LINE_HISTORY_FIELDS = [
     "spread_home_price", "spread_away_price",
     "over_price", "under_price",
     "captured_at", "last_seen_at", "series_depth",
+]
+
+PICK_VERSIONS_FIELDS = [
+    "pick_id", "version", "recorded_at", "source",
+    "pick_value", "confidence", "edge_pct", "odds_at_pick", "model_prob",
+    "suggested_unit_size", "factors",
 ]
 
 
@@ -299,6 +314,22 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
     pick_rows = [r for r in all_pick_rows if _keep(r)]
     pick_id_set = {r["pick_id"] for r in pick_rows}
 
+    # Every pick_versions row for every pick, oldest version first. Fetched
+    # once and grouped in Python for the same reason pick_results and
+    # emailed_picks are below: one query, filtered to pick_id_set, rather
+    # than one query per pick.
+    all_version_rows = conn.execute("""
+        SELECT pick_id, version, recorded_at, source, pick_value, confidence,
+               edge_pct, odds_at_pick, model_prob, suggested_unit_size,
+               rationale_json
+        FROM pick_versions
+        ORDER BY pick_id, version
+    """).fetchall()
+    versions_by_pick: dict[int, list] = {}
+    for row in all_version_rows:
+        if row["pick_id"] in pick_id_set:
+            versions_by_pick.setdefault(row["pick_id"], []).append(row)
+
     # pick_results and emailed_picks are fetched separately (full read, then
     # filtered to pick_id_set in Python) and joined in Python: neither table
     # enforces one-row-per-pick (no unique constraint on
@@ -333,6 +364,7 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
             sport_counts[r["sport"]] += 1
             result_row = results_by_pick.get(r["pick_id"])
             emailed_row = emailed_by_pick.get(r["pick_id"])
+            versions = versions_by_pick.get(r["pick_id"], [])
 
             clv_pct, clv_points = (None, None)
             if result_row is not None:
@@ -343,6 +375,9 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
             w.writerow({
                 "pick_id": r["pick_id"],
                 "created_at": _iso_z(r["created_at"]),
+                "first_seen_at": _iso_z(versions[0]["recorded_at"]) if versions else "",
+                "n_versions": len(versions),
+                "flipped_side": len({v["pick_value"] for v in versions}) > 1,
                 "game_id": r["game_id"],
                 "sport": r["sport"],
                 "season": r["season"],
@@ -430,11 +465,36 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
                 "series_depth": depth_by_game.get(r["game_id"], 0),
             })
 
+    # One row per pick_versions row, restricted to picks kept by the same
+    # --since/--sport filter (via pick_id_set) rather than every version
+    # ever recorded.
+    version_rows = [v for pid, vs in versions_by_pick.items() for v in vs]
+    pick_versions_path = os.path.join(out_dir, "pick_versions.csv")
+    with open(pick_versions_path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=PICK_VERSIONS_FIELDS)
+        w.writeheader()
+        for v in sorted(version_rows, key=lambda v: (v["pick_id"], v["version"])):
+            w.writerow({
+                "pick_id": v["pick_id"],
+                "version": v["version"],
+                "recorded_at": _iso_z(v["recorded_at"]),
+                "source": v["source"],
+                "pick_value": v["pick_value"],
+                "confidence": v["confidence"],
+                "edge_pct": v["edge_pct"],
+                "odds_at_pick": v["odds_at_pick"],
+                "model_prob": v["model_prob"],
+                "suggested_unit_size": v["suggested_unit_size"],
+                "factors": _factors(v["rationale_json"]),
+            })
+
     return {
         "picks_rows": len(pick_rows),
         "picks_path": picks_path,
         "line_history_rows": len(line_rows),
         "line_history_path": line_history_path,
+        "pick_versions_rows": len(version_rows),
+        "pick_versions_path": pick_versions_path,
         "sport_counts": dict(sport_counts),
     }
 
@@ -461,6 +521,7 @@ def write_manifest(out_dir: str, *, db_path: str, repo_root: str,
         lines.append(f"  {sport}: {n}")
     lines += [
         f"line_history.csv: {counts['line_history_rows']} rows",
+        f"pick_versions.csv: {counts['pick_versions_rows']} rows",
         "",
         "Excluded on purpose: paper_picks and user_profiles. Both are "
         "private data about the owner and paper-trading users, not data "
@@ -503,6 +564,7 @@ def main(argv=None) -> int:
 
     print(f"wrote {counts['picks_rows']} picks -> {counts['picks_path']}")
     print(f"wrote {counts['line_history_rows']} line snapshots -> {counts['line_history_path']}")
+    print(f"wrote {counts['pick_versions_rows']} pick versions -> {counts['pick_versions_path']}")
     print(f"wrote manifest -> {manifest_path}")
     return 0
 

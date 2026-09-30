@@ -5,6 +5,7 @@ from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from backend.models import Game, PickModel, PickResult, StrategyModel, Odds, TeamStat, EloRating, EloHistory, Team
+from backend.pipeline.pick_versions import record_pick_version
 from backend.data_types import GameData, TeamStats, OddsSnapshot, FighterStats
 from backend.analysis.variants.ensemble import EnsembleStrategy
 from backend.analysis.variants.recent_form import RecentFormStrategy
@@ -292,6 +293,7 @@ def generate_and_store_picks(session: Session, strategy_id: int,
                     if existing is not None:
                         if _refreshable(existing, game, graded_pick_ids):
                             _refresh_pick(existing, pick)
+                            record_pick_version(session, existing, "refresh")
                             refreshed += 1
                         continue
                     already[(game.id, pick.pick_type)] = None
@@ -301,9 +303,10 @@ def generate_and_store_picks(session: Session, strategy_id: int,
                         odds_at_pick=pick.odds_at_pick,
                         model_prob=pick.model_probability,
                         suggested_unit_size=pick.suggested_unit_size,
-                        rationale_json=json.dumps([asdict(f) for f in pick.factors]),
+                        rationale_json=_rationale_json(pick),
                         created_at=datetime.now(tz=timezone.utc))
                     session.add(db_pick)
+                    record_pick_version(session, db_pick, "insert")
                     count += 1
         except Exception:
             logger.exception("Pick generation failed for game %s", game.id)
@@ -419,6 +422,17 @@ def _refreshable(existing: PickModel, game: Game, graded_pick_ids: set) -> bool:
     return start > datetime.now(timezone.utc)
 
 
+def _rationale_json(pick) -> str:
+    """The stored `rationale_json` for a freshly computed `Pick`.
+
+    One serializer, used at insert and at refresh, so the two can never
+    disagree about what a pick's rationale contains -- the same reason
+    `prop_pipeline._refresh_prop_pick` derives from `_build_prop_pick`
+    instead of rebuilding its own fields.
+    """
+    return json.dumps([asdict(f) for f in pick.factors])
+
+
 def _refresh_pick(existing: PickModel, pick) -> None:
     """Overwrite a stored pick in place with a freshly computed one.
 
@@ -429,6 +443,15 @@ def _refresh_pick(existing: PickModel, pick) -> None:
     formed", and the answer has changed. ``odds_at_pick`` moves too: the game
     has not started, so the earlier price was never takeable in any sense
     that ROI measures.
+
+    ``rationale_json`` is refreshed too, from the same factors the fresh
+    pick carries (`_rationale_json`, shared with the insert path) -- without
+    this, a pick that flipped sides kept the old side's factors, which is
+    what `docs/data-dictionary.md` used to warn readers about as a
+    pre-existing trap. ``strategy_id`` is still NOT refreshed: nothing in
+    this pipeline recomputes which strategy produced a pick after its first
+    storage, and that remains a known trap, documented in the data
+    dictionary.
     """
     existing.pick_value = pick.pick_value
     existing.confidence = pick.confidence
@@ -438,6 +461,7 @@ def _refresh_pick(existing: PickModel, pick) -> None:
     # Re-priced advice carries a re-sized stake. Leaving the old one would
     # pair a fresh price with a stake computed against the previous one.
     existing.suggested_unit_size = getattr(pick, "suggested_unit_size", None)
+    existing.rationale_json = _rationale_json(pick)
     existing.created_at = datetime.now(timezone.utc)
 
 def _build_game_data(session: Session, game,

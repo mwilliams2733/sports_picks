@@ -7,8 +7,8 @@ import pytest
 from backend.analysis.odds_utils import compute_pick_clv
 from backend.database import get_engine, get_session
 from backend.models import (
-    Base, EmailedPick, Game, PaperPick, PickModel, PickResult, StrategyModel,
-    Team, UserProfile,
+    Base, EmailedPick, Game, PaperPick, PickModel, PickResult, PickVersion,
+    StrategyModel, Team, UserProfile,
 )
 from backend.scripts import export_picks
 
@@ -74,6 +74,25 @@ def _build_fixture_db(path: str) -> None:
                     created_at=datetime(2026, 3, 14, 12, 0)))
     s.commit()
 
+    # Pick 10 has two recorded versions -- an insert and a refresh that
+    # flipped the side, so it exercises n_versions, first_seen_at AND
+    # flipped_side all at once. Pick 11 has exactly one version (no flip).
+    # Picks 12-15 have none, exercising the "no version history at all"
+    # blank/zero/False defaults.
+    s.add(PickVersion(pick_id=10, version=1, recorded_at=datetime(2026, 9, 18, 16, 0),
+                      source="insert", pick_value="AWAY ML", confidence=3,
+                      edge_pct=-4.0, odds_at_pick=100, model_prob=0.4,
+                      rationale_json=None))
+    s.add(PickVersion(pick_id=10, version=2, recorded_at=datetime(2026, 9, 18, 18, 0),
+                      source="refresh", pick_value="HOME ML", confidence=4,
+                      edge_pct=6.0, odds_at_pick=-130, model_prob=0.62,
+                      rationale_json='[{"code": "rating_gap", "side": "home", "strength": "moderate"}]'))
+    s.add(PickVersion(pick_id=11, version=1, recorded_at=datetime(2026, 9, 18, 18, 0),
+                      source="insert", pick_value="AWAY ML", confidence=3,
+                      edge_pct=-6.0, odds_at_pick=110, model_prob=0.38,
+                      rationale_json=None))
+    s.commit()
+
     s.add(PickResult(pick_id=10, result="win", payout=0.769,
                      odds_at_close=-145, line_at_close=None))
     s.add(PickResult(pick_id=13, result="win", payout=0.909,
@@ -137,7 +156,7 @@ def test_the_connection_cannot_write(fixture_db):
         conn.close()
 
 
-def test_export_writes_three_files_and_excludes_user_data(tmp_path, fixture_db):
+def test_export_writes_four_files_and_excludes_user_data(tmp_path, fixture_db):
     conn = export_picks._connect_ro(fixture_db)
     try:
         counts = export_picks.export(conn, str(tmp_path))
@@ -145,6 +164,7 @@ def test_export_writes_three_files_and_excludes_user_data(tmp_path, fixture_db):
         conn.close()
     assert os.path.exists(counts["picks_path"])
     assert os.path.exists(counts["line_history_path"])
+    assert os.path.exists(counts["pick_versions_path"])
 
     rows = _read_csv(counts["picks_path"])
     assert len(rows) == 6
@@ -429,6 +449,68 @@ def test_manifest_lists_counts_and_exclusion_note(tmp_path, fixture_db):
     assert "mlb: 6" in text
     assert "paper_picks" in text and "user_profiles" in text
     assert "data-dictionary.md" in text
+
+
+def test_pick_versions_csv_has_one_row_per_version(tmp_path, fixture_db):
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    assert counts["pick_versions_rows"] == 3
+    rows = _read_csv(counts["pick_versions_path"])
+    assert len(rows) == 3
+    p10 = sorted([r for r in rows if r["pick_id"] == "10"],
+                key=lambda r: r["version"])
+    assert [r["version"] for r in p10] == ["1", "2"]
+    assert p10[0]["source"] == "insert"
+    assert p10[1]["source"] == "refresh"
+    assert p10[1]["pick_value"] == "HOME ML"
+    assert p10[1]["factors"] == "rating_gap:home:moderate"
+
+
+def test_picks_csv_n_versions_and_first_seen_at(tmp_path, fixture_db):
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    rows = {r["pick_id"]: r for r in _read_csv(counts["picks_path"])}
+    assert rows["10"]["n_versions"] == "2"
+    assert rows["10"]["first_seen_at"] == "2026-09-18T16:00:00Z"
+    assert rows["11"]["n_versions"] == "1"
+    assert rows["11"]["first_seen_at"] == "2026-09-18T18:00:00Z"
+    # Pick 12 has no recorded version history at all.
+    assert rows["12"]["n_versions"] == "0"
+    assert rows["12"]["first_seen_at"] == ""
+
+
+def test_flipped_side_is_true_only_when_the_pick_value_changed(tmp_path, fixture_db):
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    rows = {r["pick_id"]: r for r in _read_csv(counts["picks_path"])}
+    # Pick 10's two versions are AWAY ML then HOME ML -- a real flip.
+    assert rows["10"]["flipped_side"] == "True"
+    # Pick 11 has exactly one version -- nothing to flip against.
+    assert rows["11"]["flipped_side"] == "False"
+    # Pick 12 has no version history at all.
+    assert rows["12"]["flipped_side"] == "False"
+
+
+def test_manifest_lists_pick_versions_row_count(tmp_path, fixture_db):
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    manifest_path = export_picks.write_manifest(
+        str(tmp_path), db_path=fixture_db, repo_root=os.getcwd(),
+        since=None, sports=None, counts=counts)
+    text = open(manifest_path, encoding="utf-8").read()
+    assert "pick_versions.csv: 3 rows" in text
 
 
 def test_manifest_timestamp_is_iso8601_with_z_suffix(tmp_path, fixture_db):
