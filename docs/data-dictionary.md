@@ -49,7 +49,10 @@ anything price-derived.
 | Column | Meaning |
 |---|---|
 | `pick_id` | Primary key of `picks`. Stable identifier for one pick. |
-| `created_at` | **Not when the pick was first made -- when it was last REFRESHED.** A game pick is rewritten in place until kickoff (`backend/pipeline/pick_generator.py`'s `_refresh_pick`, lines 422-441): `pick_value`, `confidence`, `edge_pct`, `odds_at_pick`, `model_prob`, `suggested_unit_size` and `created_at` are all overwritten on each refresh, so `created_at` answers "when was this version of the advice formed", not "when did this row first appear". The side or price a reader sees here can therefore differ from what an earlier snapshot (or an email) showed for the same `pick_id` -- see `emailed_pick_value` below for one way to recover what was actually sent. **`rationale_json` (-> `factors`) and `strategy_id` (-> `strategy`) are NOT refreshed** -- they still describe whichever side/model the pick FIRST had, so `factors` can describe the opposite side from the current `pick_value` after a flip. This is a pre-existing characteristic of the live pipeline, not introduced by the export; the export is simply where it becomes visible to an outside reader. |
+| `created_at` | **Not when the pick was first made -- when it was last REFRESHED.** A game pick is rewritten in place until kickoff (`backend/pipeline/pick_generator.py`'s `_refresh_pick`): `pick_value`, `confidence`, `edge_pct`, `odds_at_pick`, `model_prob`, `suggested_unit_size`, `rationale_json` and `created_at` are all overwritten on each refresh, so `created_at` answers "when was this version of the advice formed", not "when did this row first appear". The side or price a reader sees here can therefore differ from what an earlier snapshot (or an email) showed for the same `pick_id` -- see `emailed_pick_value` below for one way to recover what was actually sent, or **`pick_versions.csv`** for the revision history -- every earlier side/price/edge this column's overwrite would otherwise have destroyed, but **only from the merge of `feat/pick-versions` (pending) forward**; a version recorded before that merge exists only as a single backfilled "final state" row, not a true history (see "known traps: picks are refreshed in place" below). `strategy_id` (-> `strategy`) is still **NOT refreshed** -- it still names whichever strategy FIRST produced the pick, even after a later refresh (see "known traps"). |
+| `first_seen_at` | `recorded_at` of the pick's version 1 in `pick_versions.csv`, or blank if the pick has no recorded version history at all. **For a pick whose version 1 was written by the backfill script, this is actually the pick's LAST pre-kickoff state, not its first** -- see "known traps: picks are refreshed in place" below and `pick_versions.csv`'s own section. |
+| `n_versions` | How many rows this pick has in `pick_versions.csv`. `0` means no version history was ever recorded for it (predates this table and was never backfilled). |
+| `flipped_side` | `True` if the pick's SIDE (not its raw `pick_value`) differs across any two of its recorded versions -- HOME/AWAY/Over/Under/a prop outcome, parsed the same way the `side` column is (`_side`, reused, not a second parser), `False` if the side never changed or there is only one version (or none). A line or price move alone -- `HOME -1.5` -> `HOME -2.5`, a prop's line moving -- is NOT a flip: comparing raw `pick_value` would count every spread/total/prop line move as a side flip, which `side` is specifically parsed out to avoid. |
 | `game_id` | Foreign key to `games`. |
 | `sport` | `nfl`, `mlb`, `nba`, `ncaaf`, `ncaab`, `boxing`, or `mma`. |
 | `season` | The season string stored on the game (e.g. `"2026"`). |
@@ -129,6 +132,41 @@ bookmaker's line move". `1` means no book was ever seen to change its price
 for the game at all. A row is written only when a price DIFFERS from the
 latest row for the same `(game_id, bookmaker)`; an unchanged re-observation
 extends `last_seen_at` on the existing row rather than adding a new one.
+
+## `pick_versions.csv` columns
+
+One row per `pick_versions` row -- the append-only pick-revision series (see
+"known traps: picks are refreshed in place" below, and the dated regime
+bullet there for exactly when recording started). Before this table
+existed, every refresh in `pick_generator._refresh_pick` and
+`prop_pipeline._refresh_prop_pick` overwrote `picks` in place and destroyed
+whatever the pick looked like a moment before. This table is the series
+that overwrite destroys, on the same append-on-change footing
+`line_snapshots` uses for prices (`backend/pipeline/pick_versions.py`'s
+`record_pick_version`): a row is written only when a tracked field differs
+from the pick's latest recorded version.
+
+Columns: `pick_id` (joins to `picks.csv`'s `pick_id`), `version` (1-based
+per pick), `recorded_at` (when this version was observed -- see the
+backfill caveat below), `source` (`insert` / `refresh` / `backfill`),
+`pick_value`, `confidence`, `edge_pct`, `odds_at_pick`, `model_prob`,
+`suggested_unit_size`, and `factors` (built from the version's own
+`rationale_json` the exact same way `picks.csv`'s `factors` column is,
+reusing the same function -- not a second serializer).
+
+**The backfill caveat.** A pick stored before this table existed has its
+version 1 written retroactively by `backend/scripts/backfill_pick_versions.py`,
+from the pick's CURRENT (last-refreshed) state, with `source='backfill'` and
+`recorded_at` set to the pick's `created_at`. Because a game pick is
+refreshed in place until kickoff, that current state is the pick's LAST
+pre-kickoff value, not its first -- every earlier side, price or edge it
+may have had before this table existed was already destroyed by the
+overwrite it replaced. So for a `source='backfill'` version 1:
+
+- `picks.csv`'s `first_seen_at` for that pick is really "last refresh
+  time before this table existed", not "when the pick was first made";
+- a pick's full history is only genuinely complete from its first
+  version recorded with `source` `insert` or `refresh` onward.
 
 ## `manifest.txt`
 
@@ -216,6 +254,74 @@ this repository as of 2026-09-30 (commit `1c81e33` and this branch's work
 on top of it). Where a check could not be made from the code alone, that is
 stated explicitly rather than left silent.
 
+- **Picks are refreshed in place until kickoff, and (from the merge of
+  `feat/pick-versions`, pending) every revision is now recorded.** This is
+  the bullet every other "known traps: picks are refreshed in place"
+  reference in this document points to. A game pick is rewritten in place
+  by `_refresh_pick`, and a prop pick by `_refresh_prop_pick`, until its
+  game starts or it is graded -- `pick_value`, `confidence`, `edge_pct`,
+  `odds_at_pick`, `model_prob`, `suggested_unit_size` and (game picks only)
+  `rationale_json` are all overwritten on each refresh, and `created_at`
+  moves to the time of that refresh, not the pick's original creation.
+  - **Before this merge, every pre-kickoff revision was simply destroyed.**
+    There was no way to recover what an earlier version of a pick looked
+    like -- only what `emailed_picks` happened to capture at send time (see
+    "emailed picks" below), and only if the pick was ever emailed at all.
+    `pick_versions` fixes this **only from the merge forward**: a pick's
+    version history is genuinely complete starting from its first version
+    recorded with `source` `insert` or `refresh`, not before.
+  - **A backfilled version 1 is a pick's LAST pre-kickoff state, not its
+    first.** `backend/scripts/backfill_pick_versions.py` writes one for
+    every pick that predates the table, from that pick's CURRENT
+    (last-refreshed) state at backfill time. **`first_seen_at` in
+    `picks.csv` for a backfilled pick is really the last refresh time, not
+    when the pick was first made** -- see `pick_versions.csv`'s own
+    section above for the full caveat, including why the backfill must run
+    with the scheduler stopped (stop the scheduler -> merge and deploy ->
+    run `backfill --apply` -> restart), between deploy and restart, never
+    against a db the new code is already live on: otherwise the
+    scheduler's own first live refresh beats the backfill to writing
+    version 1 (from whatever state that refresh computes, not the pick's
+    true pre-merge final state), and the backfill then silently skips that
+    pick forever because it now has a version.
+  - **A new version is not only ever a price, side or edge change.**
+    `suggested_unit_size` is tracked too, and it moves on its own: it
+    follows bankroll and drawdown after grading (`kelly.py`'s sizing),
+    independent of whether the model's view of the pick changed at all. A
+    version whose `pick_value`/`edge_pct`/`model_prob` are identical to the
+    one before it, but whose `suggested_unit_size` differs, is a real,
+    correctly-recorded version -- re-sizing alone is a tracked field.
+  - **Deleting a pick deletes its version history with it.**
+    `pick_versions.pick_id` is `ON DELETE CASCADE`, enforced by SQLite
+    itself (`PRAGMA foreign_keys=ON`). Every pick-deleting script
+    (`dedupe_picks.py`, `dedupe_prop_picks.py`, `dedupe_combat_games.py`,
+    the ORM delete-and-regenerate correction path) cascades cleanly and
+    leaves no orphaned version rows -- but also means a deleted duplicate
+    or bad pick's revision history is gone too, not preserved somewhere
+    else. If a pick disappears from `picks.csv`, its rows are gone from
+    `pick_versions.csv` as well; there is nothing to join.
+  - **`rationale_json` (-> `factors`) is now refreshed on every flip, but
+    only going forward from this same merge.** Before it, `_refresh_pick`
+    updated every other tracked field on a refresh but left
+    `rationale_json` untouched, so a pick that flipped sides kept the
+    factors that justified the OLD side -- `factors` in `picks.csv` could
+    describe the opposite side from the current `pick_value`. This is now
+    built at the same call site for both insert and refresh, so no two
+    code paths can disagree about what a pick's rationale contains. **This
+    is user-visible, not just an export quirk**: the daily digest renders
+    `pick.rationale_json` directly (`backend/digest/selector.py`), so the
+    emailed rationale text for a flipped pick now explains the CURRENT
+    side too, not just this export's `factors` column -- "email is
+    unaffected by this merge" does not strictly hold; only `picks`' other
+    columns, and everything downstream of them (grading, the send bar),
+    are unaffected. **A row refreshed before this merge may still carry
+    stale, pre-flip factors** -- nothing retroactively repairs
+    `rationale_json` on an existing `picks` row, and `pick_versions.csv`'s
+    own `factors` column for any `source='backfill'` version is subject to
+    the exact same staleness, since it is read from the pick's current
+    (possibly still stale) `rationale_json`. `strategy_id` (-> `strategy`)
+    is a separate, still-unfixed case: it is still never refreshed, on
+    either path.
 - **The generator only stores a game pick with `edge_pct >= 3.0`.** Every
   team-sport strategy (`ensemble.py`, `recent_form.py`, `sport_specific.py`,
   `combat_sports.py`) reads a `min_edge` from its strategy's stored config
@@ -442,6 +548,10 @@ stated explicitly rather than left silent.
 ## See also
 
 - `backend/scripts/export_picks.py` -- the export script itself.
+- `backend/pipeline/pick_versions.py` -- the append-on-change helper both
+  write paths call to populate `pick_versions`.
+- `backend/scripts/backfill_pick_versions.py` -- the one-time backfill for
+  picks stored before `pick_versions` existed.
 - `backend/analysis/clv_report.py` -- the CLV methodology this export
   reuses, and why CLV is trusted over raw results in this project.
 - `docs/review-remediation.md` -- the dated history of send-bar, edge-gate,

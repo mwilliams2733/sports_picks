@@ -286,6 +286,56 @@ class EmailedPick(Base):
                      default=lambda: datetime.now(tz=timezone.utc))
 
 
+class PickVersion(Base):
+    """One snapshot of a pick's tracked fields, appended whenever they change.
+
+    `PickModel` is overwritten in place until kickoff -- `_refresh_pick`
+    (`backend/pipeline/pick_generator.py`) and `_refresh_prop_pick`
+    (`backend/pipeline/prop_pipeline.py`) both rewrite the same row, so every
+    earlier side, price, edge and probability is otherwise lost. This table
+    is the series that overwrite destroys, on the same append-on-change
+    footing `LineSnapshot` uses for prices: a row is written only when a
+    tracked field differs from the latest version for that `pick_id`
+    (`backend/pipeline/pick_versions.py`'s `record_pick_version`). `picks`
+    itself is untouched by this table's existence -- email, the frontend and
+    grading all keep reading `PickModel` exactly as before.
+
+    `version` is 1-based per `pick_id`, enforced unique by
+    `uq_pick_versions_pick_version` below, so gaps or duplicates are a schema
+    violation rather than a silent possibility. `source` records why the row
+    was written: `'insert'` for a brand-new pick, `'refresh'` for an
+    in-place rewrite, `'backfill'` for a version-1 row reconstructed after
+    the fact for a pick that predates this table
+    (`backend/scripts/backfill_pick_versions.py`) -- its `recorded_at` is the
+    pick's `created_at`, not "now", because backfill time is not advice time.
+    """
+    __tablename__ = "pick_versions"
+    __table_args__ = (
+        UniqueConstraint("pick_id", "version",
+                         name="uq_pick_versions_pick_version"),
+    )
+    id = Column(Integer, primary_key=True)
+    #: ondelete="CASCADE" so deleting a bad pick (the correction path
+    #: `backend/pipeline/pick_generator.py`'s regeneration tests exercise,
+    #: and the operator workflow for a pick made on wrong inputs) also
+    #: clears its version history rather than leaving orphaned rows a
+    #: foreign-key check would then refuse -- `get_engine` turns SQLite's
+    #: `PRAGMA foreign_keys=ON` on for every connection, so this is enforced
+    #: by the database, not just documented here.
+    pick_id = Column(Integer, ForeignKey("picks.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    version = Column(Integer, nullable=False)
+    recorded_at = Column(DateTime, nullable=False)
+    source = Column(String, nullable=False)  # "insert" | "refresh" | "backfill"
+    pick_value = Column(String, nullable=True)
+    confidence = Column(Integer, nullable=True)
+    edge_pct = Column(Float, nullable=True)
+    odds_at_pick = Column(Integer, nullable=True)
+    model_prob = Column(Float, nullable=True)
+    suggested_unit_size = Column(Float, nullable=True)
+    rationale_json = Column(Text, nullable=True)
+
+
 class PlayerProp(Base):
     __tablename__ = "player_props"
     id = Column(Integer, primary_key=True)

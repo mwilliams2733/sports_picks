@@ -2,6 +2,7 @@ import logging
 from datetime import date, datetime, timezone
 from sqlalchemy.orm import Session
 from backend.models import Game, Team, PlayerProp, PlayerStat, PickModel, StrategyModel, TeamStat
+from backend.pipeline.pick_versions import record_pick_version
 from backend.collectors.player_stats.collector import PlayerStatsCollector
 from backend.collectors.player_stats.nba_api_source import NbaApiSource
 from backend.collectors.player_stats.espn_stats_source import EspnStatsSource
@@ -287,13 +288,16 @@ def _store_prop_picks(session: Session, analyses: list[PropAnalysis],
         if existing is not None:
             if _refreshable(existing, game, graded):
                 _refresh_prop_pick(existing, a)
+                record_pick_version(session, existing, "refresh")
                 refreshed += 1
             continue
         start = game_start_utc(game)
         if start is not None and start <= now:
             continue
         # No in-run registration needed: `chosen` is already one per key.
-        session.add(_build_prop_pick(a, strategy_id))
+        new_pick = _build_prop_pick(a, strategy_id)
+        session.add(new_pick)
+        record_pick_version(session, new_pick, "insert")
         added += 1
     session.flush()
     return added, refreshed
@@ -303,7 +307,11 @@ def _refresh_prop_pick(existing: PickModel, analysis: PropAnalysis) -> None:
     """Overwrite an ungraded, unstarted prop pick with a fresh analysis.
 
     Derived from `_build_prop_pick` so the two can never disagree about
-    what a prop pick contains.
+    what a prop pick contains. `rationale_json` is not in the refreshed
+    field list -- unlike a game pick, `_build_prop_pick` never sets it
+    (props have no rationale), so there is nothing stale to refresh here.
+    The game-pick equivalent of this bug (`pick_generator._refresh_pick`
+    used to leave `rationale_json` untouched after a flip) does not apply.
     """
     fresh = _build_prop_pick(analysis, existing.strategy_id)
     for field in ("pick_value", "confidence", "edge_pct", "odds_at_pick",

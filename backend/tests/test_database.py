@@ -27,7 +27,8 @@ def test_create_all_tables(db_engine):
         # latest used to be destroyed by that upsert, which is what blocked
         # opening lines, line movement and CLV.
         "line_snapshots", "model_metrics",
-        "odds", "paper_picks", "parlays", "pick_results", "picks", "player_props",
+        "odds", "paper_picks", "parlays", "pick_results", "pick_versions",
+        "picks", "player_props",
         # team_box_scores is post-game team totals (possessions). Kept apart
         # from team_stats, which is pre-game features, so a box score cannot
         # be mistaken for something computed before the game it describes.

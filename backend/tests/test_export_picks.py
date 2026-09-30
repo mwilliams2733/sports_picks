@@ -7,8 +7,8 @@ import pytest
 from backend.analysis.odds_utils import compute_pick_clv
 from backend.database import get_engine, get_session
 from backend.models import (
-    Base, EmailedPick, Game, PaperPick, PickModel, PickResult, StrategyModel,
-    Team, UserProfile,
+    Base, EmailedPick, Game, PaperPick, PickModel, PickResult, PickVersion,
+    StrategyModel, Team, UserProfile,
 )
 from backend.scripts import export_picks
 
@@ -74,6 +74,35 @@ def _build_fixture_db(path: str) -> None:
                     created_at=datetime(2026, 3, 14, 12, 0)))
     s.commit()
 
+    # Pick 10 has two recorded versions -- an insert and a refresh that
+    # flipped the side, so it exercises n_versions, first_seen_at AND
+    # flipped_side all at once. Pick 11 has exactly one version (no flip).
+    # Pick 13 has two versions on the SAME side with a moved line/price --
+    # regression for flipped_side comparing raw pick_value (a line move
+    # reads as a "flip") instead of the parsed side. Picks 12, 14, 15 have
+    # no version history at all, exercising the blank/zero/False defaults.
+    s.add(PickVersion(pick_id=10, version=1, recorded_at=datetime(2026, 9, 18, 16, 0),
+                      source="insert", pick_value="AWAY ML", confidence=3,
+                      edge_pct=-4.0, odds_at_pick=100, model_prob=0.4,
+                      rationale_json=None))
+    s.add(PickVersion(pick_id=10, version=2, recorded_at=datetime(2026, 9, 18, 18, 0),
+                      source="refresh", pick_value="HOME ML", confidence=4,
+                      edge_pct=6.0, odds_at_pick=-130, model_prob=0.62,
+                      rationale_json='[{"code": "rating_gap", "side": "home", "strength": "moderate"}]'))
+    s.add(PickVersion(pick_id=11, version=1, recorded_at=datetime(2026, 9, 18, 18, 0),
+                      source="insert", pick_value="AWAY ML", confidence=3,
+                      edge_pct=-6.0, odds_at_pick=110, model_prob=0.38,
+                      rationale_json=None))
+    s.add(PickVersion(pick_id=13, version=1, recorded_at=datetime(2026, 9, 18, 16, 0),
+                      source="insert", pick_value="HOME -1.5", confidence=3,
+                      edge_pct=3.0, odds_at_pick=-105, model_prob=0.52,
+                      rationale_json=None))
+    s.add(PickVersion(pick_id=13, version=2, recorded_at=datetime(2026, 9, 18, 18, 0),
+                      source="refresh", pick_value="HOME -2.5", confidence=3,
+                      edge_pct=4.0, odds_at_pick=-110, model_prob=0.54,
+                      rationale_json=None))
+    s.commit()
+
     s.add(PickResult(pick_id=10, result="win", payout=0.769,
                      odds_at_close=-145, line_at_close=None))
     s.add(PickResult(pick_id=13, result="win", payout=0.909,
@@ -137,7 +166,7 @@ def test_the_connection_cannot_write(fixture_db):
         conn.close()
 
 
-def test_export_writes_three_files_and_excludes_user_data(tmp_path, fixture_db):
+def test_export_writes_four_files_and_excludes_user_data(tmp_path, fixture_db):
     conn = export_picks._connect_ro(fixture_db)
     try:
         counts = export_picks.export(conn, str(tmp_path))
@@ -145,6 +174,7 @@ def test_export_writes_three_files_and_excludes_user_data(tmp_path, fixture_db):
         conn.close()
     assert os.path.exists(counts["picks_path"])
     assert os.path.exists(counts["line_history_path"])
+    assert os.path.exists(counts["pick_versions_path"])
 
     rows = _read_csv(counts["picks_path"])
     assert len(rows) == 6
@@ -431,6 +461,72 @@ def test_manifest_lists_counts_and_exclusion_note(tmp_path, fixture_db):
     assert "data-dictionary.md" in text
 
 
+def test_pick_versions_csv_has_one_row_per_version(tmp_path, fixture_db):
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    assert counts["pick_versions_rows"] == 5
+    rows = _read_csv(counts["pick_versions_path"])
+    assert len(rows) == 5
+    p10 = sorted([r for r in rows if r["pick_id"] == "10"],
+                key=lambda r: r["version"])
+    assert [r["version"] for r in p10] == ["1", "2"]
+    assert p10[0]["source"] == "insert"
+    assert p10[1]["source"] == "refresh"
+    assert p10[1]["pick_value"] == "HOME ML"
+    assert p10[1]["factors"] == "rating_gap:home:moderate"
+
+
+def test_picks_csv_n_versions_and_first_seen_at(tmp_path, fixture_db):
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    rows = {r["pick_id"]: r for r in _read_csv(counts["picks_path"])}
+    assert rows["10"]["n_versions"] == "2"
+    assert rows["10"]["first_seen_at"] == "2026-09-18T16:00:00Z"
+    assert rows["11"]["n_versions"] == "1"
+    assert rows["11"]["first_seen_at"] == "2026-09-18T18:00:00Z"
+    # Pick 12 has no recorded version history at all.
+    assert rows["12"]["n_versions"] == "0"
+    assert rows["12"]["first_seen_at"] == ""
+
+
+def test_flipped_side_is_true_only_when_the_pick_value_changed(tmp_path, fixture_db):
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    rows = {r["pick_id"]: r for r in _read_csv(counts["picks_path"])}
+    # Pick 10's two versions are AWAY ML then HOME ML -- a real flip.
+    assert rows["10"]["flipped_side"] == "True"
+    # Pick 11 has exactly one version -- nothing to flip against.
+    assert rows["11"]["flipped_side"] == "False"
+    # Pick 13's two versions are both HOME, just at a different line/price
+    # (-1.5 -> -2.5) -- a line move, not a side flip. Regression for
+    # comparing raw pick_value instead of the parsed side.
+    assert rows["13"]["flipped_side"] == "False"
+    # Pick 12 has no version history at all.
+    assert rows["12"]["flipped_side"] == "False"
+
+
+def test_manifest_lists_pick_versions_row_count(tmp_path, fixture_db):
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    manifest_path = export_picks.write_manifest(
+        str(tmp_path), db_path=fixture_db, repo_root=os.getcwd(),
+        since=None, sports=None, counts=counts)
+    text = open(manifest_path, encoding="utf-8").read()
+    assert "pick_versions.csv: 5 rows" in text
+
+
 def test_manifest_timestamp_is_iso8601_with_z_suffix(tmp_path, fixture_db):
     conn = export_picks._connect_ro(fixture_db)
     try:
@@ -444,3 +540,90 @@ def test_manifest_timestamp_is_iso8601_with_z_suffix(tmp_path, fixture_db):
     first_line = text.splitlines()[0]
     assert first_line.endswith("Z")
     assert "+00:00" not in first_line
+
+
+# --- a db that predates pick_versions (finding #6) --------------------------
+
+@pytest.fixture
+def pre_merge_fixture_db(tmp_path):
+    """A db built WITHOUT the `pick_versions` table at all, the same way a
+    `pre-*.db` snapshot or a live db that has not yet restarted onto
+    `feat/pick-versions` would look. `export()` must degrade, not crash."""
+    path = str(tmp_path / "pre_merge.db")
+    engine = get_engine(path)
+    tables = [t for t in Base.metadata.sorted_tables if t.name != "pick_versions"]
+    Base.metadata.create_all(engine, tables=tables)
+    s = get_session(engine)
+    s.add(StrategyModel(id=1, name="ensemble", config_json="{}", is_active=True))
+    s.add_all([
+        Team(id=1, name="Home Team", abbreviation="H", sport="nfl"),
+        Team(id=2, name="Away Team", abbreviation="A", sport="nfl"),
+    ])
+    s.flush()
+    s.add(Game(id=1, sport="nfl", season="2026", date=date(2026, 9, 20),
+              start_time=datetime(2026, 9, 20, 18, 0),
+              home_team_id=1, away_team_id=2, status="scheduled"))
+    s.flush()
+    s.add(PickModel(id=1, game_id=1, strategy_id=1, pick_type="moneyline",
+                    pick_value="HOME ML", confidence=3, edge_pct=5.0,
+                    odds_at_pick=-110, created_at=datetime(2026, 9, 20, 12, 0)))
+    s.commit()
+    s.close()
+    with engine.connect() as conn:
+        conn.exec_driver_sql("PRAGMA wal_checkpoint(FULL)")
+    engine.dispose()
+    return path
+
+
+def test_export_degrades_gracefully_with_no_pick_versions_table(
+        tmp_path, pre_merge_fixture_db):
+    conn = export_picks._connect_ro(pre_merge_fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+
+    assert counts["pick_versions_table_present"] is False
+    assert counts["pick_versions_rows"] == 0
+    assert os.path.exists(counts["pick_versions_path"])
+    version_rows = _read_csv(counts["pick_versions_path"])
+    assert version_rows == []
+    # The file is still header-only, not missing entirely.
+    with open(counts["pick_versions_path"], encoding="utf-8") as fh:
+        header = fh.readline().strip()
+    assert header == ",".join(export_picks.PICK_VERSIONS_FIELDS)
+
+    rows = {r["pick_id"]: r for r in _read_csv(counts["picks_path"])}
+    assert rows["1"]["first_seen_at"] == ""
+    assert rows["1"]["n_versions"] == "0"
+    assert rows["1"]["flipped_side"] == "False"
+
+
+def test_manifest_notes_when_pick_versions_table_is_absent(
+        tmp_path, pre_merge_fixture_db):
+    conn = export_picks._connect_ro(pre_merge_fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    manifest_path = export_picks.write_manifest(
+        str(tmp_path), db_path=pre_merge_fixture_db, repo_root=os.getcwd(),
+        since=None, sports=None, counts=counts)
+    text = open(manifest_path, encoding="utf-8").read()
+    assert "pick_versions.csv: 0 rows" in text
+    assert "NOTE" in text and "no pick_versions table" in text
+
+
+def test_manifest_has_no_absence_note_when_the_table_is_present(tmp_path, fixture_db):
+    """The note must be specific to a genuinely missing table, not printed
+    unconditionally."""
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    manifest_path = export_picks.write_manifest(
+        str(tmp_path), db_path=fixture_db, repo_root=os.getcwd(),
+        since=None, sports=None, counts=counts)
+    text = open(manifest_path, encoding="utf-8").read()
+    assert "no pick_versions table" not in text
