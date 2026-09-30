@@ -25,7 +25,7 @@ describe('auth headers', () => {
   })
 
   it('sends the player PIN on a bet, as typed', async () => {
-    await api.users.placePick(3, { game_id: 1, pick_type: 'moneyline', pick_value: 'HOME ML', odds: -110, stake: 10 }, '0123')
+    await api.users.placePick(3, { game_id: 1, pick_type: 'moneyline', side: 'HOME', stake: 10 }, '0123')
     expect(lastHeaders()['X-Player-Pin']).toBe('0123')
   })
 

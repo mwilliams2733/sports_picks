@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { formatOdds, legFromPick, priceMoveNote, parlayEstimate, ageLabel, findQuote } from './quotes'
-import type { GameQuote, PropQuote } from '../types'
+import { formatOdds, legFromPick, priceMoveNote, parlayEstimate, ageLabel, findQuote, addOrReplaceLeg } from './quotes'
+import type { GameQuote, PropQuote, BetLeg } from '../types'
 
 describe('legFromPick', () => {
   it('maps a moneyline label to a side', () => {
@@ -77,5 +77,32 @@ describe('findQuote', () => {
   })
   it('returns the refusal for an unavailable side', () => {
     expect(findQuote(game, [], { game_id: 1, pick_type: 'moneyline', side: 'AWAY' })).toMatchObject({ available: false })
+  })
+})
+
+describe('addOrReplaceLeg', () => {
+  type Slip = { leg: BetLeg; label: string }
+  const ml: BetLeg = { game_id: 1, pick_type: 'moneyline', side: 'HOME' }
+  const spread: BetLeg = { game_id: 1, pick_type: 'spread', side: 'AWAY' }
+  const otherGameMl: BetLeg = { game_id: 2, pick_type: 'moneyline', side: 'HOME' }
+
+  it('replaces the existing leg when the new one is on the same market', () => {
+    const slip: Slip[] = [{ leg: ml, label: 'HOME ML' }]
+    const updated = addOrReplaceLeg(slip, { leg: { ...ml, side: 'AWAY' }, label: 'AWAY ML' })
+    expect(updated).toHaveLength(1)
+    expect(updated[0].label).toBe('AWAY ML')
+  })
+
+  it('keeps both legs when they are the same game but different markets', () => {
+    const slip: Slip[] = [{ leg: ml, label: 'HOME ML' }]
+    const updated = addOrReplaceLeg(slip, { leg: spread, label: 'AWAY +3.5' })
+    expect(updated).toHaveLength(2)
+    expect(updated.map(l => l.label)).toEqual(['HOME ML', 'AWAY +3.5'])
+  })
+
+  it('keeps both legs when they are on the same market key shape but different games', () => {
+    const slip: Slip[] = [{ leg: ml, label: 'HOME ML (game 1)' }]
+    const updated = addOrReplaceLeg(slip, { leg: otherGameMl, label: 'HOME ML (game 2)' })
+    expect(updated).toHaveLength(2)
   })
 })

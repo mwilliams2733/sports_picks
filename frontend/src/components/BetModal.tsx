@@ -5,6 +5,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useToast } from '../hooks/useToast'
 import type { UserProfile } from '../types'
 import { getPin, setPin as storePin } from '../lib/secrets'
+import { useGameQuotes, usePropQuotes } from '../hooks/useQuotes'
+import { findQuote, formatOdds, legFromPick, priceMoveNote } from '../lib/quotes'
 
 interface BetModalProps {
   open: boolean
@@ -51,6 +53,16 @@ export default function BetModal({
     if (userId != null) setPinInput(getPin(userId) ?? '')
   }, [userId])
 
+  // Hooks run unconditionally, before the `if (!open) return null` below.
+  const leg = legFromPick(pickType, pickValue, gameId, propMarket, propPlayer)
+  const isProp = leg?.pick_type === 'prop'
+  const gameQuotes = useGameQuotes(open && leg && !isProp ? gameId : null)
+  const propQuotes = usePropQuotes(open && leg && isProp ? gameId : null)
+  const quote = leg
+    ? findQuote(gameQuotes.data?.quotes ?? [], propQuotes.data?.quotes ?? [], leg)
+    : undefined
+  const quotesLoading = gameQuotes.isLoading || propQuotes.isLoading
+
   if (!open) return null
 
   const handleCreateUser = async () => {
@@ -71,22 +83,14 @@ export default function BetModal({
   }
 
   const handlePlaceBet = async () => {
-    if (!userId) return
+    if (!userId || !leg || !quote?.available) return
     setSubmitting(true)
     try {
-      const res = await api.users.placePick(userId, {
-        game_id: gameId,
-        pick_type: pickType,
-        pick_value: pickValue,
-        odds,
-        stake,
-        prop_market: propMarket,
-        prop_player: propPlayer,
-      }, pin)
+      const res = await api.users.placePick(userId, { ...leg, stake }, pin)
       setResult(res)
       storePin(userId, pin)
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      toast('Bet placed', 'success')
+      toast(priceMoveNote(quote.odds, res.odds), 'success')
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 401) {
         storePin(userId, null)
@@ -97,8 +101,6 @@ export default function BetModal({
       setSubmitting(false)
     }
   }
-
-  const oddsStr = odds >= 0 ? `+${odds}` : `${odds}`
 
   return (
     <>
@@ -166,9 +168,19 @@ export default function BetModal({
                 <span className="bet-detail-value">{pickValue}</span>
               </div>
               <div className="bet-detail-row">
-                <span className="bet-detail-label">Odds</span>
-                <span className="bet-detail-value">{oddsStr}</span>
+                <span className="bet-detail-label">Price now</span>
+                <span className="bet-detail-value mono">
+                  {quote?.available ? formatOdds(quote.odds) : '—'}
+                </span>
               </div>
+              {quote?.available && quote.odds !== odds && (
+                <div className="quote-reason">The model priced this at {formatOdds(odds)}.</div>
+              )}
+              {!leg && <div className="quote-reason">This pick can't be bet here.</div>}
+              {leg && !quotesLoading && !quote && (
+                <div className="quote-reason">No book is quoting this bet right now.</div>
+              )}
+              {quote && !quote.available && <div className="quote-reason">{quote.message}</div>}
               {edgePct != null && (
                 <div className="bet-detail-row">
                   <span className="bet-detail-label">Edge</span>
@@ -209,7 +221,7 @@ export default function BetModal({
             <button
               className="btn btn-success"
               onClick={handlePlaceBet}
-              disabled={submitting || stake <= 0}
+              disabled={submitting || stake <= 0 || !quote?.available}
               style={{ width: '100%', marginTop: '1rem' }}
             >
               {submitting ? 'Placing...' : `Confirm -- $${stake.toLocaleString()}`}

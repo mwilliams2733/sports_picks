@@ -57,6 +57,23 @@ export function parlayEstimate(odds: number[]): { american: number; decimal: num
   return { american, decimal }
 }
 
+/** A leg's market -- (game_id, pick_type) for a game leg, (game_id,
+ *  prop_player, prop_market) for a prop leg. The server refuses two legs on
+ *  the same market with a 400, so the parlay builder keys its slip by this,
+ *  not by game_id alone -- same-game parlays on different markets are fine. */
+export function marketKey(leg: BetLeg): string {
+  return leg.pick_type === 'prop'
+    ? `${leg.game_id}|prop|${leg.prop_player}|${leg.prop_market}`
+    : `${leg.game_id}|${leg.pick_type}`
+}
+
+/** Adds a leg to a parlay slip, replacing any existing leg on the same
+ *  market rather than appending a second one. */
+export function addOrReplaceLeg<T extends { leg: BetLeg }>(legs: T[], newLeg: T): T[] {
+  const key = marketKey(newLeg.leg)
+  return [...legs.filter(l => marketKey(l.leg) !== key), newLeg]
+}
+
 export function ageLabel(quotedAt: string, now: Date = new Date()): string {
   const minutes = Math.floor((now.getTime() - new Date(quotedAt).getTime()) / 60000)
   if (minutes < 1) return 'Prices fetched just now'
