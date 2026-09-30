@@ -10,6 +10,9 @@ from html import escape as _escape
 from backend.analysis.prop_markets import market_label
 from backend.digest.selector import DigestPick, DigestSection
 
+# Product name, prefixed to every digest subject so recipients can filter on it.
+BRAND = "Metric Edge"
+
 SPORT_LABELS = {
     "nfl": "NFL", "ncaaf": "College Football", "nba": "NBA",
     "mlb": "MLB", "ncaab": "College Basketball",
@@ -130,7 +133,7 @@ def render_digest(sections: list[DigestSection], target_date: date):
     # One phrase, used for both the subject and the header, so the two can
     # never disagree with each other or with the body.
     count_phrase = _count_phrase(total_picks, total_props, len(sections))
-    subject = f"Top picks — {pretty} ({count_phrase})"
+    subject = f"{BRAND} — Top picks — {pretty} ({count_phrase})"
 
     rows = []
     text_lines = [f"TOP PICKS — {pretty}", ""]
@@ -262,7 +265,7 @@ def render_empty_day_digest(sections: list[DigestSection], target_date: date,
     the existing "nothing to send" behavior applies instead.
     """
     pretty = target_date.strftime("%a %b %d").replace(" 0", " ")
-    subject = f"No qualifying picks — {pretty}"
+    subject = f"{BRAND} — No qualifying picks — {pretty}"
 
     reasons = [empty_day_reason(s, min_shrunk_edge_pp, min_odds, max_odds) for s in sections]
 
