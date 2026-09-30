@@ -252,6 +252,33 @@ def test_an_ungradeable_prop_market_is_refused(session):
     assert (err.value.reason, err.value.status) == ("not_gradeable", 409)
 
 
+def test_a_combat_total_is_refused_even_when_quoted_but_moneyline_still_prices(session):
+    """A combat bout's score is a 0/1 win/loss pair -- a total can never be
+    graded, so it must never be offered, even in the (today, hypothetical)
+    case where a book is quoting one. The moneyline is unaffected."""
+    home = Team(name="Fighter A", abbreviation="A", sport="mma")
+    away = Team(name="Fighter B", abbreviation="B", sport="mma")
+    session.add_all([home, away])
+    session.flush()
+    g = Game(sport="mma", season="2026", date=GAME_DAY,
+             home_team_id=home.id, away_team_id=away.id,
+             status="scheduled", start_time=KICKOFF)
+    session.add(g)
+    session.commit()
+    _odds(session, g, "dk", moneyline_home=-150, moneyline_away=130,
+         over_under=1.5, over_price=-110, under_price=-110)
+
+    with pytest.raises(PricingError) as err:
+        _price(session, g, GameBet(g.id, "over_under", "Over"))
+    assert (err.value.reason, err.value.status) == ("not_gradeable", 409)
+    with pytest.raises(PricingError) as err:
+        _price(session, g, GameBet(g.id, "over_under", "Under"))
+    assert (err.value.reason, err.value.status) == ("not_gradeable", 409)
+
+    quote = _price(session, g, GameBet(g.id, "moneyline", "HOME"))
+    assert quote.odds == -150
+
+
 def test_a_stale_prop_is_refused(session):
     g = _game(session)
     _prop(session, g, "dk", -110, age=timedelta(hours=6, minutes=1))

@@ -29,6 +29,7 @@ from backend.analysis.odds_utils import InvalidOddsError, american_to_implied_pr
 from backend.analysis.prop_markets import MARKET_STAT_MAP, market_label
 from backend.analysis.strategy import consensus_line, consensus_moneyline
 from backend.models import Odds, PlayerProp
+from backend.pipeline.team_stats import COMBAT_SPORTS
 from backend.time_utils import ET, game_start_utc
 
 #: A price older than this is refused. Judged per market, on the newest
@@ -139,6 +140,15 @@ def _fresh(rows, timestamp_attr: str, now: datetime):
 
 
 def _price_game(session, game, bet: GameBet, now: datetime) -> Quote:
+    # A combat bout's stored score is a 0/1 win/loss pair, not points: a
+    # spread or total can never be graded (grader.grade_pick voids one as a
+    # push rather than settle it). Refusing the QUOTE here, not just the
+    # grade, stops a player from ever being offered -- let alone placing --
+    # a bet that can only ever come back as a push. Harmless today only
+    # because the collector fetches h2h alone for combat sports; this is the
+    # gate for if that ever changes. Moneyline is unaffected.
+    if game.sport in COMBAT_SPORTS and bet.pick_type in ("spread", "over_under"):
+        raise PricingError("not_gradeable")
     try:
         price_key, line_key = GAME_MARKETS[(bet.pick_type, bet.side)]
     except KeyError:
