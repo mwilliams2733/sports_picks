@@ -7,6 +7,7 @@ import ConfidenceStars from '../components/ConfidenceStars';
 import EmailedRecord from '../components/EmailedRecord';
 import { SPORTS } from '../constants/sports';
 import { CONFIDENCE_TOOLTIP } from '../constants/tooltips';
+import { SHOW_STARS } from '../lib/display';
 
 const RANGES = ['7d', '14d', '30d', '90d', 'all'] as const;
 
@@ -135,18 +136,24 @@ export default function TrackRecord() {
         <CalendarHeatmap data={filteredDaily} />
       </div>
 
-      {/* 5. Calibration chart — predicted vs actual win rate by confidence tier */}
-      <div className="section-header">Calibration <span className="section-divider" /></div>
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        {calibration.data ? (
-          <CalibrationChart data={calibration.data} />
-        ) : (
-          <div className="text-muted">Loading calibration…</div>
-        )}
-      </div>
+      {/* 5. Calibration chart — predicted vs actual win rate by confidence tier.
+          A by-star breakdown (its tooltip reads "Confidence tier N"), so it
+          is gated the same as the rest. */}
+      {SHOW_STARS && (
+        <>
+          <div className="section-header">Calibration <span className="section-divider" /></div>
+          <div className="card" style={{ marginBottom: '1.5rem' }}>
+            {calibration.data ? (
+              <CalibrationChart data={calibration.data} />
+            ) : (
+              <div className="text-muted">Loading calibration…</div>
+            )}
+          </div>
+        </>
+      )}
 
       {/* 6. Confidence breakdown table */}
-      {confidenceBreakdown.length > 0 && (
+      {SHOW_STARS && confidenceBreakdown.length > 0 && (
         <div className="confidence-breakdown">
           <div className="section-header">Confidence Breakdown <span className="section-divider" /></div>
           <div className="table-wrap">
@@ -191,7 +198,7 @@ export default function TrackRecord() {
               <th>Pick</th>
               <th>Result</th>
               <th title="CLV: closing-line value — how much the line moved in your favor between when you picked and game start.">CLV</th>
-              <th title={CONFIDENCE_TOOLTIP}>Confidence</th>
+              {SHOW_STARS && <th title={CONFIDENCE_TOOLTIP}>Confidence</th>}
             </tr>
           </thead>
           <tbody>
@@ -213,7 +220,7 @@ export default function TrackRecord() {
                   <td className={`mono ${clv == null ? 'text-muted' : clv > 0 ? 'text-green' : clv < 0 ? 'text-red' : ''}`}>
                     {clv == null ? '—' : `${clv > 0 ? '+' : ''}${clv.toFixed(2)} ${clvSuffix}`}
                   </td>
-                  <td><ConfidenceStars rating={p.confidence} /></td>
+                  {SHOW_STARS && <td><ConfidenceStars rating={p.confidence} /></td>}
                 </tr>
               );
             })}

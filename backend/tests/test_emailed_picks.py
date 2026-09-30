@@ -133,8 +133,10 @@ def test_a_recording_failure_does_not_unsend_the_digest(engine, monkeypatch):
 def test_the_selector_carries_the_pick_id(engine):
     s = get_session(engine)
     try:
-        sections = select_digest(s, DAY, ["nfl"],
-                                 {"nfl": {"start": "09-05", "end": "02-10"}})
+        sections = select_digest(
+            s, DAY, ["nfl"], {"nfl": {"start": "09-05", "end": "02-10"}},
+            send_bar={"min_shrunk_edge_pp": 0.0, "min_odds": -100_000, "max_odds": 100_000,
+                     "max_game_picks": 10, "max_props": 10, "blend_weight": {}})
     finally:
         s.close()
 

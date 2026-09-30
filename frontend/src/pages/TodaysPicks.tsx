@@ -17,6 +17,7 @@ import BetModal from '../components/BetModal';
 import CreditUsage from '../components/CreditUsage';
 import SpendConfirmButton from '../components/SpendConfirmButton';
 import { getOwnerKey } from '../lib/secrets';
+import { SHOW_STARS } from '../lib/display';
 
 export default function TodaysPicks() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -224,7 +225,7 @@ export default function TodaysPicks() {
                   <th>Line</th>
                   <th>Projection</th>
                   <th title={EDGE_TOOLTIP}>Edge</th>
-                  <th title={CONFIDENCE_TOOLTIP}>Confidence</th>
+                  {SHOW_STARS && <th title={CONFIDENCE_TOOLTIP}>Confidence</th>}
                   <th>Action</th>
                 </tr>
               </thead>
@@ -240,7 +241,7 @@ export default function TodaysPicks() {
                     <td className="mono">{p.line}</td>
                     <td className="mono">{p.projection}</td>
                     <td className="mono text-green">{p.edge_pct?.toFixed(1)}%</td>
-                    <td><ConfidenceStars rating={p.confidence ?? 0} /></td>
+                    {SHOW_STARS && <td><ConfidenceStars rating={p.confidence ?? 0} /></td>}
                     <td>
                       <button
                         className="btn-bet"

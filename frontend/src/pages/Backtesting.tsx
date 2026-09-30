@@ -5,6 +5,7 @@ import PerformanceChart from '../components/PerformanceChart';
 import SpendConfirmButton from '../components/SpendConfirmButton';
 import { rememberRefreshCost } from '../lib/refreshCost';
 import { useToast } from '../hooks/useToast';
+import { SHOW_STARS } from '../lib/display';
 
 const SPORTS = ['nba', 'nfl', 'ncaab', 'ncaaf', 'mlb'] as const;
 
@@ -368,8 +369,8 @@ export default function Backtesting() {
                 </div>
               )}
 
-              {/* Prop Confidence Breakdown */}
-              {isProp && currentResult.by_confidence && (
+              {/* Prop Confidence Breakdown -- all or nothing behind SHOW_STARS */}
+              {SHOW_STARS && isProp && currentResult.by_confidence && (
                 <div>
                   <div className="input-label" style={{ marginBottom: '0.5rem' }}>By Confidence</div>
                   <div className="table-wrap">
@@ -391,7 +392,9 @@ export default function Backtesting() {
                             const rate = total > 0 ? ((r.wins / total) * 100).toFixed(1) : '0';
                             return (
                               <tr key={conf}>
-                                <td className="font-medium">{'*'.repeat(Number(conf))} ({conf} star{Number(conf) !== 1 ? 's' : ''})</td>
+                                <td className="font-medium">
+                                  {'*'.repeat(Number(conf))} ({conf} star{Number(conf) !== 1 ? 's' : ''})
+                                </td>
                                 <td className="mono">{r.wins}-{r.losses}</td>
                                 <td className="mono text-muted">{total}</td>
                                 <td className="mono" style={{ color: Number(rate) >= 55 ? 'var(--green)' : undefined }}>
