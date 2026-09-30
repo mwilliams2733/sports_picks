@@ -221,3 +221,34 @@ def test_today_last_meeting_is_null_when_no_prior_history():
     assert g["last_meeting"] is None
     assert g["home_l10_record"] == "0-0"
     assert g["away_l10_record"] == "0-0"
+
+
+def _seed_today_game_with_two_books(app):
+    """A scheduled game with two books' moneylines (dk -110/+100, fd
+    -130/+110), so the consensus (-120) differs from either book alone."""
+    today = et_today()
+    _seed(app, [
+        Team(id=3, name="Rockets", abbreviation="HOU", sport="nba"),
+        Team(id=4, name="Spurs", abbreviation="SAS", sport="nba"),
+        Game(id=900, sport="nba", season="2025-26", date=today,
+             home_team_id=3, away_team_id=4, status="scheduled",
+             start_time=None),
+        Odds(game_id=900, bookmaker="dk",
+             moneyline_home=-110, moneyline_away=+100,
+             timestamp=datetime.now(timezone.utc)),
+        Odds(game_id=900, bookmaker="fd",
+             moneyline_home=-130, moneyline_away=+110,
+             timestamp=datetime.now(timezone.utc)),
+    ])
+    return 900
+
+
+def test_today_shows_the_consensus_not_the_first_book():
+    """dk -110 and fd -130 on the home side -> consensus -120 (hand-computed
+    in test_paper_pricing). The first book's -110 must not be shown."""
+    app = create_app(":memory:")
+    gid = _seed_today_game_with_two_books(app)
+    [game] = [g for g in TestClient(app).get("/games/today").json() if g["id"] == gid]
+    assert game["moneyline_home"] == -120
+    assert game["bookmaker"] == "consensus"
+    assert game["odds_count"] == 2

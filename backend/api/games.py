@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Request, HTTPException
 from sqlalchemy import or_, and_, select
 from sqlalchemy.orm import aliased
+from backend.analysis.strategy import average_odds
 from backend.database import get_session
 from backend.models import Game, Odds, Team
 from backend.time_utils import et_today
@@ -54,7 +55,10 @@ def get_today_games(request: Request, sport: str | None = None):
         results = []
         for game, home, away in query.all():
             odds_rows = session.query(Odds).filter(Odds.game_id == game.id).all()
-            best = odds_rows[0] if odds_rows else None
+            # The same consensus the paper-bet quotes use (plan 027), so every
+            # price on screen agrees. It used to show whichever book's row came
+            # back first.
+            consensus = average_odds(odds_rows) or {}
             results.append({
                 "id": game.id,
                 "sport": game.sport,
@@ -67,11 +71,11 @@ def get_today_games(request: Request, sport: str | None = None):
                 "away_team_name": away.name,
                 "home_score": game.home_score,
                 "away_score": game.away_score,
-                "moneyline_home": best.moneyline_home if best else None,
-                "moneyline_away": best.moneyline_away if best else None,
-                "spread_home": best.spread_home if best else None,
-                "over_under": best.over_under if best else None,
-                "bookmaker": best.bookmaker if best else None,
+                "moneyline_home": consensus.get("moneyline_home"),
+                "moneyline_away": consensus.get("moneyline_away"),
+                "spread_home": consensus.get("spread_home"),
+                "over_under": consensus.get("over_under"),
+                "bookmaker": "consensus" if odds_rows else None,
                 "odds_count": len(odds_rows),
                 "last_meeting": _last_meeting(session, game),
                 "home_l10_record": _l10_record(session, game.home_team_id, game.sport, game.date),

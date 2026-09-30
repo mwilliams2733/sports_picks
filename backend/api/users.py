@@ -177,6 +177,7 @@ def list_users(request: Request):
             result.append({
                 "id": u.id,
                 "name": u.name,
+                "has_pin": u.pin_hash is not None,
                 "starting_balance": u.starting_balance,
                 "current_balance": round(current_balance, 2),
                 "total_wagered": round(total_wagered, 2),
@@ -362,6 +363,7 @@ def get_user(request: Request, user_id: int):
         return {
             "id": user.id,
             "name": user.name,
+            "has_pin": user.pin_hash is not None,
             "starting_balance": user.starting_balance,
             "current_balance": round(current_balance, 2),
             "total_wagered": round(total_wagered, 2),
