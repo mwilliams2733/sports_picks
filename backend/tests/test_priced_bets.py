@@ -91,6 +91,7 @@ def test_the_old_request_shape_is_rejected():
 def test_a_side_that_does_not_fit_the_market_is_rejected():
     client = _client()
     gid = _game(client)
+    seed_fresh_odds(client.app.state.engine, gid)
     uid = _user(client)
     r = client.post(f"/users/{uid}/picks", json={
         "game_id": gid, "pick_type": "spread", "side": "Over", "stake": 100})
@@ -201,6 +202,55 @@ def test_a_parlay_with_one_unpriceable_leg_is_refused_whole():
         {"game_id": a, "pick_type": "moneyline", "side": "HOME"},
         {"game_id": b, "pick_type": "moneyline", "side": "HOME"}]})
     assert r.status_code == 409
+    s = get_session(client.app.state.engine)
+    assert s.query(Parlay).count() == 0 and s.query(PaperPick).count() == 0
+    s.close()
+
+
+# --- Fix round 1: same-game legs are correlated, never independent ----------
+
+def test_two_identical_legs_on_one_game_are_rejected():
+    client = _client()
+    gid = _game(client)
+    seed_fresh_odds(client.app.state.engine, gid)
+    uid = _user(client)
+    r = client.post(f"/users/{uid}/parlay", json={"stake": 100, "legs": [
+        {"game_id": gid, "pick_type": "moneyline", "side": "HOME"},
+        {"game_id": gid, "pick_type": "moneyline", "side": "HOME"}]})
+    assert r.status_code == 400
+    assert r.json()["detail"] == "A parlay can have only one leg per game."
+    s = get_session(client.app.state.engine)
+    assert s.query(Parlay).count() == 0 and s.query(PaperPick).count() == 0
+    s.close()
+
+
+def test_a_moneyline_leg_and_a_spread_leg_on_one_game_are_rejected():
+    client = _client()
+    gid = _game(client)
+    seed_fresh_odds(client.app.state.engine, gid)
+    uid = _user(client)
+    r = client.post(f"/users/{uid}/parlay", json={"stake": 100, "legs": [
+        {"game_id": gid, "pick_type": "moneyline", "side": "HOME"},
+        {"game_id": gid, "pick_type": "spread", "side": "HOME"}]})
+    assert r.status_code == 400
+    assert r.json()["detail"] == "A parlay can have only one leg per game."
+    s = get_session(client.app.state.engine)
+    assert s.query(Parlay).count() == 0 and s.query(PaperPick).count() == 0
+    s.close()
+
+
+def test_a_prop_leg_and_a_moneyline_leg_on_one_game_are_rejected():
+    client = _client()
+    gid = _game(client)
+    seed_fresh_odds(client.app.state.engine, gid)
+    seed_fresh_prop(client.app.state.engine, gid)
+    uid = _user(client)
+    r = client.post(f"/users/{uid}/parlay", json={"stake": 100, "legs": [
+        {"game_id": gid, "pick_type": "prop", "prop_player": "QB One",
+         "prop_market": "player_pass_yds", "outcome": "Over", "line": 225.5},
+        {"game_id": gid, "pick_type": "moneyline", "side": "HOME"}]})
+    assert r.status_code == 400
+    assert r.json()["detail"] == "A parlay can have only one leg per game."
     s = get_session(client.app.state.engine)
     assert s.query(Parlay).count() == 0 and s.query(PaperPick).count() == 0
     s.close()

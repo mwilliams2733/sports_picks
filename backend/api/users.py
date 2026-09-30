@@ -502,6 +502,17 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
         if body.stake <= 0:
             raise HTTPException(status_code=400, detail="Stake must be positive")
 
+        # Two legs on the same game are correlated (or, worst case, the same
+        # outcome twice), and combine() treats every leg as independent --
+        # that let a parlay of {game, moneyline HOME} x2 price at +264 for
+        # what is one -110 outcome (Fix round 1). Checked before pricing or
+        # any row is written, and it applies across leg types (a prop leg and
+        # a game leg on the same game_id are also a same-game correlation).
+        game_ids = [leg.game_id for leg in body.legs]
+        if len(set(game_ids)) != len(game_ids):
+            raise HTTPException(status_code=400,
+                                 detail="A parlay can have only one leg per game.")
+
         # Check balance
         current_balance = balance_of(session, user)
         if body.stake > current_balance:
