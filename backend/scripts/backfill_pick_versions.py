@@ -21,6 +21,36 @@ Idempotent: a pick that already has any `pick_versions` row (whether written
 live or by an earlier backfill run) is skipped, so a second `--apply` writes
 zero rows.
 
+Run order matters and is NOT enforced by this script
+-----------------------------------------------------
+Run this only with the scheduler stopped, strictly between deploy and
+restart:
+
+    1. stop the scheduler;
+    2. merge and deploy this code;
+    3. run `--apply`;
+    4. restart the scheduler.
+
+Two hazards if that order is not followed, both from the same root cause --
+this script and a live `generate_and_store_picks`/`_store_prop_picks` run
+deciding independently what a pick's "next" version is:
+
+* **Running the backfill against a db the new code is already live on**
+  quietly loses data, not just correctness: the scheduler's first refresh
+  of any pre-existing pick writes version 1 itself (`source='refresh'`),
+  from whatever state the pick is in AT THAT REFRESH -- and this script's
+  `unversioned_picks` filter then skips that pick forever, because it now
+  has a version. The pick's TRUE pre-merge final state (what this script
+  exists to capture) is gone, silently replaced by whatever the first live
+  refresh happened to compute.
+* **Running the backfill concurrently with a live scheduler** can race a
+  window run for the same pick: both independently compute "this pick has
+  no version yet, so mine is version 1", and one write wins while the
+  other hits `uq_pick_versions_pick_version` and is caught and skipped
+  (see `pick_versions.record_pick_version`'s docstring) -- survivable, but
+  still a hazard worth avoiding, since which side's "version 1" you get is
+  then a coin flip.
+
 Like the other repair scripts, a dry run is the default and `--apply` must
 be given. Back the database up first.
 
@@ -34,6 +64,7 @@ from collections import Counter
 
 from backend.database import get_engine, get_session, run_migrations
 from backend.models import Game, PickModel, PickVersion
+from backend.pipeline.pick_versions import record_pick_version
 
 logger = logging.getLogger(__name__)
 
@@ -56,15 +87,13 @@ def run_on_session(session, apply: bool = False) -> dict:
         summary["written"] += 1
         summary["by_sport"][sport] = summary["by_sport"].get(sport, 0) + 1
         if apply:
-            session.add(PickVersion(
-                pick_id=pick.id, version=1, recorded_at=pick.created_at,
-                source="backfill",
-                pick_value=pick.pick_value, confidence=pick.confidence,
-                edge_pct=pick.edge_pct, odds_at_pick=pick.odds_at_pick,
-                model_prob=pick.model_prob,
-                suggested_unit_size=pick.suggested_unit_size,
-                rationale_json=pick.rationale_json,
-            ))
+            # Same helper the live write paths use, not a second field list
+            # that could drift from it -- `record_pick_version` already
+            # knows `source='backfill'` means `recorded_at = created_at`
+            # (see its own docstring), and every pick here is, by
+            # `unversioned_picks`'s filter, guaranteed to have no prior
+            # version, so this always writes version 1.
+            record_pick_version(session, pick, "backfill")
     if apply and summary["pick_ids"]:
         session.commit()
     return summary

@@ -9,7 +9,10 @@ import datetime
 import pytest
 
 from backend.database import get_engine, get_session
-from backend.models import Base, Game, PickModel, PickResult, StrategyModel, Team
+from backend.models import (
+    Base, Game, PickModel, PickResult, PickVersion, StrategyModel, Team,
+)
+from backend.pipeline.pick_versions import record_pick_version
 from backend.scripts.dedupe_picks import duplicate_groups, run
 
 D = datetime.date(2026, 9, 19)
@@ -107,6 +110,42 @@ def test_dry_run_is_the_default_and_writes_nothing(tmp_path):
     summary = run(db)
     assert summary["would_delete"] == 1
     assert _ids(db) == [1, 2], "a dry run deleted rows"
+
+
+def test_deleting_a_duplicate_with_versions_does_not_fk_error_and_leaves_no_orphans(tmp_path):
+    """`dedupe_picks` bulk-deletes with `query.delete()`, which emits a
+    plain SQL DELETE rather than going through the ORM's identity map --
+    the review flagged this as the pattern to check, since SQLite's FK
+    cascade is entirely a database-level guarantee (`PRAGMA
+    foreign_keys=ON`, `ON DELETE CASCADE` in the `pick_versions` DDL) and
+    not something the ORM enforces on a bulk delete. Pick 2 (dropped, the
+    duplicate) carries two recorded versions; pick 1 (kept) carries one.
+    """
+    db = _db(tmp_path, [_pick(1), _pick(2)])
+    s = get_session(get_engine(db))
+    p1, p2 = (s.query(PickModel).filter(PickModel.id == pid).one()
+             for pid in (1, 2))
+    record_pick_version(s, p1, "insert")
+    record_pick_version(s, p2, "insert")
+    s.commit()
+    p2.edge_pct = 9.0
+    record_pick_version(s, p2, "refresh")
+    s.commit()
+    s.close()
+
+    summary = run(db, apply=True)  # must not raise an IntegrityError
+
+    assert _ids(db) == [1]
+    assert summary["deleted"] == 1
+
+    s = get_session(get_engine(db))
+    try:
+        remaining = s.query(PickVersion).all()
+        assert {v.pick_id for v in remaining} == {1}, \
+            "pick 2's version rows must be gone, not orphaned"
+        assert len(remaining) == 1
+    finally:
+        s.close()
 
 
 def test_a_sport_filter_limits_the_blast_radius(tmp_path):

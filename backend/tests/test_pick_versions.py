@@ -161,3 +161,46 @@ def test_unique_constraint_on_pick_id_and_version(session):
                             source="insert"))
     with pytest.raises(Exception):
         session.commit()
+
+
+def test_a_version_collision_is_caught_and_skipped_not_fatal(session, monkeypatch, caplog):
+    """Two overlapping scheduler runs (BackgroundScheduler's thread pool,
+    per the review) can each compute the same next-version number for one
+    pick from a read taken before either has written -- a real thread race
+    is not reproducible deterministically in a single-threaded test, so
+    this forces the exact failure mode `_next_version` would hand back in
+    that race (a stale, already-taken number) via monkeypatch, and drives
+    the real write path (the nested SAVEPOINT and its `except
+    IntegrityError`) from there."""
+    import logging
+    from backend.pipeline import pick_versions
+
+    pick = _pick(session)
+    record_pick_version(session, pick, "insert")
+    session.commit()
+    assert [v.version for v in session.query(PickVersion)
+            .filter(PickVersion.pick_id == pick.id)] == [1]
+
+    # Force the "next" number to collide with the version already on
+    # record, exactly as a stale concurrent read would.
+    monkeypatch.setattr(pick_versions, "_next_version",
+                        lambda session, pick_id: (1, None))
+    pick.edge_pct = 12.0
+
+    with caplog.at_level(logging.WARNING):
+        result = record_pick_version(session, pick, "refresh")
+
+    assert result is None, "a caught collision must not return a row"
+    assert any("collision" in r.message and str(pick.id) in r.message
+              for r in caplog.records), \
+        "the collision must be logged with the pick_id"
+
+    # The run continues: committing afterward must not raise, and the
+    # pick's own refreshed field is not lost just because its version was.
+    session.commit()
+    refreshed = session.query(PickModel).filter(PickModel.id == pick.id).one()
+    assert refreshed.edge_pct == 12.0
+    versions = session.query(PickVersion).filter(
+        PickVersion.pick_id == pick.id).all()
+    assert [v.version for v in versions] == [1], \
+        "the colliding version must not have been written"

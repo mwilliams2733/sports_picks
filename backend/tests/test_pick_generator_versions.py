@@ -187,3 +187,39 @@ def test_a_side_flip_refreshes_rationale_and_the_version_carries_it(
     versions = _versions(db_session, pick.id)
     assert [v.version for v in versions] == [1, 2]
     assert versions[-1].rationale_json == pick.rationale_json
+
+
+def test_a_version_collision_does_not_abort_the_generation_run(
+        db_engine, db_session, monkeypatch):
+    """`generate_and_store_picks` commits once per call, covering every pick
+    refreshed in that run (game AND, via the same session elsewhere, that
+    window's props). A `pick_versions` UNIQUE collision on ONE pick's
+    version write must not raise out of `record_pick_version` and abort
+    that whole commit -- see `pick_versions.record_pick_version`'s
+    docstring. Forces the collision via the same `_next_version`
+    monkeypatch `test_pick_versions.py` uses, since a real thread race
+    isn't reproducible deterministically here."""
+    from backend.pipeline import pick_versions
+
+    Base.metadata.create_all(db_engine)
+    _seed(db_session)
+    generate_and_store_picks(db_session, strategy_id=1, target_date=DAY)
+    pick_id = _the_pick(db_session).id
+    assert len(_versions(db_session, pick_id)) == 1
+    edge_before = _the_pick(db_session).edge_pct
+
+    monkeypatch.setattr(pick_versions, "_next_version",
+                        lambda session, pick_id: (1, None))
+    db_session.query(Odds).filter(Odds.game_id == 1).update({"moneyline_home": -170})
+    db_session.commit()
+
+    added = generate_and_store_picks(db_session, strategy_id=1, target_date=DAY)
+
+    assert added == 0, "no new pick -- this is a refresh, not an insert"
+    pick = _the_pick(db_session)
+    # The refresh itself must have gone through despite the version
+    # collision being swallowed -- the market move actually changed the edge.
+    assert pick.edge_pct != edge_before, \
+        "the refresh must not be lost just because its version write collided"
+    assert len(_versions(db_session, pick_id)) == 1, \
+        "the colliding version must not have been written"

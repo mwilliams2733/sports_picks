@@ -18,7 +18,11 @@ Writes four files into ``--out``:
     series) -- every stored version of every pick, not just its current
     state. See ``docs/data-dictionary.md`` for the backfill caveat: a
     backfilled version 1 is a pick's LAST known pre-kickoff state, not its
-    first.
+    first. If the db has no ``pick_versions`` table at all (it predates
+    ``feat/pick-versions``), this file is written header-only and
+    ``picks.csv``'s ``first_seen_at``/``n_versions``/``flipped_side``
+    degrade to blank/0/False rather than raising -- the manifest notes
+    this explicitly so it is not mistaken for "no pick was ever revised".
 ``manifest.txt``
     When the export ran, the db path, the git HEAD, row counts per file and
     sport, the filters applied, and a pointer to ``docs/data-dictionary.md``.
@@ -256,6 +260,21 @@ def _git_head(repo_root: str) -> str:
         return f"(unavailable: {type(e).__name__})"
 
 
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    """Whether `name` exists in this db's schema.
+
+    `pick_versions` is new: a db that predates this merge -- a `pre-*.db`
+    snapshot, a live db not yet restarted onto the new code -- has no such
+    table, and this export is opened `mode=ro`, so there is no migration
+    step available to create one. A missing table must degrade the export,
+    not crash it.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (name,)).fetchone()
+    return row is not None
+
+
 def _series_depth(conn: sqlite3.Connection) -> dict[int, int]:
     """game_id -> the most line_snapshots rows any single bookmaker has on
     it, via `line_snapshots.depth_from_pairs` -- the same definition
@@ -318,17 +337,19 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
     # once and grouped in Python for the same reason pick_results and
     # emailed_picks are below: one query, filtered to pick_id_set, rather
     # than one query per pick.
-    all_version_rows = conn.execute("""
-        SELECT pick_id, version, recorded_at, source, pick_value, confidence,
-               edge_pct, odds_at_pick, model_prob, suggested_unit_size,
-               rationale_json
-        FROM pick_versions
-        ORDER BY pick_id, version
-    """).fetchall()
+    pick_versions_table_present = _table_exists(conn, "pick_versions")
     versions_by_pick: dict[int, list] = {}
-    for row in all_version_rows:
-        if row["pick_id"] in pick_id_set:
-            versions_by_pick.setdefault(row["pick_id"], []).append(row)
+    if pick_versions_table_present:
+        all_version_rows = conn.execute("""
+            SELECT pick_id, version, recorded_at, source, pick_value, confidence,
+                   edge_pct, odds_at_pick, model_prob, suggested_unit_size,
+                   rationale_json
+            FROM pick_versions
+            ORDER BY pick_id, version
+        """).fetchall()
+        for row in all_version_rows:
+            if row["pick_id"] in pick_id_set:
+                versions_by_pick.setdefault(row["pick_id"], []).append(row)
 
     # pick_results and emailed_picks are fetched separately (full read, then
     # filtered to pick_id_set in Python) and joined in Python: neither table
@@ -377,7 +398,8 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
                 "created_at": _iso_z(r["created_at"]),
                 "first_seen_at": _iso_z(versions[0]["recorded_at"]) if versions else "",
                 "n_versions": len(versions),
-                "flipped_side": len({v["pick_value"] for v in versions}) > 1,
+                "flipped_side": len({_side(r["pick_type"], v["pick_value"])
+                                     for v in versions}) > 1,
                 "game_id": r["game_id"],
                 "sport": r["sport"],
                 "season": r["season"],
@@ -495,6 +517,7 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
         "line_history_path": line_history_path,
         "pick_versions_rows": len(version_rows),
         "pick_versions_path": pick_versions_path,
+        "pick_versions_table_present": pick_versions_table_present,
         "sport_counts": dict(sport_counts),
     }
 
@@ -522,6 +545,15 @@ def write_manifest(out_dir: str, *, db_path: str, repo_root: str,
     lines += [
         f"line_history.csv: {counts['line_history_rows']} rows",
         f"pick_versions.csv: {counts['pick_versions_rows']} rows",
+    ]
+    if not counts["pick_versions_table_present"]:
+        lines.append(
+            "  NOTE: this database has no pick_versions table (it predates "
+            "feat/pick-versions, or the live db has not restarted onto it "
+            "yet) -- pick_versions.csv is header-only, and first_seen_at/"
+            "n_versions/flipped_side in picks.csv are blank/0/False for "
+            "every row, not a real absence of version history.")
+    lines += [
         "",
         "Excluded on purpose: paper_picks and user_profiles. Both are "
         "private data about the owner and paper-trading users, not data "
