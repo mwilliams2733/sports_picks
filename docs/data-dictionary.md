@@ -77,7 +77,7 @@ anything price-derived.
 | `payout` | Net units from `backend.pipeline.grader.payout_for(result, odds_at_pick)`, **for a flat 1-unit stake** -- it is NOT scaled by `suggested_unit_size`. A pick sized at 0.3 units by Kelly and a pick sized at 2.0 units show the identical `payout` for the identical price and result; multiply by `suggested_unit_size` yourself if you want bankroll-scaled P&L. Blank if ungraded. |
 | `odds_at_close` / `line_at_close` | The price/line at game close, captured for CLV. Blank if never captured (see "line snapshots" below). **For `spread` and `over_under` picks, `odds_at_close` is a deliberate copy of `odds_at_pick`, not a real closing price** -- see "What CLV means here". |
 | `clv_price_pp` / `clv_line_pts` | Closing line value for this pick, split by unit -- see "What CLV means here" below. Exactly one is filled per row (or neither, if there is no close); **never pool the two columns together.** |
-| `series_depth` | The deepest per-bookmaker observation count `line_snapshots` has for this pick's game (see `line_history.csv` below). `1` means no book was ever seen to change its price for that game, so any `odds_at_close`/`line_at_close`/CLV value drawn from it is the SAME observation as the opening price, not a real close. `backend.analysis.clv_report.measurable()` drops `series_depth <= 1` rows from its own reporting; use this column to reproduce that filter here. |
+| `series_depth` | The deepest per-bookmaker observation count `line_snapshots` has for this pick's game (see `line_history.csv` below). `0` means the game has no line snapshots at all (most games before 2026-09-22). `1` means no book was ever seen to change its price for that game, so any `odds_at_close`/`line_at_close`/CLV value drawn from it is the SAME observation as the opening price, not a real close. `backend.analysis.clv_report.measurable()` keeps only `series_depth > 1`, so it drops both `0` and `1` rows from its own reporting; use this column to reproduce that filter here. |
 | `odds_reconstructed` | `True` when `odds_at_pick` was rebuilt afterwards from surviving book rows rather than recorded live (`backend/scripts/repair_invalid_odds.py`). Treat these as an approximation in any ROI/CLV figure. `backend.analysis.clv_report.usable()` excludes these by default too (`include_reconstructed=False`). |
 | `emailed` | `True` if this pick appears at least once in `emailed_picks`. |
 | `emailed_odds` / `emailed_at` / `emailed_pick_value` / `emailed_digest_date` / `emailed_confidence` | What the email actually said, at the time it was sent, for the **most recent** digest that included this pick -- not what the pick's own (possibly since-refreshed) columns say now. A pick can be emailed on more than one digest date (the uniqueness constraint on `emailed_picks` is per `(digest_date, pick_id)`, not per pick); this export keeps the row with the latest `sent_at` and folds the rest away, so one `pick_id` is always exactly one `picks.csv` row. `emailed_pick_value` and `emailed_odds` are the side/price as displayed that day and can differ from the current `pick_value`/`odds_at_pick` if the pick was refreshed after sending (see `created_at` above). `emailed_confidence` is the star rating as sent (nullable -- rows recorded before 2026-09-29 don't always carry it). All five are blank before 2026-09-28, when `emailed_picks` recording began (nothing before that date was recorded, regardless of whether it was actually emailed). |
@@ -225,7 +225,7 @@ stated explicitly rather than left silent.
   `plans/007-measure-calibration-before-retuning-min-edge.md:152-153`, and
   matching the same `3.0` the `combat_sports` strategy is seeded with in
   `backend/database.py:471`). On 2026-09-30 the live db's minimum
-  `edge_pct` was 3.0 in every sport, consistent with this floor. **The edge
+  `edge_pct` was at least 3.0 in every sport (exactly 3.0 in mlb/nba/ncaaf, up to 17.2 in boxing), consistent with this floor. **The edge
   distribution in this export is truncated at +3.0 by construction -- there
   is no lower tail below it to find, and its absence is not a finding.**
   (`value_only.py`'s own `min_edge` default is 10.0, higher still, for
@@ -341,9 +341,9 @@ stated explicitly rather than left silent.
     header's Pacific date.
   - This branch's own two commits (`de0e349`, `0ab3fd6`, removing the
     3-point bar and adding this export) are also dated 2026-09-30 UTC
-    (`17:06` UTC). The 3-point bar was therefore live for well under a day
-    in UTC terms before this same-day follow-up removed it -- not "roughly
-    a day" as an earlier draft of this dictionary said.
+    (`17:06` UTC). The 3-point bar went live 2026-09-30 ~07:06Z (merge
+    `f7a3bee`) and stays in force until the first digest after this branch
+    merges -- provisionally 2026-10-01 (see the next bullet).
   - **As of this branch, the 3-point bar removal is NOT YET merged to
     master or deployed.** "Every priced game pick is emailed" is only true
     starting with the first digest run AFTER this branch merges and the
@@ -354,7 +354,7 @@ stated explicitly rather than left silent.
     fact already in the data.
 - **Emailed picks have only been recorded since 2026-09-28.** Verified via
   git history: `697d6fc` ("feat(digest): record the picks each email sent,
-  and grade them as sent") is dated 2026-09-28 (15:07 UTC).
+  and grade them as sent") is dated 2026-09-28 (23:07 UTC).
 - **Prop `edge_pct` is NOT a probability difference.** Verified by code
   intent: `backend/digest/selector.py`'s docstring (in the notes on prop
   ranking, not `render.py`) states explicitly that a prop's edge is

@@ -41,6 +41,7 @@ from backend.analysis.odds_utils import (
     compute_pick_clv,
     parse_pick_line,
 )
+from backend.analysis.line_snapshots import depth_from_pairs
 from backend.digest.render import _prop_label, _selection_label
 from backend.digest.selector import DigestPick
 
@@ -181,7 +182,7 @@ def _market_prob_novig(pick_type: str, model_prob: float | None,
       market probability -- there is no market-side win probability stored
       for a spread/total pick. 0.5 is the documented convention, not a
       computed value, and is written only when `model_prob` is itself
-      present -- a pick with no stored `model_prob` (all 284 legacy
+      present -- a pick with no stored `model_prob` (all 141 legacy
       spread/over_under picks from before 2026-09-17; see
       docs/data-dictionary.md's known traps) gets a blank here rather than
       a fabricated 0.5, since 0.5 documents what a REAL pick's edge was
@@ -242,11 +243,9 @@ def _git_head(repo_root: str) -> str:
 
 def _series_depth(conn: sqlite3.Connection) -> dict[int, int]:
     """game_id -> the most line_snapshots rows any single bookmaker has on
-    it. Same definition as `backend.analysis.line_snapshots.series_depth`
-    (game_id -> max per-bookmaker observation count), reimplemented against
-    a raw sqlite3 connection here because that function takes a SQLAlchemy
-    session and this script deliberately never opens one (see the module
-    docstring: read-only mode=ro only).
+    it, via `line_snapshots.depth_from_pairs` -- the same definition
+    `series_depth` uses, fed from a raw mode=ro connection because this
+    script never opens a SQLAlchemy session.
 
     1 means no book was ever seen to change its price for that game -- the
     "closing" price on record is the same observation as the opening one,
@@ -254,14 +253,8 @@ def _series_depth(conn: sqlite3.Connection) -> dict[int, int]:
     lets the export reproduce that same population instead of treating
     every row with a non-blank clv_* column as equally trustworthy.
     """
-    counts: dict[tuple[int, str], int] = {}
-    for game_id, bookmaker in conn.execute(
-            "SELECT game_id, bookmaker FROM line_snapshots"):
-        counts[(game_id, bookmaker)] = counts.get((game_id, bookmaker), 0) + 1
-    out: dict[int, int] = {}
-    for (game_id, _), n in counts.items():
-        out[game_id] = max(out.get(game_id, 0), n)
-    return out
+    return depth_from_pairs(
+        conn.execute("SELECT game_id, bookmaker FROM line_snapshots"))
 
 
 def export(conn: sqlite3.Connection, out_dir: str, *,

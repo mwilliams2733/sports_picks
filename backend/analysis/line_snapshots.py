@@ -227,10 +227,16 @@ def series_depth(session: Session, game_ids) -> dict[int, int]:
     ids = list(game_ids)
     if not ids:
         return {}
+    return depth_from_pairs(
+        session.query(LineSnapshot.game_id, LineSnapshot.bookmaker)
+        .filter(LineSnapshot.game_id.in_(ids)).all())
+
+
+def depth_from_pairs(pairs) -> dict[int, int]:
+    """The one definition of series depth, over (game_id, bookmaker) rows --
+    one row per snapshot. `series_depth` and the CSV export both call it."""
     counts: dict[tuple[int, str], int] = {}
-    for game_id, bookmaker in (session.query(LineSnapshot.game_id,
-                                             LineSnapshot.bookmaker)
-                               .filter(LineSnapshot.game_id.in_(ids)).all()):
+    for game_id, bookmaker in pairs:
         counts[(game_id, bookmaker)] = counts.get((game_id, bookmaker), 0) + 1
     out: dict[int, int] = {}
     for (game_id, _), n in counts.items():

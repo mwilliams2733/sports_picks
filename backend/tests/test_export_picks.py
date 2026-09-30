@@ -353,6 +353,12 @@ def test_line_history_carries_start_time_and_series_depth(tmp_path, fixture_db):
                     moneyline_home=-135, moneyline_away=115,
                     captured_at=datetime(2026, 9, 18, 18, 0),
                     last_seen_at=datetime(2026, 9, 18, 20, 0)),
+        # A second book seen once: depth is the deepest single book (2),
+        # not the game's total snapshot count (3).
+        LineSnapshot(game_id=1, bookmaker="fanduel",
+                    moneyline_home=-128, moneyline_away=108,
+                    captured_at=datetime(2026, 9, 18, 12, 0),
+                    last_seen_at=datetime(2026, 9, 18, 20, 0)),
     ])
     s.commit()
     s.close()
@@ -366,9 +372,11 @@ def test_line_history_carries_start_time_and_series_depth(tmp_path, fixture_db):
     finally:
         conn.close()
     rows = _read_csv(counts["line_history_path"])
-    assert len(rows) == 2
+    assert len(rows) == 3
     assert all(r["start_time_utc"] == "2026-09-18T23:05:00Z" for r in rows)
     assert all(r["series_depth"] == "2" for r in rows)
+    picks = _read_csv(counts["picks_path"])
+    assert {r["series_depth"] for r in picks if r["game_id"] == "1"} == {"2"}
 
 
 def test_timestamps_are_iso8601_with_z_suffix(tmp_path, fixture_db):
