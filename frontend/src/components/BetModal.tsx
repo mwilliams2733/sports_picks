@@ -99,8 +99,11 @@ export default function BetModal({
       setResult(res)
       storePin(userId, pin)
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      const shownLabel = resolveQuoteLabel(quote, homeTeam, awayTeam)
-      const chargedLabel = isProp ? propOutcomeLabel(res.pick_value) : resolveLabel(res.pick_value, homeTeam, awayTeam)
+      // Both sides from the server's own label through the same function, so
+      // an unmoved bet compares equal (a display label drops "ML" and would not).
+      const label = (v: string) => isProp ? propOutcomeLabel(v) : resolveLabel(v, homeTeam, awayTeam)
+      const shownLabel = label(quote.pick_value)
+      const chargedLabel = label(res.pick_value)
       toast(priceMoveNote(shownLabel, quote.odds, chargedLabel, res.odds), 'success')
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 401) {

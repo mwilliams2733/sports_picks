@@ -171,6 +171,35 @@ describe('BetModal', () => {
     expect(screen.getByText('The line has moved from BOS +3.5 to BOS +2.5.')).toBeInTheDocument()
   })
 
+  it('reports no move after placing a moneyline bet at the price shown', async () => {
+    useUserStore.setState({ currentUserName: 'Marcus' })
+    vi.mocked(api.users.list).mockResolvedValue([makeUser()])
+    vi.mocked(api.users.placePick).mockResolvedValue(
+      { id: 1, result: null, payout: null, new_balance: 9900, pick_value: 'HOME ML', odds: -140, line: null, quoted_at: '' })
+    const user = userEvent.setup()
+    renderModal({ homeTeam: 'LAL', awayTeam: 'BOS' })   // quote HOME ML -140
+
+    await user.type(await screen.findByLabelText('PIN'), '1234')
+    await user.click(await screen.findByRole('button', { name: /Confirm/ }))
+
+    expect(await screen.findByText('Placed at LAL ML -140')).toBeInTheDocument()
+    expect(screen.queryByText(/when you looked/)).not.toBeInTheDocument()
+  })
+
+  it('reports the move when the server charges a different price', async () => {
+    useUserStore.setState({ currentUserName: 'Marcus' })
+    vi.mocked(api.users.list).mockResolvedValue([makeUser()])
+    vi.mocked(api.users.placePick).mockResolvedValue(
+      { id: 1, result: null, payout: null, new_balance: 9900, pick_value: 'HOME ML', odds: -150, line: null, quoted_at: '' })
+    const user = userEvent.setup()
+    renderModal({ homeTeam: 'LAL', awayTeam: 'BOS' })   // quote HOME ML -140
+
+    await user.type(await screen.findByLabelText('PIN'), '1234')
+    await user.click(await screen.findByRole('button', { name: /Confirm/ }))
+
+    expect(await screen.findByText('Placed at LAL ML -150 — was LAL ML -140 when you looked')).toBeInTheDocument()
+  })
+
   it('cannot confirm a pick the server will not price', async () => {
     useUserStore.setState({ currentUserName: 'Marcus' })
     vi.mocked(api.users.list).mockResolvedValue([makeUser()])
