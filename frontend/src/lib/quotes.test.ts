@@ -69,9 +69,11 @@ describe('findQuote', () => {
       quoted_at: '2026-10-04T14:00:00+00:00' },
   ]
   it('finds the matching game side and prop line', () => {
-    expect(findQuote(game, [], { game_id: 1, pick_type: 'moneyline', side: 'HOME' })?.odds).toBe(-120)
+    expect(findQuote(game, [], { game_id: 1, pick_type: 'moneyline', side: 'HOME' }))
+      .toMatchObject({ available: true, odds: -120 })
     expect(findQuote([], props, { game_id: 1, pick_type: 'prop', prop_player: 'QB',
-      prop_market: 'player_pass_yds', outcome: 'Over', line: 225.5 })?.odds).toBe(-110)
+      prop_market: 'player_pass_yds', outcome: 'Over', line: 225.5 }))
+      .toMatchObject({ available: true, odds: -110 })
   })
   it('returns the refusal for an unavailable side', () => {
     expect(findQuote(game, [], { game_id: 1, pick_type: 'moneyline', side: 'AWAY' })).toMatchObject({ available: false })

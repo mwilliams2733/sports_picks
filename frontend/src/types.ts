@@ -280,10 +280,9 @@ export interface QuoteFields {
   prop_player: string | null;
   prop_market: string | null;
 }
-// `odds` is optional here (never actually set) only so that
-// `findQuote(...)?.odds` type-checks without first narrowing on
-// `available` -- a refusal never carries a price.
-type Refusal = { available: false; reason: string; message: string; odds?: number };
+// A refusal has no price field, so reading `odds` requires narrowing on
+// `available` first -- the compiler stops a refused quote being charged.
+type Refusal = { available: false; reason: string; message: string };
 type GameKey = { pick_type: GamePickType; side: GameSide };
 type PropKey = { prop_player: string; prop_market: string; market_label: string;
   outcome: 'Over' | 'Under'; line: number };
