@@ -278,6 +278,40 @@ def test_wiring_marker_logged_only_when_every_sport_generated_zero_picks(monkeyp
     assert "no picks were generated for any sport" in caplog.text
 
 
+def test_wiring_marker_not_logged_when_only_some_sports_generated_zero_picks(monkeypatch, caplog):
+    """Both sports have a game today; nfl generated a pick (it fails the
+    bar at lambda 0), mlb generated none. That is not the scout-failed fault
+    -- one sport produced picks -- so the marker must NOT fire. Without two
+    sports that BOTH have games, `all` and `any` are indistinguishable."""
+    from backend.database import get_engine, get_session
+    from backend.models import Base, Team, Game
+    engine = get_engine(":memory:")
+    Base.metadata.create_all(engine)
+    d = date(2026, 9, 20)
+    _seed_wiring_nfl_game(engine, d, [("P1-0", 5.0, -110, 0.55)])
+    session = get_session(engine)
+    session.add_all([
+        Team(id=3, name="MHome", abbreviation="MHome", sport="mlb"),
+        Team(id=4, name="MAway", abbreviation="MAway", sport="mlb"),
+    ])
+    session.flush()
+    session.add(Game(id=2, sport="mlb", season="2026", date=d,
+                     home_team_id=3, away_team_id=4, status="scheduled"))
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr("backend.digest.job.send_email", lambda *a, **k: True)
+    caplog.set_level(logging.INFO)
+    cfg = {"seasons": WIRING_SEASONS,
+          "digest": {"enabled": True, "sports": ["nfl", "mlb"], "send_bar": FROZEN_SEND_BAR,
+                     "from": "a@b.c", "recipients": ["d@e.f"]}}
+    result = send_daily_digest(cfg, engine, target_date=d)
+
+    assert result["sent"] is True, "the empty-day email still goes out"
+    assert "MLB: no picks generated today." in caplog.text
+    assert "no picks were generated for any sport" not in caplog.text
+
+
 def test_a_send_bar_missing_min_shrunk_edge_pp_sends_nothing_and_errors(monkeypatch):
     """The bar must fail closed on a broken config, not silently admit
     everything. This is the job-level guard for the fix-round-1 regression:
