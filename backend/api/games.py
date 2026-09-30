@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Request, HTTPException
 from sqlalchemy import or_, and_, select
 from sqlalchemy.orm import aliased
+from backend.analysis.strategy import average_odds
 from backend.database import get_session
 from backend.models import Game, Odds, Team
 from backend.paper import pricing
@@ -59,11 +60,26 @@ def get_today_games(request: Request, sport: str | None = None):
             # pricing.game_quotes), so a displayed price and a charged price
             # never disagree -- it used to average every Odds row in,
             # including a stale book that never gets deleted.
-            by_market = {(q["pick_type"], q["side"]): q for q in pricing.game_quotes(session, game)}
+            # A game that has started or finished has no bettable quote to agree
+            # with -- pricing refuses every side -- so its card keeps the last
+            # consensus over all its rows as a display, instead of going blank.
+            if pricing.open_for_betting(game, now):
+                by_market = {(q["pick_type"], q["side"]): q for q in pricing.game_quotes(session, game, now)}
 
-            def _quoted(pick_type: str, side: str, field: str):
-                q = by_market.get((pick_type, side))
-                return q[field] if q and q["available"] else None
+                def _quoted(pick_type: str, side: str, field: str):
+                    q = by_market.get((pick_type, side))
+                    return q[field] if q and q["available"] else None
+                has_price = any(q["available"] for q in by_market.values())
+            else:
+                closed = average_odds(odds_rows) or {}
+                closed_keys = {("moneyline", "HOME", "odds"): "moneyline_home",
+                               ("moneyline", "AWAY", "odds"): "moneyline_away",
+                               ("spread", "HOME", "line"): "spread_home",
+                               ("over_under", "Over", "line"): "over_under"}
+
+                def _quoted(pick_type: str, side: str, field: str):
+                    return closed.get(closed_keys[(pick_type, side, field)])
+                has_price = bool(odds_rows)
 
             results.append({
                 "id": game.id,
@@ -81,7 +97,7 @@ def get_today_games(request: Request, sport: str | None = None):
                 "moneyline_away": _quoted("moneyline", "AWAY", "odds"),
                 "spread_home": _quoted("spread", "HOME", "line"),
                 "over_under": _quoted("over_under", "Over", "line"),
-                "bookmaker": "consensus" if any(q["available"] for q in by_market.values()) else None,
+                "bookmaker": "consensus" if has_price else None,
                 "odds_count": len(odds_rows),
                 "last_meeting": _last_meeting(session, game),
                 "home_l10_record": _l10_record(session, game.home_team_id, game.sport, game.date),

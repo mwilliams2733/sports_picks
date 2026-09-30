@@ -300,23 +300,24 @@ def test_today_matches_paper_quotes_when_a_book_is_stale():
     assert game["bookmaker"] == "consensus"
 
 
-def test_today_matches_paper_quotes_when_a_book_is_stale_mutation_check():
-    """Same fixture as above, but pricing reverted to averaging every Odds
-    row in (the pre-fix behavior) -- the stale -300 book must pull the
-    price, proving the assertions above would catch that regression."""
+def test_a_live_game_keeps_its_last_consensus_on_the_card():
+    """An in-progress game has no bettable quote (pricing refuses every side),
+    so the card shows the last consensus over its rows instead of going
+    blank: dk -110 and fd -130 -> -120, as in the scheduled case."""
     app = create_app(":memory:")
-    gid = _seed_today_game_with_one_fresh_and_one_stale_book(app)
-    engine = app.state.engine
-    session = get_session(engine)
+    gid = _seed_today_game_with_two_books(app)
+    session = get_session(app.state.engine)
     try:
-        from backend.analysis.strategy import average_odds
-        odds_rows = session.query(Odds).filter(Odds.game_id == gid).all()
-        consensus = average_odds(odds_rows) or {}
+        session.get(Game, gid).status = "in_progress"
+        session.commit()
     finally:
         session.close()
-    # Averaging -110 and -300 does NOT equal the fresh-only price -110 --
-    # this is what /games/today would show without the fix.
-    assert consensus.get("moneyline_home") != -110
+    client = TestClient(app)
+    [game] = [g for g in client.get("/games/today").json() if g["id"] == gid]
+    assert game["moneyline_home"] == -120
+    assert game["bookmaker"] == "consensus"
+    quotes = client.get(f"/paper/quotes?game_id={gid}").json()["quotes"]
+    assert not any(q["available"] for q in quotes)
 
 
 def test_today_shows_no_price_when_the_only_book_is_stale():
