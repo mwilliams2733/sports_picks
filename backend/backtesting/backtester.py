@@ -33,7 +33,8 @@ class Backtester:
                     no_bet += 1
                     continue
                 grade_outcome = grade_pick(
-                    pick.pick_type, pick.pick_value, home_score, away_score, pick.odds_at_pick
+                    pick.pick_type, pick.pick_value, home_score, away_score,
+                    pick.odds_at_pick, sport=getattr(game, "sport", None)
                 )
                 if grade_outcome is None:
                     # Not a pick type grade_pick understands; excluding it is

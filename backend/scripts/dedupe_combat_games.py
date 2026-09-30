@@ -54,14 +54,14 @@ from sqlalchemy import func
 
 from backend.collectors.ufc import normalize_name
 from backend.database import get_engine, get_session, run_migrations
-from backend.models import (EloHistory, EloRating, Game, Odds, PickModel,
-                            PickResult, Team)
+from backend.models import (EloHistory, EloRating, Game, LineSnapshot, Odds,
+                            PickModel, PickResult, Team)
 from backend.time_utils import et_today
 
 logger = logging.getLogger(__name__)
 
 #: Sports whose Elo is binary and grader-owned.
-COMBAT_SPORTS = ("mma", "boxing")
+from backend.pipeline.team_stats import COMBAT_SPORTS  # the one definition
 
 SEED_RATING = 1500.0
 
@@ -262,7 +262,26 @@ def main(argv=None) -> int:
     ap.add_argument("--sport", default="mma", choices=COMBAT_SPORTS)
     ap.add_argument("--apply", action="store_true",
                     help="Actually delete. Without this it is a dry run.")
+    ap.add_argument("--check-mirrored", action="store_true",
+                    help="Read-only. List odds rows that survived a PAST "
+                         "mirrored merge_date_splits merge. See "
+                         "find_past_mirrored_merges: this is not derivable "
+                         "from the data on disk, so it always reports none, "
+                         "and explains why rather than guessing.")
     args = ap.parse_args(argv)
+    if args.check_mirrored:
+        if args.db != ":memory:" and not os.path.exists(args.db):
+            raise FileNotFoundError(f"--db {args.db!r} does not exist.")
+        engine = get_engine(args.db)
+        session = get_session(engine)
+        try:
+            rows = find_past_mirrored_merges(session, args.sport)
+        finally:
+            session.close()
+        print(find_past_mirrored_merges.__doc__.strip().splitlines()[0])
+        print(f"Found {len(rows)} row(s) (this will always be 0 -- see "
+              "find_past_mirrored_merges' docstring for why).")
+        return 0
     print(format_summary(run(args.db, sport=args.sport, apply=args.apply),
                          args.apply))
     return 0
@@ -336,10 +355,54 @@ def date_split_groups(session, sport: str) -> list[Group]:
     return groups
 
 
+def _is_mirrored(keep_game: Game, drop_game: Game) -> bool:
+    """Whether ``drop_game`` has the same two fighters as ``keep_game`` but
+    with home/away reversed.
+
+    ``date_split_groups`` matches a pair on an UNORDERED set of fighter
+    names, so the two sources can (and, per the module docstring, sometimes
+    do) disagree about who is "home". A price reparented with a bare
+    ``game_id`` update in that case lands on the wrong fighter: a −200
+    favorite on the dropped row becomes a −200 favorite for the opponent on
+    the kept row.
+    """
+    return (keep_game.home_team_id == drop_game.away_team_id
+            and keep_game.away_team_id == drop_game.home_team_id)
+
+
+#: Column pairs to swap when reparenting a mirrored row's market data.
+#: `over_under` and its prices are a single line, not a per-side one, so a
+#: mirror never touches them.
+_MIRROR_SWAP_COLUMNS = (
+    ("moneyline_home", "moneyline_away"),
+    ("spread_home", "spread_away"),
+    ("spread_home_price", "spread_away_price"),
+)
+
+
+def _reparent_fields(model, drop_id_column, keep_id, mirrored: bool) -> dict:
+    """The ``{column: value}`` mapping for a bulk UPDATE that reparents rows
+    from ``model`` onto ``keep_id``, swapping home/away market columns when
+    the pair is mirrored.
+
+    A single UPDATE's SET clause evaluates every right-hand side against the
+    row's values BEFORE the update (standard SQL, and true of SQLite), so
+    ``{a: b, b: a}`` is a real swap, not a copy that clobbers ``b`` before
+    ``a`` reads it.
+    """
+    fields = {drop_id_column: keep_id}
+    if mirrored:
+        for left, right in _MIRROR_SWAP_COLUMNS:
+            fields[getattr(model, left)] = getattr(model, right)
+            fields[getattr(model, right)] = getattr(model, left)
+    return fields
+
+
 def merge_date_splits(session, sport: str = "mma", *,
                       apply: bool = False) -> dict:
     """Move the market onto the surviving row and drop the emptied twin."""
-    summary = {"sport": sport, "merged": 0, "odds_moved": 0, "refused": 0,
+    summary = {"sport": sport, "merged": 0, "odds_moved": 0,
+               "snapshots_moved": 0, "mirrored": 0, "refused": 0,
                "refused_ids": []}
     for group in date_split_groups(session, sport):
         if group.key[1] == "conflict":
@@ -348,14 +411,36 @@ def merge_date_splits(session, sport: str = "mma", *,
             continue
         drop_id = group.drop[0]
         moving = session.query(Odds).filter(Odds.game_id == drop_id).count()
+        moving_snapshots = session.query(LineSnapshot).filter(
+            LineSnapshot.game_id == drop_id).count()
         summary["merged"] += 1
         summary["odds_moved"] += moving
+        summary["snapshots_moved"] += moving_snapshots
         if apply:
+            keep_game = session.get(Game, group.keep)
+            drop_game = session.get(Game, drop_id)
+            mirrored = _is_mirrored(keep_game, drop_game)
+            if mirrored:
+                summary["mirrored"] += 1
             # Reparented, not deleted: the price this bout was offered at is
             # the only record of what the market thought, and the surviving
-            # row is the one everything else now points at.
+            # row is the one everything else now points at. Swapped in the
+            # same UPDATE when mirrored, so the price never exists attached
+            # to the wrong fighter even transiently.
             session.query(Odds).filter(Odds.game_id == drop_id).update(
-                {Odds.game_id: group.keep}, synchronize_session=False)
+                _reparent_fields(Odds, Odds.game_id, group.keep, mirrored),
+                synchronize_session=False)
+            # LineSnapshot carries games.id as a NOT NULL foreign key with no
+            # cascade, and foreign_keys=ON is set on every connection
+            # (backend.database.get_engine). Deleting `drop_id` below without
+            # first moving its snapshot rows would raise an IntegrityError on
+            # any bout that had ever had a price recorded -- which, since
+            # 58fd5b9, is every bout `Odds` was ever upserted for. Moved (and
+            # mirror-swapped) rather than deleted so the opening-line/
+            # movement history this table exists for survives the merge.
+            session.query(LineSnapshot).filter(LineSnapshot.game_id == drop_id).update(
+                _reparent_fields(LineSnapshot, LineSnapshot.game_id, group.keep, mirrored),
+                synchronize_session=False)
             session.query(EloHistory).filter(
                 EloHistory.game_id == drop_id).delete(synchronize_session=False)
             pick_ids = [p.id for p in session.query(PickModel)
@@ -370,6 +455,32 @@ def merge_date_splits(session, sport: str = "mma", *,
     if apply and summary["merged"]:
         session.commit()
     return summary
+
+
+def find_past_mirrored_merges(session, sport: str = "mma"):
+    """Read-only: odds rows on a surviving row of a PAST mirrored merge.
+
+    There is no way to answer this. Once ``merge_date_splits`` reparents an
+    ``Odds`` row and deletes the dropped ``Game``, nothing records that the
+    reparenting happened, let alone whether it was mirrored -- the dropped
+    row's ``home_team_id``/``away_team_id`` (the only evidence a merge was
+    mirrored) are gone with the row. There is no audit log, no
+    "merged_from_game_id" column, and no timestamp on ``Odds`` that
+    distinguishes a reparented row from one the collector always wrote to
+    that game.
+
+    A heuristic that guessed from price shape (e.g. "the model's favorite is
+    priced as an underdog") would produce both false positives -- for a
+    genuine live upset price -- and false negatives -- for a mirror that
+    happened to land two similarly-priced fighters -- and there is no way to
+    calibrate it without exactly the ground truth this function is trying to
+    recover. That is worse than admitting the question is unanswerable, so
+    this deliberately does not attempt one: it always returns an empty list.
+
+    Kept as a real function (not inlined into the CLI) so ``--check-mirrored``
+    has one place to call and this docstring has one place to live.
+    """
+    return []
 
 
 # --- a bout that moved and never happened here -----------------------------

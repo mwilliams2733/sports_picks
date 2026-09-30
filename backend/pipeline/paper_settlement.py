@@ -42,7 +42,8 @@ def grade_paper_picks(session) -> list[PaperPick]:
             outcome = grade_prop_pick(pick.pick_value, pick.prop_market, player_stat)
         else:
             outcome = grade_pick(pick.pick_type, pick.pick_value,
-                                 game.home_score, game.away_score, pick.odds)
+                                 game.home_score, game.away_score, pick.odds,
+                                 sport=game.sport)
         if outcome is None:
             continue
         pick.result = outcome[0]

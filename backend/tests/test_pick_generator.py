@@ -241,6 +241,13 @@ def test_pick_generator_routes_mma_to_combat_even_when_strategy_is_sport_specifi
     # The strategy name is "sport_specific" — the team-sport strategy. The dispatch
     # must still route the MMA game to CombatSportsStrategy.
     session.add(StrategyModel(id=1, name="sport_specific", config_json='{"min_edge": 2.0}', is_active=True))
+    # Combat picks are stored under the dedicated combat_sports strategy
+    # row, looked up by name -- not under whichever strategy_id the caller
+    # passed. Production always has this row (backend.database.run_migrations
+    # seeds it); this test builds its schema directly with
+    # Base.metadata.create_all rather than run_migrations, so it must seed
+    # the row itself.
+    session.add(StrategyModel(id=2, name="combat_sports", config_json='{"min_edge": 2.0}', is_active=False))
     session.commit()
 
     n = generate_and_store_picks(session, strategy_id=1, target_date=_date(2026, 4, 29))

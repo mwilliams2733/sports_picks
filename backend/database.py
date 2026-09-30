@@ -401,6 +401,77 @@ def migrate_user_pin(engine):
                 conn.execute(text(f"ALTER TABLE user_profiles ADD COLUMN {col} VARCHAR"))
 
 
+#: Fixed id for the seeded `combat_sports` StrategyModel row. See
+#: migrate_combat_sports_strategy for why this is not autoincremented.
+COMBAT_SPORTS_STRATEGY_ID = 999_999
+
+
+def migrate_combat_sports_strategy(engine):
+    """Ensure a ``combat_sports`` row exists in ``strategies``.
+
+    Without this row, ``CombatSportsStrategy`` (in ``STRATEGY_MAP`` since it
+    was added) has no id to store picks under, so ``generate_and_store_picks``
+    has nothing to route combat games to: every mma/boxing pick in production
+    was generated and graded as ``ensemble``, the team-sport strategy, which
+    is how 13 "Over 0" mma totals were emitted and graded a guaranteed win.
+
+    ``min_edge: 3.0`` matches the value the strategy's own tests and the
+    combat-sports integration test already use; ``CombatSportsStrategy``
+    reads no other config key (see ``backend/analysis/variants/combat_sports.py``).
+
+    Idempotent by name: a row named ``combat_sports`` already existing is
+    left untouched (including any hand-tuned config), so running this twice,
+    or against a database where someone already created the row by hand,
+    creates or changes nothing.
+
+    Inserted at a fixed, deliberately large id (:data:`COMBAT_SPORTS_STRATEGY_ID`)
+    rather than left to autoincrement. ``run_migrations`` runs on every
+    ``create_app()`` -- including inside test fixtures that build a brand
+    new, otherwise-empty database and then insert their OWN strategy row
+    with an explicit, small id (``StrategyModel(id=1, name="ensemble", ...)``
+    is pervasive in the test suite). An autoincremented insert into an empty
+    table lands at id=1 and collides with every one of them. A high fixed id
+    cannot collide with a small hand-picked one, and -- as a second-order
+    benefit -- keeps this row out of the way of any unordered ``.first()``
+    query over "the active game strategy" (`pipeline/scheduler.py`), which
+    in SQLite returns the lowest-rowid match for a plain scan.
+
+    ``is_active=False``, deliberately NOT the brief's literal ``is_active=True``:
+    three call sites (`api/pipeline_api.py:81-86`, `pipeline/scheduler.py:329-340`
+    and `:585-590`) select "the" active game strategy with
+    ``.filter(is_active==True, strategy_type=="game").first()`` and hand its
+    id to `generate_and_store_picks` for EVERY sport in the run, combat or
+    not. An active ``combat_sports`` row can win that ``.first()`` whenever
+    no other game strategy happens to be active -- proven by
+    `test_pipeline_api.py::test_no_game_strategy_means_no_game_picks`, which
+    seeds no strategy at all and asserts `generate_and_store_picks` is never
+    called; with this row active it WAS called, with `combat_sports` id,
+    for an NBA run. `generate_and_store_picks` internally looks up
+    `combat_sports` by name regardless of this flag (see
+    `pipeline/pick_generator.py`), so combat routing works identically
+    either way; only the naive "pick one active game strategy for the whole
+    run" call sites read this flag, and for them `combat_sports` competing
+    to be that one strategy is a bug, not a feature it needs to advertise.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "strategies" not in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM strategies WHERE name = 'combat_sports' LIMIT 1")
+        ).first()
+        if exists:
+            return
+        conn.execute(text(
+            "INSERT INTO strategies (id, name, description, config_json, "
+            "is_active, strategy_type) VALUES "
+            f"({COMBAT_SPORTS_STRATEGY_ID}, 'combat_sports', 'Fighter Elo + "
+            "recent-form h2h moneyline picks for mma/boxing.', "
+            "'{\"min_edge\": 3.0}', 0, 'game')"
+        ))
+
+
 MIGRATIONS = (
     migrate_api_usage,
     migrate_game_start_time,
@@ -442,6 +513,14 @@ def run_migrations(engine, *, allow_destructive: bool | None = None) -> None:
     ``SPORTS_PICKS_ALLOW_DESTRUCTIVE_MIGRATIONS`` environment variable, so
     the default for every launch site -- app, scheduler, scripts, pytest --
     is that nothing destroys anything.
+
+    :func:`migrate_combat_sports_strategy` runs after ``create_all`` rather
+    than in :data:`MIGRATIONS`, because it inserts a *row*, not a column or
+    table: on a brand-new database every table -- including ``strategies``
+    -- is created for the first time by ``create_all`` below, so a row-seed
+    that ran with the rest of ``MIGRATIONS`` (which all run before
+    ``create_all``) would find no ``strategies`` table yet, no-op, and never
+    insert the row a fresh database needs.
     """
     from backend.models import Base
     if allow_destructive is None:
@@ -452,3 +531,4 @@ def run_migrations(engine, *, allow_destructive: bool | None = None) -> None:
         else:
             migration(engine)
     Base.metadata.create_all(engine)
+    migrate_combat_sports_strategy(engine)

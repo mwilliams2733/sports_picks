@@ -12,6 +12,7 @@ from backend.analysis.variants.value_only import ValueOnlyStrategy
 from backend.analysis.variants.sport_specific import SportSpecificStrategy
 from backend.analysis.variants.prop_value import PropValueStrategy
 from backend.analysis.variants.combat_sports import CombatSportsStrategy
+from backend.pipeline.team_stats import COMBAT_SPORTS
 from backend.analysis.confidence import get_thresholds
 from backend.analysis.kelly import (UNITS_PER_BANKROLL, fractional_kelly,
                                     sizing_fraction)
@@ -153,6 +154,20 @@ def generate_and_store_picks(session: Session, strategy_id: int,
     config = json.loads(strat_row.config_json)
     strategy_cls = STRATEGY_MAP.get(strat_row.name)
     if not strategy_cls: return 0
+
+    # Combat games (mma, boxing) are always predicted by CombatSportsStrategy
+    # and stored under the dedicated `combat_sports` strategy row -- never
+    # under whichever strategy_id the caller passed (usually `ensemble`).
+    # Team-based strategies have no signal for individual fighters, and
+    # `ensemble` producing a combat pick is exactly how 52 mma picks,
+    # including 13 "Over 0" totals graded a guaranteed win, reached
+    # production: see backend/scripts/audit_combat_grading.py. Looked up by
+    # name rather than by the caller's strategy_id so this routing holds
+    # regardless of which "game" strategy the scheduler happens to select.
+    combat_row = (session.query(StrategyModel)
+                  .filter(StrategyModel.name == "combat_sports").first())
+    combat_config = json.loads(combat_row.config_json) if combat_row else {}
+
     game_q = session.query(Game).filter(Game.date == target_date,
                                         Game.status == "scheduled")
     if sports:
@@ -171,10 +186,17 @@ def generate_and_store_picks(session: Session, strategy_id: int,
         games = kept
 
     game_ids = [g.id for g in games] or [-1]
+    # Idempotence is keyed on whichever strategy id a pick actually gets
+    # stored under. A combat game's picks land under `combat_row.id`, not
+    # `strategy_id`, so both ids must be checked here or a combat game would
+    # be re-picked (and, worse, re-priced) on every run.
+    strategy_ids_in_play = {strategy_id}
+    if combat_row:
+        strategy_ids_in_play.add(combat_row.id)
     already = {
         (row.game_id, row.pick_type): row
         for row in session.query(PickModel)
-        .filter(PickModel.strategy_id == strategy_id,
+        .filter(PickModel.strategy_id.in_(strategy_ids_in_play),
                 PickModel.game_id.in_(game_ids))
     }
     # A graded pick is a recorded wager, not advice, and is never rewritten.
@@ -208,18 +230,46 @@ def generate_and_store_picks(session: Session, strategy_id: int,
             if game.sport not in thresholds_by_sport:
                 thresholds_by_sport[game.sport] = get_thresholds(session, game.sport)
             sport_thresholds = thresholds_by_sport[game.sport]
-            # Combat sports always route to CombatSportsStrategy because the team-based
-            # strategies have no signal for individual fighters. For team sports, use
-            # whichever strategy the user configured.
-            if game.sport in ("mma", "boxing"):
-                strategy = CombatSportsStrategy(strat_row.name, config, sport_thresholds)
+            is_combat = game.sport in COMBAT_SPORTS
+            if is_combat and combat_row is None:
+                # No `combat_sports` strategy row to store under. Dropping
+                # here rather than falling back to `strategy_id` is the
+                # whole point of the fix: silently falling back is how
+                # `ensemble` ended up grading fights before.
+                logger.warning(
+                    "Dropping combat pick(s) for game %s (sport=%s): no "
+                    "'combat_sports' strategy row exists to store them under",
+                    game.id, game.sport)
+                continue
+            if is_combat:
+                effective_strategy_id = combat_row.id
+                strategy = CombatSportsStrategy(combat_row.name, combat_config, sport_thresholds)
             else:
+                effective_strategy_id = strategy_id
                 strategy = strategy_cls(strat_row.name, config, sport_thresholds)
             game_data = _build_game_data(session, game, pitcher_scores=pitcher_scores)
-            if game.sport in ("mma", "boxing"):
+            if is_combat:
                 game_data.home_fighter = _build_fighter_stats(session, game.home_team_id, game.sport, game.date)
                 game_data.away_fighter = _build_fighter_stats(session, game.away_team_id, game.sport, game.date)
             picks = strategy.predict(game_data)
+            if is_combat:
+                # A combat game's score is a 0/1 win/loss pair, not points:
+                # a spread or total can never mean anything for it, and
+                # `grader.grade_pick` would settle "Over 0" as a guaranteed
+                # win (actual_total = home_score + away_score = 1, always
+                # over any line at or above 0). Enforced here rather than
+                # only inside CombatSportsStrategy so every strategy in
+                # STRATEGY_MAP is covered, not just the one this repo ships.
+                filtered = []
+                for p in picks:
+                    if p.pick_type in ("spread", "over_under"):
+                        logger.warning(
+                            "Dropping %s pick for combat game %s (sport=%s): "
+                            "combat sports have no valid spread or total",
+                            p.pick_type, game.id, game.sport)
+                    else:
+                        filtered.append(p)
+                picks = filtered
             # Correlation is the only per-game term: several picks on one
             # game are several bets on one outcome. Counted over the picks
             # that will actually be stored, not everything predicted.
@@ -245,7 +295,7 @@ def generate_and_store_picks(session: Session, strategy_id: int,
                             refreshed += 1
                         continue
                     already[(game.id, pick.pick_type)] = None
-                    db_pick = PickModel(game_id=game.id, strategy_id=strategy_id,
+                    db_pick = PickModel(game_id=game.id, strategy_id=effective_strategy_id,
                         pick_type=pick.pick_type, pick_value=pick.pick_value,
                         confidence=pick.confidence, edge_pct=pick.edge_pct,
                         odds_at_pick=pick.odds_at_pick,

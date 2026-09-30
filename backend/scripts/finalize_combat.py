@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 #: The sports this can serve. Both are combat sports whose rows come from
 #: the odds feed rather than an ESPN scoreboard.
-COMBAT_SPORTS = ("mma", "boxing")
+from backend.pipeline.team_stats import COMBAT_SPORTS  # the one definition
 
 
 def stuck_combat(session, sport: str, today: date,

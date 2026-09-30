@@ -28,9 +28,10 @@ import pytest
 from sqlalchemy import create_engine
 
 from backend.database import get_session
-from backend.models import (Base, EloHistory, Game, Odds, PickModel,
-                            PickResult, Team)
-from backend.scripts.dedupe_combat_games import (merge_date_splits,
+from backend.models import (Base, EloHistory, Game, LineSnapshot, Odds,
+                            PickModel, PickResult, Team)
+from backend.scripts.dedupe_combat_games import (find_past_mirrored_merges,
+                                                 merge_date_splits,
                                                  stale_reschedules,
                                                  void_reschedules)
 
@@ -132,6 +133,109 @@ def test_two_final_copies_are_refused(session):
 
     assert summary["merged"] == 0
     assert summary["refused"] == 1
+
+
+def test_a_mirrored_split_lands_each_price_on_its_own_fighter(session):
+    """The pair is matched on an unordered fighter set, so the two sources
+    can disagree about who is "home". A bare game_id reparent then lands
+    the -200/+170 prices on the wrong fighter; the fix must swap them back
+    onto the fighter each price actually belongs to."""
+    final = _bout(session, DAY, "Fighter A", "Fighter B",
+                  home_score=1, away_score=0)
+    # Mirrored relative to `final`: this row's home is Fighter B.
+    mirrored = _bout(session, DAY + datetime.timedelta(days=1),
+                     "Fighter B", "Fighter A")
+    session.add(Odds(
+        game_id=mirrored.id, bookmaker="dk",
+        moneyline_home=-200, moneyline_away=170,
+        spread_home=-3.5, spread_away=3.5,
+        spread_home_price=-105, spread_away_price=-115,
+        over_under=8.5, over_price=-108, under_price=-112,
+    ))
+    session.commit()
+    final_id = final.id
+
+    summary = merge_date_splits(session, "mma", apply=True)
+
+    assert summary["merged"] == 1
+    assert summary["mirrored"] == 1
+    session.expire_all()
+    odds = session.query(Odds).filter_by(game_id=final_id).one()
+    # final.home_team_id is Fighter A; mirrored priced Fighter A (its AWAY
+    # side) at +170. That price must now sit on the kept row's home side.
+    assert odds.moneyline_home == 170
+    assert odds.moneyline_away == -200
+    assert odds.spread_home == 3.5
+    assert odds.spread_away == -3.5
+    assert odds.spread_home_price == -115
+    assert odds.spread_away_price == -105
+    # over_under has no home/away side; a mirror never touches it.
+    assert odds.over_under == 8.5
+    assert odds.over_price == -108
+    assert odds.under_price == -112
+
+
+def test_a_non_mirrored_split_is_moved_unchanged(session):
+    final = _bout(session, DAY, "Fighter A", "Fighter B",
+                  home_score=1, away_score=0)
+    same_order = _bout(session, DAY + datetime.timedelta(days=1),
+                       "Fighter A", "Fighter B")
+    session.add(Odds(
+        game_id=same_order.id, bookmaker="dk",
+        moneyline_home=-200, moneyline_away=170,
+        spread_home=-3.5, spread_away=3.5,
+        spread_home_price=-105, spread_away_price=-115,
+        over_under=8.5,
+    ))
+    session.commit()
+    final_id = final.id
+
+    summary = merge_date_splits(session, "mma", apply=True)
+
+    assert summary["mirrored"] == 0
+    session.expire_all()
+    odds = session.query(Odds).filter_by(game_id=final_id).one()
+    assert odds.moneyline_home == -200
+    assert odds.moneyline_away == 170
+    assert odds.spread_home == -3.5
+    assert odds.spread_away == 3.5
+    assert odds.spread_home_price == -105
+    assert odds.spread_away_price == -115
+
+
+def test_line_snapshots_move_with_the_odds_and_a_mirror_swaps_them(session):
+    """LineSnapshot has a NOT NULL, non-cascading FK to games.id, and
+    foreign_keys=ON is set on every connection. Deleting the dropped game
+    without moving its snapshot rows first would raise an IntegrityError for
+    any bout that ever had a price recorded -- i.e. every bout, since
+    58fd5b9. This also proves the merge does not crash on such a bout."""
+    final = _bout(session, DAY, "Fighter A", "Fighter B",
+                  home_score=1, away_score=0)
+    mirrored = _bout(session, DAY + datetime.timedelta(days=1),
+                     "Fighter B", "Fighter A")
+    session.add(LineSnapshot(
+        game_id=mirrored.id, bookmaker="dk",
+        moneyline_home=-200, moneyline_away=170,
+        spread_home=-3.5, spread_away=3.5,
+        spread_home_price=-105, spread_away_price=-115,
+        over_under=8.5,
+    ))
+    session.commit()
+    final_id = final.id
+
+    merge_date_splits(session, "mma", apply=True)
+
+    session.expire_all()
+    snap = session.query(LineSnapshot).filter_by(game_id=final_id).one()
+    assert snap.moneyline_home == 170
+    assert snap.moneyline_away == -200
+
+
+def test_find_past_mirrored_merges_admits_it_cannot_know(session):
+    """Nothing records whether a past merge was mirrored -- the only
+    evidence (the dropped row's home/away) is deleted with the row. The
+    function must say so rather than guess, and always returns none."""
+    assert find_past_mirrored_merges(session, "mma") == []
 
 
 def test_merge_dry_run_writes_nothing(session):
