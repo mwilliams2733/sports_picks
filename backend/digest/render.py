@@ -19,10 +19,6 @@ SPORT_LABELS = {
 _FONT = "font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;"
 
 
-def _stars(confidence: int) -> str:
-    return "★" * confidence + "☆" * (5 - confidence)
-
-
 def _label(sport: str) -> str:
     return SPORT_LABELS.get(sport, sport.upper())
 
@@ -148,12 +144,12 @@ def render_digest(sections: list[DigestSection], target_date: date):
                 f'<div style="{_FONT}font-size:15px;font-weight:600;color:#111827;">'
                 f'{_escape(_selection_label(p))} <span style="font-weight:400;color:#6b7280;">({p.odds})</span></div>'
                 f'<div style="{_FONT}font-size:13px;color:#374151;padding-top:2px;">'
-                f'{_escape(p.matchup)} &nbsp;·&nbsp; {_stars(p.confidence)} &nbsp;·&nbsp; '
+                f'{_escape(p.matchup)} &nbsp;·&nbsp; '
                 f'Model {_pct(p.model_prob)} &nbsp;·&nbsp; Price {_pct(p.price_prob)}</div>'
                 f'{rationale_html}</td></tr>'
             )
             text_lines.append(
-                f"  {_selection_label(p)} ({p.odds}) — {p.matchup} — {_stars(p.confidence)} "
+                f"  {_selection_label(p)} ({p.odds}) — {p.matchup} — "
                 f"Model {_pct(p.model_prob)} / Price {_pct(p.price_prob)}"
             )
             if p.rationale:
@@ -177,10 +173,10 @@ def render_digest(sections: list[DigestSection], target_date: date):
                     f'<div style="{_FONT}font-size:14px;color:#111827;">'
                     f'{_escape(_prop_label(p.pick_value))} <span style="color:#6b7280;">({p.odds})</span></div>'
                     f'<div style="{_FONT}font-size:12px;color:#6b7280;padding-top:2px;">'
-                    f'{_escape(p.matchup)} &nbsp;·&nbsp; {_stars(p.confidence)}</div></td></tr>'
+                    f'{_escape(p.matchup)}</div></td></tr>'
                 )
                 text_lines.append(
-                    f"    {_prop_label(p.pick_value)} ({p.odds}) — {p.matchup} — {_stars(p.confidence)}"
+                    f"    {_prop_label(p.pick_value)} ({p.odds}) — {p.matchup}"
                 )
         text_lines.append("")
 
@@ -207,3 +203,61 @@ def render_digest(sections: list[DigestSection], target_date: date):
         'model\'s win probability; "Price" is what the quoted price implies.'
     )
     return subject, html, "\n".join(text_lines)
+
+
+_FOOTER_TEXT = ('Model output for research, not betting advice. "Model" is the '
+               'model\'s win probability; "Price" is what the quoted price implies.')
+
+
+def empty_day_reason(section: DigestSection, min_shrunk_edge_pp: float) -> str:
+    """One line explaining why this sport contributed nothing today.
+
+    Shared between the empty-day email body and the job's INFO log, so the
+    two can never say something different about the same sport.
+    """
+    d = section.diagnostics
+    label = _label(section.sport)
+    if d is None or d.generated == 0:
+        return f"{label}: no picks generated today."
+    bar = f"{min_shrunk_edge_pp:g}"
+    return (f"{label}: {d.generated} pick{'' if d.generated == 1 else 's'} generated, "
+           f"none cleared the {bar}-point bar (model weight {d.lambda_used:.2f}).")
+
+
+def render_empty_day_digest(sections: list[DigestSection], target_date: date,
+                            min_shrunk_edge_pp: float):
+    """Return (subject, html, text) for a day where nothing cleared the send bar.
+
+    ``sections`` is the full diagnostics list from ``select_digest`` -- every
+    in-season sport, including ones with zero games that day. The caller is
+    responsible for only calling this when at least one in-season sport had
+    at least one game (see backend/digest/job.py): with no games at all,
+    the existing "nothing to send" behavior applies instead.
+    """
+    pretty = target_date.strftime("%a %b %d").replace(" 0", " ")
+    subject = f"No qualifying picks — {pretty}"
+
+    reasons = [empty_day_reason(s, min_shrunk_edge_pp) for s in sections]
+
+    text_lines = [f"NO QUALIFYING PICKS — {pretty}", ""] + reasons + ["", _FOOTER_TEXT]
+    text = "\n".join(text_lines)
+
+    rows = "".join(
+        f'<tr><td style="{_FONT}font-size:14px;color:#111827;padding:4px 0;">'
+        f'{_escape(r)}</td></tr>'
+        for r in reasons
+    )
+    html = (
+        f'<html><body style="margin:0;padding:0;background:#f9fafb;">'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="background:#f9fafb;padding:16px;"><tr><td align="center">'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="max-width:560px;background:#ffffff;border-radius:10px;padding:20px;">'
+        f'<tr><td style="{_FONT}font-size:18px;font-weight:700;color:#111827;'
+        f'padding-bottom:10px;">No qualifying picks — {pretty}</td></tr>'
+        + rows
+        + f'<tr><td style="{_FONT}font-size:11px;color:#9ca3af;padding-top:18px;">'
+        f'{_FOOTER_TEXT}</td></tr>'
+        f'</table></td></tr></table></body></html>'
+    )
+    return subject, html, text

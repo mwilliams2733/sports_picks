@@ -45,12 +45,20 @@ def test_subject_and_header_agree():
     assert phrase in html
 
 
-def test_prop_row_names_the_matchup_and_confidence():
+def test_prop_row_names_the_matchup():
     _, html, text = render_digest([_section()], date(2026, 9, 20))
     prop_block = html.split("Player props", 1)[1]
     assert "Bills @ Chiefs" in prop_block, "a reader must know which game a prop is from"
-    assert "★" in prop_block or "☆" in prop_block
     assert "Bills @ Chiefs" in text.split("Player props:", 1)[1]
+
+
+def test_no_stars_anywhere_in_the_rendered_email():
+    """Confidence stars are hidden from the daily email (owner decision
+    2026-09-28 / implemented 2026-09-29). A render test that still passes
+    when a star glyph is reintroduced is not a guard."""
+    _, html, text = render_digest([_section()], date(2026, 9, 20))
+    assert "★" not in html and "☆" not in html
+    assert "★" not in text and "☆" not in text
 
 
 def test_prop_row_omits_the_percent_edge_glyph():

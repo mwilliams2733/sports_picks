@@ -12,6 +12,7 @@ from backend.config import is_sport_in_season
 from backend.data_types import PickFactor
 from backend.analysis.rationale import render_rationale
 from backend.analysis.odds_utils import InvalidOddsError, american_to_implied_prob
+from backend.analysis.prop_markets import MARKET_STAT_MAP
 from backend.models import Game, PickModel, PickResult, Team
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,25 @@ class DigestPick:
     #: The stored pick this was rendered from, so the send can be recorded
     #: (EmailedPick). None only for a DigestPick built outside the selector.
     pick_id: int | None = None
+    #: lambda[sport] * edge_pct. Only game picks are ranked by it; a prop's
+    #: DigestPick leaves this None -- props are not blended with the market
+    #: (see the note on prop ranking in select_digest).
+    shrunk_edge: float | None = None
+
+
+@dataclass(frozen=True)
+class DigestDiagnostics:
+    """Why a sport's send-bar result looks the way it does.
+
+    Populated for every in-season sport the selector considers, even one
+    with zero games that day or zero picks that survive -- an empty-day
+    email needs to say *why* each sport is empty, and "no games" and "games
+    but nothing cleared the bar" are different answers.
+    """
+    games: int              # games scheduled for this sport on target_date
+    generated: int          # game picks after dedupe, before any filter
+    survived_price: int     # of those, how many had a price inside the window
+    lambda_used: float      # blend_weight[sport], or 0.0 if missing
 
 
 @dataclass(frozen=True)
@@ -41,6 +61,7 @@ class DigestSection:
     picks: list[DigestPick]
     props: list[DigestPick]
     record: tuple[int, int] | None = None   # (wins, losses) over the trailing window
+    diagnostics: DigestDiagnostics | None = None
 
 
 def _price_prob(odds: int | None) -> float | None:
@@ -153,41 +174,106 @@ def _recency(pick: PickModel) -> tuple:
     return (created.replace(tzinfo=None), pick.id or 0)
 
 
-def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
-                  max_odds: int | None = 150,
+#: Defaults chosen so a caller that omits `send_bar` entirely (an old test,
+#: say) gets "no gate, no ceiling" rather than a KeyError. Production always
+#: supplies the full dict from config.yaml's digest.send_bar.
+_SEND_BAR_DEFAULTS = {
+    "min_shrunk_edge_pp": 0.0,
+    "min_odds": -100_000,
+    "max_odds": 100_000,
+    "max_game_picks": 5,
+    "max_props": 5,
+    "blend_weight": {},
+}
+
+
+def _start_time_key(games_by_id, p) -> tuple:
+    # start_time is nullable, and stored rows may be naive or aware.
+    # Comparing a datetime to a date, or a naive to an aware datetime,
+    # raises TypeError mid-sort -- normalize to naive and push missing
+    # start times to the end.
+    st = games_by_id[p.game_id].start_time
+    when = st.replace(tzinfo=None) if st is not None else datetime.max
+    return (when, p.id or 0)
+
+
+def _suppressed(record, min_trailing_win_pct, min_trailing_picks, sport) -> bool:
+    if (min_trailing_win_pct is not None and record is not None
+            and sum(record) >= min_trailing_picks
+            and record[0] / sum(record) < min_trailing_win_pct):
+        logger.info("Digest: %s suppressed, trailing %d-%d below %.0f%%",
+                    sport, record[0], record[1], min_trailing_win_pct * 100)
+        return True
+    return False
+
+
+def select_digest(session, target_date, sports, seasons, send_bar: dict | None = None,
                   min_trailing_win_pct: float | None = None,
                   min_trailing_picks: int = 20):
-    """Return one DigestSection per active sport that has something to show.
+    """Return one DigestSection per in-season sport.
 
-    Game picks are filtered by a price ceiling to avoid emailing longshots that
-    carry high edges but poor win rates. Measured on the graded book (moneyline,
-    five team sports, 129 decided picks):
+    A sport in season always gets a section, even one with no games that day
+    or no picks that clear the send bar -- ``diagnostics`` on each section is
+    how the empty-day email explains itself. (The one exception is trailing-
+    record suppression, below: a suppressed sport is left out entirely, same
+    as before this changed.)
 
-    | price band | n | win % | units |
-    |---|---|---|---|
-    | favorite at -150 or shorter | 15 | 73% | +1.3 |
-    | favorite -149 to -101 | 14 | 43% | -3.4 |
-    | dog +100 to +200 | 42 | 40% | -3.0 |
-    | dog longer than +200 | 58 | 16% | -16.6 |
+    Game picks must clear a frozen "send bar" (``send_bar`` -- see
+    config.yaml's digest.send_bar, frozen 2026-09-29):
 
-    A pick with no stored price is kept: unknown is not a longshot, and the
-    renderer shows it at -110 anyway. The ceiling is applied here rather than
-    in the strategy, so that the picks still exist for grading and measurement;
-    only what gets emailed changes.
+    - a stored price (``odds_at_pick``) is required; a pick with none is
+      dropped -- previously it was kept and shown at -110;
+    - the price must fall in [min_odds, max_odds], inclusive at both ends;
+    - "shrunk edge" = blend_weight[sport] * edge_pct must be
+      >= min_shrunk_edge_pp. edge_pct is the stored PickModel.edge_pct
+      (model minus market, in percentage points -- de-vigged for moneyline,
+      measured against 0.5 for spreads/totals; see
+      backend/analysis/variants/ensemble.py). A sport missing from
+      blend_weight counts as 0.0, which (with a positive min_shrunk_edge_pp)
+      means it never clears the bar.
+    - ranked by shrunk edge descending, ties broken by start time then id;
+    - capped at max_game_picks.
+
+    Props are a separate, price-gated but not edge-gated list: only
+    gradeable markets (present in MARKET_STAT_MAP) survive, the same price
+    window applies, and they are sorted by start time then id (no ranking by
+    edge -- a prop's edge_pct is price-blind and not comparable to a game
+    pick's de-vigged edge, the same reason props are never ranked against
+    game picks), capped at max_props.
     """
+    bar = {**_SEND_BAR_DEFAULTS, **(send_bar or {})}
+    blend_weight = bar["blend_weight"] or {}
+    min_odds = bar["min_odds"]
+    max_odds = bar["max_odds"]
+    min_shrunk = bar["min_shrunk_edge_pp"]
+    max_game_picks = bar["max_game_picks"]
+    max_props = bar["max_props"]
+
     sections: list[DigestSection] = []
 
     for sport in sports:
         if not is_sport_in_season(sport, seasons, target_date):
             continue
+
+        lam = float(blend_weight.get(sport, 0.0))
+
         games = (
             session.query(Game)
             .filter(Game.sport == sport, Game.date == target_date)
             .all()
         )
-        if not games:
-            continue
         games_by_id = {g.id: g for g in games}
+
+        if not games:
+            record = trailing_record(session, sport, target_date)
+            if _suppressed(record, min_trailing_win_pct, min_trailing_picks, sport):
+                continue
+            sections.append(DigestSection(
+                sport=sport, picks=[], props=[], record=record,
+                diagnostics=DigestDiagnostics(games=0, generated=0,
+                                              survived_price=0, lambda_used=lam),
+            ))
+            continue
 
         # `prop_pipeline` writes its analyzed props into this SAME picks table
         # with pick_type="prop". They must never be ranked against game picks:
@@ -201,33 +287,22 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
                     PickModel.pick_type != "prop")
             .all()
         )
-
         picks = _dedupe_latest(picks)
+        generated = len(picks)
 
-        if max_odds is not None:
-            # A pick with no stored price is kept: unknown is not a longshot,
-            # and the renderer shows it at -110 anyway.
-            picks = [p for p in picks
-                     if p.odds_at_pick is None or p.odds_at_pick <= max_odds]
+        priced = [p for p in picks if p.odds_at_pick is not None
+                 and min_odds <= p.odds_at_pick <= max_odds]
+        survived_price = len(priced)
 
-        def _pick_sort_key(p):
-            # start_time is nullable, and stored rows may be naive or aware.
-            # Comparing a datetime to a date, or a naive to an aware datetime,
-            # raises TypeError mid-sort — normalize to naive and push missing
-            # start times to the end.
-            st = games_by_id[p.game_id].start_time
-            when = st.replace(tzinfo=None) if st is not None else datetime.max
-            # Win probability first. Confidence is a threshold on edge, and
-            # edge is model minus market in absolute points, which is largest
-            # exactly where the model is most wrong (long-priced underdogs).
-            # A pick with no stored probability sorts after every pick that
-            # has one; among those, the old order still applies.
-            prob = p.model_prob if p.model_prob is not None else -1.0
-            return (-prob, -p.confidence, -(p.edge_pct or 0.0), when, p.id or 0)
+        qualifying = []
+        for p in priced:
+            shrunk = lam * (p.edge_pct or 0.0)
+            if shrunk >= min_shrunk:
+                qualifying.append((shrunk, p))
 
-        picks.sort(key=_pick_sort_key)
+        qualifying.sort(key=lambda item: (-item[0], *_start_time_key(games_by_id, item[1])))
 
-        def _make_pick(p: PickModel) -> DigestPick:
+        def _make_pick(p: PickModel, shrunk: float) -> DigestPick:
             game = games_by_id[p.game_id]
             away_name, home_name = _team_names(session, game)
             return DigestPick(
@@ -243,11 +318,12 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
                 home_team=home_name,
                 away_team=away_name,
                 pick_id=p.id,
+                shrunk_edge=round(shrunk, 2),
             )
 
-        digest_picks = [_make_pick(p) for p in picks[:max_per_sport]]
+        digest_picks = [_make_pick(p, shrunk) for shrunk, p in qualifying[:max_game_picks]]
 
-        # Props come from the same table but are ranked among themselves only.
+        # Props: gradeable markets only, same price window, no edge gate.
         props = (
             session.query(PickModel)
             .filter(PickModel.game_id.in_(list(games_by_id)),
@@ -256,7 +332,14 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
             .all()
         )
         props = _dedupe_latest(props)
-        props.sort(key=_pick_sort_key)
+        gradeable_props = [
+            p for p in props
+            if p.prop_market in MARKET_STAT_MAP
+            and p.odds_at_pick is not None
+            and min_odds <= p.odds_at_pick <= max_odds
+        ]
+        gradeable_props.sort(key=lambda p: _start_time_key(games_by_id, p))
+
         def _make_prop(p: PickModel) -> DigestPick:
             game = games_by_id[p.game_id]
             away_name, home_name = _team_names(session, game)
@@ -273,21 +356,16 @@ def select_digest(session, target_date, sports, seasons, max_per_sport: int = 5,
                 pick_id=p.id,
             )
 
-        digest_props = [_make_prop(p) for p in props[:max_per_sport]]
-
-        if not digest_picks and not digest_props:
-            continue
+        digest_props = [_make_prop(p) for p in gradeable_props[:max_props]]
 
         record = trailing_record(session, sport, target_date)
-
-        if (min_trailing_win_pct is not None and record is not None
-                and sum(record) >= min_trailing_picks
-                and record[0] / sum(record) < min_trailing_win_pct):
-            logger.info("Digest: %s suppressed, trailing %d-%d below %.0f%%",
-                        sport, record[0], record[1], min_trailing_win_pct * 100)
+        if _suppressed(record, min_trailing_win_pct, min_trailing_picks, sport):
             continue
 
-        sections.append(DigestSection(sport=sport, picks=digest_picks, props=digest_props,
-                                      record=record))
+        sections.append(DigestSection(
+            sport=sport, picks=digest_picks, props=digest_props, record=record,
+            diagnostics=DigestDiagnostics(games=len(games), generated=generated,
+                                          survived_price=survived_price, lambda_used=lam),
+        ))
 
     return sections

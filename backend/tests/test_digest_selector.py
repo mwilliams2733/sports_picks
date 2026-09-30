@@ -3,10 +3,22 @@ from datetime import date, datetime, timedelta, timezone
 
 from backend.database import get_engine, get_session
 from backend.models import Base, Team, Game, StrategyModel, PickModel, PickResult
-from backend.digest.selector import select_digest
+from backend.digest.selector import select_digest, DigestDiagnostics
 
 SEASONS = {"nfl": {"start": "09-05", "end": "02-10"},
            "nba": {"start": "10-22", "end": "06-20"}}
+
+#: A wide-open bar: no price window, no edge gate, generous caps. Used by
+#: tests that exercise something other than the bar itself (dedupe, matchup
+#: text, rationale, ...). blend_weight is irrelevant when min_shrunk_edge_pp
+#: is 0 -- shrunk edge is >= 0 for any non-negative edge_pct, so everything
+#: clears regardless of lambda.
+OPEN_BAR = {"min_shrunk_edge_pp": 0.0, "min_odds": -100_000, "max_odds": 100_000,
+           "max_game_picks": 10, "max_props": 10, "blend_weight": {}}
+
+
+def _bar(**overrides):
+    return {**OPEN_BAR, **overrides}
 
 
 def _mk(session, sport, gid, tid_h, tid_a, d, picks):
@@ -25,14 +37,15 @@ def _mk(session, sport, gid, tid_h, tid_a, d, picks):
     session.commit()
 
 
-def _mk_priced(session, sport, gid, tid_h, tid_a, d, picks, pick_type="moneyline"):
+def _mk_priced(session, sport, gid, tid_h, tid_a, d, picks, pick_type="moneyline",
+              start_time=None):
     """picks: list of (confidence, edge, odds, model_prob)."""
     session.add_all([
         Team(id=tid_h, name=f"H{gid}", abbreviation=f"H{gid}", sport=sport),
         Team(id=tid_a, name=f"A{gid}", abbreviation=f"A{gid}", sport=sport),
     ])
     session.flush()
-    session.add(Game(id=gid, sport=sport, season="2026", date=d,
+    session.add(Game(id=gid, sport=sport, season="2026", date=d, start_time=start_time,
                      home_team_id=tid_h, away_team_id=tid_a, status="scheduled"))
     session.flush()
     for i, (conf, edge, odds, prob) in enumerate(picks):
@@ -51,52 +64,55 @@ def _session():
     return s
 
 
-def test_ranks_by_confidence_then_edge():
-    s = _session()
-    d = date(2026, 11, 1)
-    _mk(s, "nfl", 1, 1, 2, d, [(3, 9.0), (5, 4.0), (4, 8.0)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
-    vals = [p.pick_value for p in sections[0].picks]
-    assert vals == ["P1-1", "P1-2", "P1-0"]
+# --- structural behavior unaffected by the send bar ------------------------
 
-
-def test_caps_at_max_per_sport_and_never_pads():
+def test_caps_at_max_game_picks_and_never_pads():
     s = _session()
     d = date(2026, 11, 1)
     _mk(s, "nfl", 1, 1, 2, d, [(5, 9.0), (5, 8.0)])
-    sections = select_digest(s, d, ["nfl"], SEASONS, max_per_sport=5)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=_bar(max_game_picks=5))
     assert len(sections[0].picks) == 2, "must not pad to five"
-
-
-def test_sport_with_no_games_is_omitted():
-    s = _session()
-    d = date(2026, 11, 1)
-    _mk(s, "nfl", 1, 1, 2, d, [(5, 9.0)])
-    sections = select_digest(s, d, ["nfl", "nba"], SEASONS)
-    assert [sec.sport for sec in sections] == ["nfl"]
 
 
 def test_out_of_season_sport_is_omitted():
     s = _session()
     d = date(2026, 7, 1)  # NFL out of season
     _mk(s, "nfl", 1, 1, 2, d, [(5, 9.0)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert sections == []
 
 
-def test_zero_confidence_picks_excluded():
+def test_a_sport_in_season_with_no_games_still_gets_an_empty_section():
+    """Both nfl and nba are in season on 2026-11-01; only nfl has a game.
+    nba must still appear, empty, with diagnostics -- the empty-day email
+    needs a line for it ("no picks generated today")."""
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk(s, "nfl", 1, 1, 2, d, [(5, 9.0)])
+    sections = select_digest(s, d, ["nfl", "nba"], SEASONS, send_bar=OPEN_BAR)
+    by_sport = {sec.sport: sec for sec in sections}
+    assert set(by_sport) == {"nfl", "nba"}
+    assert by_sport["nba"].picks == []
+    assert by_sport["nba"].props == []
+    assert by_sport["nba"].diagnostics == DigestDiagnostics(
+        games=0, generated=0, survived_price=0, lambda_used=0.0)
+
+
+def test_zero_confidence_picks_are_excluded_but_the_section_still_appears():
     s = _session()
     d = date(2026, 11, 1)
     _mk(s, "nfl", 1, 1, 2, d, [(0, 20.0)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
-    assert sections == []
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
+    assert len(sections) == 1
+    assert sections[0].picks == []
+    assert sections[0].diagnostics.generated == 0
 
 
 def test_matchup_reads_away_at_home():
     s = _session()
     d = date(2026, 11, 1)
     _mk(s, "nfl", 1, 1, 2, d, [(5, 9.0)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert sections[0].picks[0].matchup == "A1 at H1"
 
 
@@ -104,7 +120,7 @@ def test_digest_pick_carries_both_team_names():
     s = _session()
     d = date(2026, 11, 1)
     _mk(s, "nfl", 1, 1, 2, d, [(5, 9.0)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     pick = sections[0].picks[0]
     assert pick.home_team == "H1"
     assert pick.away_team == "A1"
@@ -131,7 +147,7 @@ def test_a_missing_team_row_falls_back_without_crashing():
 
     # And the section still renders when a real digest is built for the
     # (unmodified, DB-valid) game.
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert sections[0].picks[0].home_team == "H1"
 
 
@@ -139,17 +155,18 @@ def test_prop_picks_never_rank_against_game_picks():
     # prop_pipeline writes analyzed props into the SAME picks table with
     # pick_type="prop". A prop's edge_pct is (prob - 0.5) * 200 and ignores
     # the prop's price, so it is not comparable to a game pick's de-vigged
-    # edge. A juiced prop with a huge nominal edge must not appear in — let
-    # alone top — the game-pick list.
+    # edge. A juiced prop with a huge nominal edge must not appear in -- let
+    # alone top -- the game-pick list.
     s = _session()
     d = date(2026, 11, 1)
     _mk(s, "nfl", 1, 1, 2, d, [(3, 4.0)])
     s.add(PickModel(game_id=1, strategy_id=1, pick_type="prop",
                     pick_value="Mahomes Over 275.5 Pass Yards",
+                    prop_market="player_pass_yds",
                     confidence=5, edge_pct=40.0, odds_at_pick=-300))
     s.commit()
 
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     game_values = [p.pick_value for p in sections[0].picks]
     assert "Mahomes Over 275.5 Pass Yards" not in game_values
     assert game_values == ["P1-0"]
@@ -181,7 +198,7 @@ def test_rationale_json_null_degrades_to_empty_string():
     s = _session()
     d = date(2026, 11, 1)
     _mk_with_rationale(s, "nfl", 1, 1, 2, d, "null")
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert sections[0].picks[0].rationale == ""
 
 
@@ -189,7 +206,7 @@ def test_rationale_json_number_degrades_to_empty_string():
     s = _session()
     d = date(2026, 11, 1)
     _mk_with_rationale(s, "nfl", 1, 1, 2, d, "5")
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert sections[0].picks[0].rationale == ""
 
 
@@ -197,7 +214,7 @@ def test_rationale_json_dict_degrades_to_empty_string():
     s = _session()
     d = date(2026, 11, 1)
     _mk_with_rationale(s, "nfl", 1, 1, 2, d, '{"code":"rating_gap"}')
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert sections[0].picks[0].rationale == ""
 
 
@@ -208,11 +225,11 @@ def test_rationale_json_wellformed_list_still_renders():
         s, "nfl", 1, 1, 2, d,
         '[{"code": "rating_gap", "side": "home", "strength": "moderate"}]',
     )
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert sections[0].picks[0].rationale != ""
 
 
-def _dup_setup(session, d, pick_type, pick_value):
+def _dup_setup(session, d, pick_type, pick_value, prop_market=None):
     session.add_all([
         Team(id=1, name="H1", abbreviation="H1", sport="nfl"),
         Team(id=2, name="A1", abbreviation="A1", sport="nfl"),
@@ -222,15 +239,15 @@ def _dup_setup(session, d, pick_type, pick_value):
                      home_team_id=1, away_team_id=2, status="scheduled"))
     session.flush()
     # _run_window regenerates picks for ALL of today's games once per window,
-    # and generate_and_store_picks inserts unconditionally — so the same pick
-    # lands once per window with a later created_at each time.
+    # and generate_and_store_picks inserts unconditionally -- so the same
+    # pick lands once per window with a later created_at each time.
     session.add(PickModel(game_id=1, strategy_id=1, pick_type=pick_type,
                           pick_value=pick_value, confidence=4, edge_pct=6.0,
-                          odds_at_pick=-110,
+                          odds_at_pick=-110, prop_market=prop_market,
                           created_at=datetime(2026, 11, 1, 13, 0)))
     session.add(PickModel(game_id=1, strategy_id=1, pick_type=pick_type,
                           pick_value=pick_value, confidence=4, edge_pct=9.9,
-                          odds_at_pick=-125,
+                          odds_at_pick=-125, prop_market=prop_market,
                           created_at=datetime(2026, 11, 1, 18, 0)))
     session.commit()
 
@@ -239,7 +256,7 @@ def test_repeated_game_pick_appears_once_and_is_the_newest():
     s = _session()
     d = date(2026, 11, 1)
     _dup_setup(s, d, "moneyline", "HOME ML")
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     picks = sections[0].picks
     assert len(picks) == 1, f"three windows must not yield {len(picks)} identical rows"
     assert picks[0].edge_pct == 9.9, "must keep the most recent created_at"
@@ -249,8 +266,8 @@ def test_repeated_game_pick_appears_once_and_is_the_newest():
 def test_repeated_prop_appears_once_and_is_the_newest():
     s = _session()
     d = date(2026, 11, 1)
-    _dup_setup(s, d, "prop", "Mahomes Over 275.5 Pass Yards")
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    _dup_setup(s, d, "prop", "Mahomes Over 275.5 Pass Yards", prop_market="player_pass_yds")
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     props = sections[0].props
     assert len(props) == 1
     assert props[0].edge_pct == 9.9
@@ -262,7 +279,7 @@ def test_dedup_keys_on_pick_value_not_just_the_game():
     s = _session()
     d = date(2026, 11, 1)
     _mk(s, "nfl", 1, 1, 2, d, [(5, 9.0), (4, 8.0)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert len(sections[0].picks) == 2
 
 
@@ -287,79 +304,239 @@ def test_dedup_tolerates_a_missing_or_naive_created_at():
     assert kept[0].edge_pct == 9.9, "the newest row wins; a NULL never does"
 
 
-def test_ranks_by_model_probability_over_confidence():
+# --- the send bar: shrunk edge, price window, caps -------------------------
+
+def test_shrunk_edge_is_lambda_times_edge_pct():
     s = _session()
     d = date(2026, 11, 1)
-    _mk_priced(s, "nfl", 1, 1, 2, d,
-               [(5, 18.0, -110, 0.40),
-                (3, 4.0, -110, 0.70),
-                (4, 9.0, -110, 0.55)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
-    vals = [p.pick_value for p in sections[0].picks]
-    assert vals == ["P1-1", "P1-2", "P1-0"]
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 10.0, -110, 0.55)])
+    sections = select_digest(
+        s, d, ["nfl"], SEASONS,
+        send_bar=_bar(blend_weight={"nfl": 0.5}))
+    assert sections[0].picks[0].shrunk_edge == 5.0
 
 
-def test_pick_without_probability_sorts_last():
+def test_price_minus_150_is_in_and_minus_151_is_out():
     s = _session()
     d = date(2026, 11, 1)
-    _mk_priced(s, "nfl", 1, 1, 2, d,
-               [(5, 9.0, -110, None),
-                (2, 3.0, -110, 0.52)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
-    vals = [p.pick_value for p in sections[0].picks]
-    assert vals == ["P1-1", "P1-0"]
-
-
-def test_longshot_past_the_ceiling_is_not_emailed():
-    s = _session()
-    d = date(2026, 11, 1)
-    _mk_priced(s, "nfl", 1, 1, 2, d,
-               [(5, 18.0, 248, 0.34),
-                (3, 4.0, -130, 0.60)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
-    vals = [p.pick_value for p in sections[0].picks]
-    assert vals == ["P1-1"]
-
-
-def test_price_at_the_ceiling_is_kept():
-    s = _session()
-    d = date(2026, 11, 1)
-    _mk_priced(s, "nfl", 1, 1, 2, d,
-               [(3, 4.0, 150, 0.45)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 10.0, -150, 0.55), (3, 10.0, -151, 0.55)])
+    sections = select_digest(
+        s, d, ["nfl"], SEASONS,
+        send_bar=_bar(min_odds=-150, max_odds=150, blend_weight={"nfl": 1.0}))
     vals = [p.pick_value for p in sections[0].picks]
     assert vals == ["P1-0"]
 
 
-def test_missing_price_is_kept():
+def test_price_plus_150_is_in_and_plus_151_is_out():
     s = _session()
     d = date(2026, 11, 1)
-    _mk_priced(s, "nfl", 1, 1, 2, d,
-               [(3, 4.0, None, 0.55)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 10.0, 150, 0.45), (3, 10.0, 151, 0.45)])
+    sections = select_digest(
+        s, d, ["nfl"], SEASONS,
+        send_bar=_bar(min_odds=-150, max_odds=150, blend_weight={"nfl": 1.0}))
     vals = [p.pick_value for p in sections[0].picks]
     assert vals == ["P1-0"]
 
 
-def test_ceiling_can_be_disabled():
+def test_a_pick_with_no_price_is_dropped():
     s = _session()
     d = date(2026, 11, 1)
-    _mk_priced(s, "nfl", 1, 1, 2, d,
-               [(5, 18.0, 800, 0.20)])
-    sections = select_digest(s, d, ["nfl"], SEASONS, max_odds=None)
-    vals = [p.pick_value for p in sections[0].picks]
-    assert vals == ["P1-0"]
-
-
-def test_ceiling_does_not_touch_props():
-    s = _session()
-    d = date(2026, 11, 1)
-    _mk_priced(s, "nfl", 1, 1, 2, d,
-               [(3, 10.0, 300, 0.6)], pick_type="prop")
-    sections = select_digest(s, d, ["nfl"], SEASONS)
-    assert len(sections[0].props) == 1
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 10.0, None, 0.55)])
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=_bar(blend_weight={"nfl": 1.0}))
     assert sections[0].picks == []
+    assert sections[0].diagnostics.survived_price == 0
 
+
+def test_shrunk_exactly_the_floor_is_in_just_below_is_out():
+    s = _session()
+    d = date(2026, 11, 1)
+    # lambda=1.0 so shrunk == edge_pct exactly.
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+              [(3, 3.0, -110, 0.55), (3, 2.9, -110, 0.55)])
+    sections = select_digest(
+        s, d, ["nfl"], SEASONS,
+        send_bar=_bar(min_shrunk_edge_pp=3.0, blend_weight={"nfl": 1.0}))
+    vals = [p.pick_value for p in sections[0].picks]
+    assert vals == ["P1-0"]
+
+
+def test_the_fourth_game_pick_is_cut():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+              [(3, 40.0, -110, 0.7), (3, 30.0, -110, 0.65),
+               (3, 20.0, -110, 0.6), (3, 10.0, -110, 0.55)])
+    sections = select_digest(
+        s, d, ["nfl"], SEASONS,
+        send_bar=_bar(max_game_picks=3, blend_weight={"nfl": 1.0}))
+    vals = [p.pick_value for p in sections[0].picks]
+    assert vals == ["P1-0", "P1-1", "P1-2"]
+
+
+def test_a_sport_missing_from_blend_weight_gets_lambda_zero():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 100.0, -110, 0.9)])
+    sections = select_digest(
+        s, d, ["nfl"], SEASONS,
+        send_bar=_bar(min_shrunk_edge_pp=0.01, blend_weight={"mlb": 1.0}))
+    assert sections[0].picks == []
+    assert sections[0].diagnostics.lambda_used == 0.0
+
+
+def test_ranked_by_shrunk_edge_descending():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+              [(3, 4.0, -110, 0.9), (3, 18.0, -110, 0.4), (3, 9.0, -110, 0.55)])
+    sections = select_digest(
+        s, d, ["nfl"], SEASONS,
+        send_bar=_bar(blend_weight={"nfl": 1.0}))
+    vals = [p.pick_value for p in sections[0].picks]
+    assert vals == ["P1-1", "P1-2", "P1-0"], (
+        "ranking must follow shrunk edge, not model probability"
+    )
+
+
+def test_ties_break_by_start_time_then_id():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 10.0, -110, 0.6)],
+              start_time=datetime(2026, 11, 1, 20, 0))
+    _mk_priced(s, "nfl", 2, 3, 4, d, [(3, 10.0, -110, 0.6)],
+              start_time=datetime(2026, 11, 1, 13, 0))
+    sections = select_digest(
+        s, d, ["nfl"], SEASONS,
+        send_bar=_bar(blend_weight={"nfl": 1.0}))
+    vals = [p.pick_value for p in sections[0].picks]
+    assert vals == ["P2-0", "P1-0"], "the earlier start time must sort first"
+
+
+# --- props: gradeable markets, same price window, no edge gate -------------
+
+def test_an_ungradeable_prop_market_is_dropped():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+              [(3, 40.0, -110, 0.9)], pick_type="prop")
+    s.query(PickModel).filter_by(pick_value="P1-0").update({"prop_market": "batter_hits"})
+    s.commit()
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
+    assert sections[0].props == []
+
+
+def test_a_gradeable_prop_market_survives():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+              [(3, 40.0, -110, 0.9)], pick_type="prop")
+    s.query(PickModel).filter_by(pick_value="P1-0").update({"prop_market": "player_pass_yds"})
+    s.commit()
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
+    assert [p.pick_value for p in sections[0].props] == ["P1-0"]
+
+
+def test_props_apply_the_same_price_window():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+              [(3, 10.0, -200, 0.7), (3, 10.0, -110, 0.55)], pick_type="prop")
+    for pv in ("P1-0", "P1-1"):
+        s.query(PickModel).filter_by(pick_value=pv).update({"prop_market": "player_pass_yds"})
+    s.commit()
+    sections = select_digest(
+        s, d, ["nfl"], SEASONS,
+        send_bar=_bar(min_odds=-150, max_odds=150))
+    assert [p.pick_value for p in sections[0].props] == ["P1-1"]
+
+
+def test_a_prop_with_no_price_is_dropped():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+              [(3, 10.0, None, 0.55)], pick_type="prop")
+    s.query(PickModel).filter_by(pick_value="P1-0").update({"prop_market": "player_pass_yds"})
+    s.commit()
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
+    assert sections[0].props == []
+
+
+def test_props_are_not_edge_gated():
+    """A prop with a tiny edge still survives -- there is no shrunk-edge gate
+    on props, only the price window and market gradeability."""
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 0.1, -110, 0.51)], pick_type="prop")
+    s.query(PickModel).filter_by(pick_value="P1-0").update({"prop_market": "player_pass_yds"})
+    s.commit()
+    sections = select_digest(
+        s, d, ["nfl"], SEASONS,
+        send_bar=_bar(min_shrunk_edge_pp=50.0))  # would fail a game pick outright
+    assert [p.pick_value for p in sections[0].props] == ["P1-0"]
+
+
+def test_the_sixth_prop_is_cut():
+    s = _session()
+    d = date(2026, 11, 1)
+    picks = [(3, 5.0, -110, 0.55)] * 6
+    _mk_priced(s, "nfl", 1, 1, 2, d, picks, pick_type="prop")
+    for i in range(6):
+        s.query(PickModel).filter_by(pick_value=f"P1-{i}").update(
+            {"prop_market": "player_pass_yds"})
+    s.commit()
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=_bar(max_props=5))
+    assert len(sections[0].props) == 5
+
+
+def test_props_sort_by_start_time_then_id():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 5.0, -110, 0.55)], pick_type="prop",
+              start_time=datetime(2026, 11, 1, 20, 0))
+    _mk_priced(s, "nfl", 2, 3, 4, d, [(3, 5.0, -110, 0.55)], pick_type="prop",
+              start_time=datetime(2026, 11, 1, 13, 0))
+    for pv in ("P1-0", "P2-0"):
+        s.query(PickModel).filter_by(pick_value=pv).update({"prop_market": "player_pass_yds"})
+    s.commit()
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
+    assert [p.pick_value for p in sections[0].props] == ["P2-0", "P1-0"]
+
+
+# --- diagnostics -------------------------------------------------------------
+
+def test_diagnostics_report_generated_and_survived_and_lambda():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d,
+              [(3, 10.0, -110, 0.6), (3, 10.0, 500, 0.6)])  # second fails price window
+    sections = select_digest(
+        s, d, ["nfl"], SEASONS,
+        send_bar=_bar(min_odds=-150, max_odds=150, blend_weight={"nfl": 0.5}))
+    diag = sections[0].diagnostics
+    assert diag.games == 1
+    assert diag.generated == 2
+    assert diag.survived_price == 1
+    assert diag.lambda_used == 0.5
+
+
+# --- price ceiling props: the old ceiling-agnostic-props test --------------
+
+def test_ceiling_does_not_touch_game_picks_of_a_different_sport():
+    """Sanity: the price window is per-call, not global state leaking across
+    sports in the same select_digest call."""
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 10.0, -110, 0.6)])
+    _mk_priced(s, "nba", 2, 3, 4, d, [(3, 10.0, -110, 0.6)])
+    sections = select_digest(
+        s, d, ["nfl", "nba"], SEASONS,
+        send_bar=_bar(blend_weight={"nfl": 1.0, "nba": 1.0}))
+    by_sport = {sec.sport: sec for sec in sections}
+    assert len(by_sport["nfl"].picks) == 1
+    assert len(by_sport["nba"].picks) == 1
+
+
+# --- trailing record / suppression (unaffected by the send bar) ------------
 
 def _grade(session, pick_id, result):
     session.add(PickResult(pick_id=pick_id, result=result, payout=0.91 if result == "win" else 0.0))
@@ -375,18 +552,10 @@ def test_digest_pick_carries_model_and_price_probability():
     s = _session()
     d = date(2026, 11, 1)
     _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 4.0, -150, 0.62)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     picks = sections[0].picks
     assert picks[0].model_prob == 0.62
     assert abs(picks[0].price_prob - 0.6) < 1e-9
-
-
-def test_missing_price_gives_no_price_probability():
-    s = _session()
-    d = date(2026, 11, 1)
-    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 4.0, None, 0.55)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
-    assert sections[0].picks[0].price_prob is None
 
 
 def test_trailing_record_counts_decided_game_picks_only():
@@ -397,7 +566,7 @@ def test_trailing_record_counts_decided_game_picks_only():
     # Game 10 days before d: three graded moneyline picks and one graded prop.
     d_recent = d - timedelta(days=10)
     _mk_priced(s, "nfl", 2, 3, 4, d_recent,
-               [(5, 9.0, -110, 0.6), (4, 8.0, -110, 0.55), (3, 5.0, -110, 0.52)])
+              [(5, 9.0, -110, 0.6), (4, 8.0, -110, 0.55), (3, 5.0, -110, 0.52)])
     s.add(PickModel(game_id=2, strategy_id=1, pick_type="prop",
                     pick_value="Prop", confidence=4, edge_pct=10.0, odds_at_pick=-110))
     s.commit()
@@ -411,7 +580,7 @@ def test_trailing_record_counts_decided_game_picks_only():
     _mk_priced(s, "nfl", 3, 5, 6, d_old, [(5, 9.0, -110, 0.6)])
     _grade(s, _pick_ids(s, 3)[0], "win")
 
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert sections[0].record == (1, 1)
 
 
@@ -419,7 +588,7 @@ def test_no_graded_history_gives_no_record():
     s = _session()
     d = date(2026, 11, 1)
     _mk_priced(s, "nfl", 1, 1, 2, d, [(5, 9.0, -110, 0.6)])
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert sections[0].record is None
 
 
@@ -430,7 +599,7 @@ def test_trailing_record_excludes_today():
     _mk_priced(s, "nfl", 2, 3, 4, d, [(5, 9.0, -110, 0.6)])
     _grade(s, _pick_ids(s, 2)[0], "win")
 
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert sections[0].record is None
 
 
@@ -440,11 +609,11 @@ def test_suppression_is_off_by_default():
     _mk_priced(s, "nfl", 1, 1, 2, d, [(5, 9.0, -110, 0.6)])
     d_recent = d - timedelta(days=5)
     _mk_priced(s, "nfl", 2, 3, 4, d_recent,
-               [(5, 9.0, -110, 0.6)] * 25)
+              [(5, 9.0, -110, 0.6)] * 25)
     for pid in _pick_ids(s, 2):
         _grade(s, pid, "loss")
 
-    sections = select_digest(s, d, ["nfl"], SEASONS)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR)
     assert len(sections) == 1
 
 
@@ -457,7 +626,7 @@ def test_suppression_needs_the_minimum_sample():
     for pid in _pick_ids(s, 2):
         _grade(s, pid, "loss")
 
-    sections = select_digest(s, d, ["nfl"], SEASONS, min_trailing_win_pct=0.5)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR, min_trailing_win_pct=0.5)
     assert len(sections) == 1
 
 
@@ -473,5 +642,5 @@ def test_suppression_fires_below_the_floor():
     for pid in ids[15:]:
         _grade(s, pid, "win")
 
-    sections = select_digest(s, d, ["nfl"], SEASONS, min_trailing_win_pct=0.5)
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR, min_trailing_win_pct=0.5)
     assert sections == []

@@ -32,12 +32,15 @@ digest:
   enabled: true
   send_hour_et: 11
   sports: ["ncaaf", "nfl", "nba", "mlb"]
-  max_per_sport: 5
-  # Longest American price the email will show. Measured on the graded
-  # book: picks longer than +200 win 16% of the time; favorites at -150 or
-  # shorter win 73%. Picks past the ceiling are still generated and graded;
-  # they are just not emailed. `null` disables the ceiling.
-  max_odds: 150
+  send_bar:            # frozen 2026-09-29 (owner decision 2026-09-28); change only with a dated note
+    min_shrunk_edge_pp: 3.0
+    min_odds: -150
+    max_odds: 150
+    max_game_picks: 3
+    max_props: 5
+    blend_weight:      # lambda per sport, measured 2026-09-29 by backend.analysis.market_shrinkage (NFL 1,184 games, MLB 127; in-sample best 0.00 both)
+      nfl: 0.00
+      mlb: 0.00
   # Optional. When set (e.g. 0.50), a sport whose trailing 30-day record is
   # below this win rate on at least min_trailing_picks decided picks is left
   # out of the email. Off by default: with five graded NFL picks a record
