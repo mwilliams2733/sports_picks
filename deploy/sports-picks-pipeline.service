@@ -1,5 +1,5 @@
 [Unit]
-Description=Sports Picks Data Pipeline & Scheduler
+Description=Metric Edge Data Pipeline & Scheduler
 After=network.target sports-picks-web.service
 
 [Service]

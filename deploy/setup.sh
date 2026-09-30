@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sports Picks VPS Setup Script
+# Metric Edge VPS Setup Script
 # Run on a fresh Ubuntu 22.04/24.04 VPS as root
 # Usage: curl -sSL <raw-github-url>/deploy/setup.sh | bash
 
@@ -9,7 +9,7 @@ APP_USER="sportspicks"
 APP_DIR="/opt/sports-picks"
 REPO_URL="https://github.com/mwilliams2733/sports_picks.git"
 
-echo "=== Sports Picks VPS Setup ==="
+echo "=== Metric Edge VPS Setup ==="
 
 # 1. System packages
 echo "[1/7] Installing system packages..."

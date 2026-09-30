@@ -1,5 +1,5 @@
 [Unit]
-Description=Sports Picks Web Server
+Description=Metric Edge Web Server
 After=network.target
 
 [Service]

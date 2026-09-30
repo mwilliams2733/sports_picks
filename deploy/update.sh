@@ -7,7 +7,7 @@ set -euo pipefail
 APP_DIR="/opt/sports-picks"
 APP_USER="sportspicks"
 
-echo "=== Updating Sports Picks ==="
+echo "=== Updating Metric Edge ==="
 
 cd "$APP_DIR"
 

@@ -61,7 +61,7 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
             if scheduler is not None and scheduler.running:
                 scheduler.shutdown(wait=False)
 
-    app = FastAPI(title="Sports Picks API", lifespan=lifespan)
+    app = FastAPI(title="Metric Edge API", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_allowed_origins(),
