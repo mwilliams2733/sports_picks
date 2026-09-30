@@ -43,13 +43,18 @@ deciding independently what a pick's "next" version is:
   has a version. The pick's TRUE pre-merge final state (what this script
   exists to capture) is gone, silently replaced by whatever the first live
   refresh happened to compute.
-* **Running the backfill concurrently with a live scheduler** can race a
-  window run for the same pick: both independently compute "this pick has
-  no version yet, so mine is version 1", and one write wins while the
-  other hits `uq_pick_versions_pick_version` and is caught and skipped
-  (see `pick_versions.record_pick_version`'s docstring) -- survivable, but
-  still a hazard worth avoiding, since which side's "version 1" you get is
-  then a coin flip.
+* **Running the backfill concurrently with a live scheduler** must not be
+  done. Under WAL the realistic failure is `database is locked` on
+  whichever writer loses, not a tidy skip; the savepoint-and-skip in
+  `pick_versions.record_pick_version` only covers the rarer case of two
+  writers both computing the same version number.
+
+Each version row commits on its own: the helper's SAVEPOINT is the first
+statement of the backfill's transaction, and pysqlite commits it when the
+savepoint is released. So an interrupted `--apply` leaves a partial
+backfill. That is safe -- `unversioned_picks` makes a rerun pick up exactly
+the rows still missing -- and ~1k small commits take seconds, so it is left
+as is rather than giving the backfill its own write path.
 
 Like the other repair scripts, a dry run is the default and `--apply` must
 be given. Back the database up first.
