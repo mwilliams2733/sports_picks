@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Starting Sports Picks..."
+echo "Starting Metric Edge..."
 
 # Build frontend
 cd frontend && npm run build && cd ..

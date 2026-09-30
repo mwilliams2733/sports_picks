@@ -1,6 +1,6 @@
 {
-  "name": "SP Sports Picks",
-  "short_name": "Sports Picks",
+  "name": "Metric Edge",
+  "short_name": "Metric Edge",
   "description": "Data-driven sports betting analysis for your friend group",
   "start_url": "/",
   "display": "standalone",

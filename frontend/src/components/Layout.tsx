@@ -34,7 +34,7 @@ export default function Layout() {
             ☰
           </button>
           <div className="header-logo">
-            <span className="header-logo-accent">SP</span> Sports Picks
+            <span className="header-logo-accent">ME</span> Metric Edge
           </div>
         </div>
         <nav className="header-nav" aria-label="Main navigation">

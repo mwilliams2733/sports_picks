@@ -90,7 +90,7 @@ def test_the_asgi_target_uvicorn_resolves_still_builds_an_app(tmp_path):
     """)
 
     assert proc.returncode == 0, proc.stderr
-    assert "TITLE: Sports Picks API" in proc.stdout
+    assert "TITLE: Metric Edge API" in proc.stdout
 
 
 def test_resolving_the_app_is_what_migrates_and_it_happens_once(tmp_path):

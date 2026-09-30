@@ -22,6 +22,11 @@ def test_subject_names_date_and_count():
     assert "(1 pick, 1 prop across 1 sport)" in subject
 
 
+def test_subject_starts_with_the_product_name():
+    subject, _, _ = render_digest([_section()], date(2026, 9, 20))
+    assert subject.startswith("Metric Edge — Top picks — ")
+
+
 def test_props_only_subject_does_not_claim_zero():
     """A subject saying "0" over a body listing props erodes trust fast."""
     section = DigestSection(

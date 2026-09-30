@@ -49,9 +49,9 @@ export default function Admin() {
     setOwnerKeyInput('');
   };
 
-  const inviteMessage = `Join our Sports Picks group! We use AI-powered analysis to find high-value bets across NBA, NFL, NCAAB, and more.\n\nSign up here: ${appUrl}/paper-trading`;
+  const inviteMessage = `Join our Metric Edge group! We use AI-powered analysis to find high-value bets across NBA, NFL, NCAAB, and more.\n\nSign up here: ${appUrl}/paper-trading`;
 
-  const emailSubject = 'Join Sports Picks';
+  const emailSubject = 'Join Metric Edge';
   const emailBody = `Hey!\n\n${inviteMessage}\n\nSee you on the leaderboard!`;
 
   const copyToClipboard = async (text: string, label: string) => {

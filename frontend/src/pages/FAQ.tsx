@@ -29,9 +29,9 @@ const SECTIONS: FAQSection[] = [
     icon: '1',
     items: [
       {
-        question: 'What is Sports Picks?',
+        question: 'What is Metric Edge?',
         answer:
-          'Sports Picks is a data-driven sports betting analysis tool. It pulls live game schedules, odds, and player prop lines from ESPN and The Odds API, then runs them through configurable strategies to generate picks with confidence ratings. It covers NBA, NFL, NCAAB, NCAAF, Boxing, and MMA.',
+          'Metric Edge is a data-driven sports betting analysis tool. It pulls live game schedules, odds, and player prop lines from ESPN and The Odds API, then runs them through configurable strategies to generate picks with confidence ratings. It covers NBA, NFL, NCAAB, NCAAF, Boxing, and MMA.',
       },
       {
         question: 'How do I load data into the app?',
@@ -351,7 +351,7 @@ export default function FAQ() {
         <h2 className="page-title">FAQ & User Guide</h2>
       </div>
       <p className="faq-intro">
-        Everything you need to know about using Sports Picks &mdash; from reading odds to running backtests.
+        Everything you need to know about using Metric Edge &mdash; from reading odds to running backtests.
       </p>
 
       {SECTIONS.map(section => (
