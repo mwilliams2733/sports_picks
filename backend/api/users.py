@@ -181,7 +181,9 @@ def hold_bankroll(session, user_id: int) -> None:
     $6,000. A no-op UPDATE is the transaction's first write, so SQLite hands
     out its single write lock here -- a second bet waits (the driver's 5s
     busy timeout) until the first commits or rolls back, then reads a
-    balance that includes it. It must come before the balance read: in WAL a
+    balance that includes it. The lock is database-wide, not per player:
+    every other writer (other players' bets, the scheduler) waits too, for
+    the few milliseconds a bet takes. It must come before the balance read: in WAL a
     transaction that has already read cannot then take the lock on a newer
     snapshot. The lock is released when the session commits or closes.
     """
@@ -451,13 +453,14 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
+        if bet.stake <= 0:
+            raise HTTPException(status_code=400, detail="Stake must be positive")
+
         hold_bankroll(session, user_id)
         available = available_of(session, user)
 
         if bet.stake > available:
             raise HTTPException(status_code=400, detail="Insufficient balance")
-        if bet.stake <= 0:
-            raise HTTPException(status_code=400, detail="Stake must be positive")
 
         # Check if the game exists
         game = session.get(Game, bet.game_id)
