@@ -155,6 +155,32 @@ def balance_of(session, user) -> float:
     return user.starting_balance + straight + parlays
 
 
+def open_stakes(session, user) -> float:
+    """Stake riding on bets that have not settled yet.
+
+    A straight bet's or parlay's stake only reaches `balance_of` as the
+    payout when it settles, so until then it is in neither number. Parlay
+    legs carry stake 0 and are excluded like they are there.
+    """
+    straight = (session.query(func.coalesce(func.sum(PaperPick.stake), 0.0))
+                .filter(PaperPick.user_id == user.id, PaperPick.parlay_id.is_(None),
+                        PaperPick.result.is_(None))
+                .scalar())
+    parlays = (session.query(func.coalesce(func.sum(Parlay.stake), 0.0))
+               .filter(Parlay.user_id == user.id, Parlay.result.is_(None)).scalar())
+    return straight + parlays
+
+
+def available_of(session, user) -> float:
+    """What a player can still stake: settled balance minus open stakes.
+
+    The bet checks used `balance_of` alone, so a $10,000 bankroll could
+    place any number of $10,000 bets while the games were still to play.
+    `balance_of` stays the settled number the leaderboard ranks on.
+    """
+    return balance_of(session, user) - open_stakes(session, user)
+
+
 def _open_for_betting(game) -> bool:
     """See backend.paper.pricing.open_for_betting -- the one definition."""
     return pricing.open_for_betting(game)
@@ -179,6 +205,7 @@ def list_users(request: Request):
                 "has_pin": u.pin_hash is not None,
                 "starting_balance": u.starting_balance,
                 "current_balance": round(current_balance, 2),
+                "available_balance": round(available_of(session, u), 2),
                 "total_wagered": round(total_wagered, 2),
                 "profit": profit,
                 "roi": round(s.roi * 100, 2) if s.roi is not None else 0,
@@ -365,6 +392,7 @@ def get_user(request: Request, user_id: int):
             "has_pin": user.pin_hash is not None,
             "starting_balance": user.starting_balance,
             "current_balance": round(current_balance, 2),
+            "available_balance": round(available_of(session, user), 2),
             "total_wagered": round(total_wagered, 2),
             "profit": profit,
             "roi": round(s.roi * 100, 2) if s.roi is not None else 0,
@@ -388,9 +416,9 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        current_balance = balance_of(session, user)
+        available = available_of(session, user)
 
-        if bet.stake > current_balance:
+        if bet.stake > available:
             raise HTTPException(status_code=400, detail="Insufficient balance")
         if bet.stake <= 0:
             raise HTTPException(status_code=400, detail="Stake must be positive")
@@ -438,7 +466,7 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
             "id": pick.id,
             "result": None,
             "payout": None,
-            "new_balance": round(current_balance, 2),
+            "new_balance": round(available - bet.stake, 2),
             **{k: v for k, v in quote.as_dict().items()
                if k in ("pick_value", "odds", "line", "quoted_at")},
         }
@@ -524,8 +552,8 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
                                  detail="A parlay can't have two legs on the same market.")
 
         # Check balance
-        current_balance = balance_of(session, user)
-        if body.stake > current_balance:
+        available = available_of(session, user)
+        if body.stake > available:
             raise HTTPException(status_code=400, detail="Insufficient balance")
 
         # Price every leg before creating the Parlay, so a refusal writes nothing.
@@ -594,7 +622,7 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
             "potential_payout": round(body.stake * (combined_decimal - 1), 2),
             "result": parlay.result,
             "payout": parlay_payout,
-            "new_balance": round(current_balance + (parlay_payout or 0), 2),
+            "new_balance": round(available - body.stake, 2),
         }
     finally:
         session.close()

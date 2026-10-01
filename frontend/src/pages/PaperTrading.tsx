@@ -66,6 +66,9 @@ export default function PaperTrading() {
   const selectUser = (user: UserProfile) => {
     setSelectedUser(user);
   };
+  // `selectedUser` is the row as it was when clicked; the users query is
+  // what a placed bet invalidates, so money is read from there.
+  const liveUser = users.find(u => u.id === selectedUser?.id) ?? selectedUser;
 
   const handleCreateUser = async () => {
     if (!newName.trim()) return;
@@ -99,7 +102,7 @@ export default function PaperTrading() {
         { ...legFromQuote(selectedGame, chosen), stake }, betPin);
       setPin(selectedUser.id, betPin);
       toast(`${priceMoveNote(chosen.pick_value, chosen.odds, res.pick_value, res.odds)}. `
-        + `Balance: $${res.new_balance.toLocaleString()}`, 'success');
+        + `Available: $${res.new_balance.toLocaleString()}`, 'success');
       queryClient.invalidateQueries({ queryKey: ['users'] });
       setChosen(null);
     } catch (e) {
@@ -245,6 +248,12 @@ export default function PaperTrading() {
 
           {/* Stats Cards */}
           <div className="results-grid" style={{ marginBottom: '1rem' }}>
+            <div className="stat-card" style={{ padding: '0.75rem' }}>
+              <div className="stat-label">Available</div>
+              <div className="stat-value" style={{ fontSize: '1.25rem' }}>
+                {formatMoney(liveUser?.available_balance ?? 0)}
+              </div>
+            </div>
             <div className="stat-card" style={{ padding: '0.75rem' }}>
               <div className="stat-label">ROI</div>
               <div className="stat-value" style={{ fontSize: '1.25rem', color: selectedUser.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>

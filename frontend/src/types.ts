@@ -190,6 +190,8 @@ export interface UserProfile {
   name: string;
   starting_balance: number;
   current_balance: number;
+  /** Settled balance minus stakes on bets still open: what can be bet now. */
+  available_balance: number;
   total_wagered: number;
   profit: number;
   roi: number;

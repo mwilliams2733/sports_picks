@@ -11,7 +11,8 @@ vi.mock('../api/client', async (importOriginal) => {
 })
 
 const user = (id: number, name: string, has_pin: boolean): UserProfile => ({
-  id, name, has_pin, starting_balance: 10000, current_balance: 10000, total_wagered: 0, profit: 0,
+  id, name, has_pin, starting_balance: 10000, current_balance: 10000, available_balance: 10000,
+  total_wagered: 0, profit: 0,
   roi: 0, wins: 0, losses: 0, pushes: 0, pending: 0, win_rate: 0, current_streak: 0,
   best_streak: 0, streak_type: 'none',
 })
