@@ -242,34 +242,34 @@ export default function PaperTrading() {
       </div>
 
       {/* Selected User Detail */}
-      {selectedUser && (
+      {liveUser && (
         <div style={{ marginTop: '1.25rem' }}>
-          <div className="section-header">{selectedUser.name} <span className="section-divider" /></div>
+          <div className="section-header">{liveUser.name} <span className="section-divider" /></div>
 
           {/* Stats Cards */}
           <div className="results-grid" style={{ marginBottom: '1rem' }}>
             <div className="stat-card" style={{ padding: '0.75rem' }}>
               <div className="stat-label">Available</div>
               <div className="stat-value" style={{ fontSize: '1.25rem' }}>
-                {formatMoney(liveUser?.available_balance ?? 0)}
+                {formatMoney(liveUser.available_balance)}
               </div>
             </div>
             <div className="stat-card" style={{ padding: '0.75rem' }}>
               <div className="stat-label">ROI</div>
-              <div className="stat-value" style={{ fontSize: '1.25rem', color: selectedUser.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                {selectedUser.roi >= 0 ? '+' : ''}{selectedUser.roi}%
+              <div className="stat-value" style={{ fontSize: '1.25rem', color: liveUser.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                {liveUser.roi >= 0 ? '+' : ''}{liveUser.roi}%
               </div>
             </div>
             <div className="stat-card" style={{ padding: '0.75rem' }}>
               <div className="stat-label">Record</div>
               <div className="stat-value" style={{ fontSize: '1.25rem' }}>
-                {selectedUser.wins}-{selectedUser.losses}
+                {liveUser.wins}-{liveUser.losses}
               </div>
             </div>
             <div className="stat-card" style={{ padding: '0.75rem' }}>
               <div className="stat-label">Best Streak</div>
               <div className="stat-value" style={{ fontSize: '1.25rem' }}>
-                {selectedUser.best_streak}
+                {liveUser.best_streak}
               </div>
             </div>
           </div>

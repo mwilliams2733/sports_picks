@@ -24,9 +24,9 @@ vi.mock('../api/client', async (importOriginal) => {
   }
 })
 
-const user = (available_balance: number): UserProfile => ({
+const user = (available_balance: number, roi = 0): UserProfile => ({
   id: 7, name: 'Sam', starting_balance: 10000, current_balance: 10000, available_balance,
-  total_wagered: 0, profit: 0, roi: 0, wins: 0, losses: 0, pushes: 0, pending: 0,
+  total_wagered: 0, profit: 0, roi, wins: 0, losses: 0, pushes: 0, pending: 0,
   win_rate: 0, current_streak: 0, best_streak: 0, streak_type: 'none',
 })
 
@@ -45,7 +45,7 @@ describe('PaperTrading', () => {
     // a bet since then lowered what is available. A placed bet invalidates
     // the users query, so that is where the current number lives.
     useUserStore.setState({ selectedUser: user(10000) })
-    vi.mocked(api.users.list).mockResolvedValue([user(9000)])
+    vi.mocked(api.users.list).mockResolvedValue([user(9000, 4.5)])
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={qc}>
@@ -55,5 +55,8 @@ describe('PaperTrading', () => {
     const label = await screen.findByText('Available')
     const card = label.closest('.stat-card') as HTMLElement
     await vi.waitFor(() => expect(card).toHaveTextContent('$9.0K'))
+    // Every card, not just Available: a settled bet moves ROI too.
+    const roi = screen.getByText('ROI').closest('.stat-card') as HTMLElement
+    expect(roi).toHaveTextContent('+4.5%')
   })
 })

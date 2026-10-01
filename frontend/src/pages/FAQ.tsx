@@ -288,7 +288,7 @@ const SECTIONS: FAQSection[] = [
       {
         question: 'How do I place a pick?',
         answer:
-          'Click your name on the leaderboard to open your profile. In the "Place a Pick" form, select a game, choose your bet type (Moneyline, Spread, or Over/Under), and set your stake. The odds auto-fill based on the game and bet type, but you can adjust them. Click "Place Pick" to submit. Your balance is reduced by the stake amount. Bets close when the game starts.',
+          'Click your name on the leaderboard to open your profile. In the "Place a Pick" form, select a game and bet type, pick one of the sides on offer, and set your stake. The price comes from the sportsbooks and is checked again when you place the bet, so it can move slightly -- you cannot edit it. The button shows the bet and its price (for example "Place HOME ML -110"); click it to submit. The stake comes out of your Available balance straight away; the leaderboard balance only changes when the bet settles. Bets close when the game starts.',
       },
       {
         question: 'How does grading work?',
