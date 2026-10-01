@@ -360,6 +360,22 @@ stated explicitly rather than left silent.
   46 already-stored rows remain in this export and would read as a striking
   "pattern" (`model_prob` always exactly 1.0) to an analyst who has not seen
   this comment.
+- **Every `spread` and `over_under` pick is priced at exactly -110, and
+  none exist after 2026-09-20.** All 241 of them (241 of 241 as measured
+  against the live db 2026-09-30, dated 2026-03-15 through 2026-09-20) have
+  `odds_at_pick = -110`. That is `STANDARD_JUICE`, the fallback used when no
+  book's spread or total price was on record, not a quoted price. The
+  collector only began storing those prices on 2026-09-21 20:35 UTC. So on
+  these rows the price, and anything computed from it (the payout on a win,
+  `clv_price_pp`), carries no information; line points (`pick_value`,
+  `line_at_close`, `clv_line_pts`) are the only real market signal. Spread
+  picks were gated off per sport at 2026-09-20 21:25 UTC (commit 69c13cf,
+  `SPREAD_VALIDATED_SPORTS`, currently empty), and totals by
+  `TOTALS_VALIDATED_SPORTS` (see the previous bullet), so no new rows of
+  either type have been generated since. If a sport is re-enabled, its new
+  spread/total rows will carry real prices, and `odds_at_close` will need to
+  become a real closing price too (see "What CLV means here", caveat 1).
+  That is a regime change to split on.
 - **Collection effectively starts 2026-09-17.** Verified directly in code:
   `backend/scripts/backfill_date_range.py` states "Game collection began on
   2026-09-17, and nothing ever fetched what came [before]". Earlier rows
