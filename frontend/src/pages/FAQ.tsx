@@ -293,7 +293,7 @@ const SECTIONS: FAQSection[] = [
       {
         question: 'How does grading work?',
         answer:
-          'Bets close when the game starts. After games finish, picks are graded automatically each morning (the owner can also grade on demand). Wins pay at the price you took; pushes return your stake. Parlays settle once every leg is graded; a leg whose game is postponed or canceled keeps the parlay pending.',
+          'Bets close when the game starts. After games finish, picks are graded automatically each morning (the owner can also grade on demand). Wins pay at the price you took; pushes return your stake. A bet that can never be graded -- its game is canceled or postponed, or a player prop has no stat line -- is settled as a push two days after the game date, so your stake comes back. Parlays settle once every leg is graded, and a parlay with a pushed leg pushes.',
       },
       {
         question: 'How is the leaderboard ranked?',
