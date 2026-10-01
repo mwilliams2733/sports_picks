@@ -37,6 +37,24 @@ def stale_duplicates(session) -> list[Odds]:
     return doomed
 
 
+def collision_losers(session, from_game_id: int, to_game_id: int) -> list[Odds]:
+    """The rows `drop_odds_collisions` would delete, without deleting them --
+    so a dry run reports the same number its ``--apply`` will act on."""
+    # Every row on either game, newest first, so the first row seen for a
+    # book is its winner and every later one -- on either side, including a
+    # pre-existing duplicate on one game alone -- loses.
+    rows = (session.query(Odds)
+            .filter(Odds.game_id.in_((from_game_id, to_game_id))).all())
+    seen: set[str] = set()
+    losers = []
+    for row in _newest_first(rows):
+        if row.bookmaker in seen:
+            losers.append(row)
+        else:
+            seen.add(row.bookmaker)
+    return losers
+
+
 def drop_odds_collisions(session, from_game_id: int, to_game_id: int) -> int:
     """Clear the way for moving ``from_game_id``'s rows onto ``to_game_id``.
 
@@ -46,18 +64,8 @@ def drop_odds_collisions(session, from_game_id: int, to_game_id: int) -> int:
     then no book it moves is already on the survivor. Call it BEFORE the
     reparent: afterwards the unique index has already refused the move.
     """
-    # Every row on either game, newest first, so the first row seen for a
-    # book is its winner and every later one -- on either side, including a
-    # pre-existing duplicate on one game alone -- is deleted.
-    rows = (session.query(Odds)
-            .filter(Odds.game_id.in_((from_game_id, to_game_id))).all())
-    seen: set[str] = set()
-    deleted = 0
-    for row in _newest_first(rows):
-        if row.bookmaker in seen:
-            session.delete(row)
-            deleted += 1
-        else:
-            seen.add(row.bookmaker)
+    losers = collision_losers(session, from_game_id, to_game_id)
+    for row in losers:
+        session.delete(row)
     session.flush()
-    return deleted
+    return len(losers)

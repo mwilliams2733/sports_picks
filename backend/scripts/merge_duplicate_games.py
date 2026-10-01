@@ -66,7 +66,7 @@ from collections import Counter
 from sqlalchemy import func
 
 from backend.database import get_engine, get_session, run_migrations
-from backend.pipeline.odds_rows import drop_odds_collisions
+from backend.pipeline.odds_rows import collision_losers, drop_odds_collisions
 from backend.models import (
     EloHistory, Game, Odds, PickModel, PlayerProp, TeamStat,
 )
@@ -115,8 +115,11 @@ def choose_survivor(session, rows: list[Game]) -> Game | None:
     return rows[0]          # ordered by date: the earlier, Eastern-dated row
 
 
-def _absorb(session, survivor: Game, loser: Game) -> None:
-    """Move what must be kept, delete what must be recomputed, drop the loser."""
+def _absorb(session, survivor: Game, loser: Game) -> int:
+    """Move what must be kept, delete what must be recomputed, drop the loser.
+
+    Returns how many older `Odds` rows the collision step deleted.
+    """
     # A survivor that never finalized inherits the result rather than losing it.
     if survivor.status != "final" and loser.status == "final":
         survivor.status = loser.status
@@ -129,7 +132,7 @@ def _absorb(session, survivor: Game, loser: Game) -> None:
     # the collector keeps updating, one frozen, and every consensus counting
     # that book double. The newer quote wins; the unique index now refuses
     # the duplicate outright, so this has to run before the move.
-    drop_odds_collisions(session, loser.id, survivor.id)
+    odds_deleted = drop_odds_collisions(session, loser.id, survivor.id)
     for model in REPOINTED:
         for row in session.query(model).filter(model.game_id == loser.id).all():
             row.game_id = survivor.id
@@ -137,6 +140,7 @@ def _absorb(session, survivor: Game, loser: Game) -> None:
         for row in session.query(model).filter(model.game_id == loser.id).all():
             session.delete(row)
     session.delete(loser)
+    return odds_deleted
 
 
 def run(db_path: str, *, dry_run: bool = False) -> dict:
@@ -167,10 +171,14 @@ def run(db_path: str, *, dry_run: bool = False) -> dict:
                 refusals.append(str(rows[0].espn_id))
                 continue
             if dry_run:
+                for loser in rows:
+                    if loser.id != survivor.id:
+                        counts["odds_rows_deleted"] += len(
+                            collision_losers(session, loser.id, survivor.id))
                 continue
             for loser in rows:
                 if loser.id != survivor.id:
-                    _absorb(session, survivor, loser)
+                    counts["odds_rows_deleted"] += _absorb(session, survivor, loser)
                     counts["deleted_rows"] += 1
             counts["merged"] += 1
         if dry_run:
@@ -182,6 +190,7 @@ def run(db_path: str, *, dry_run: bool = False) -> dict:
 
     return {"pairs": counts["pairs"], "merged": counts["merged"],
             "refused": counts["refused"], "deleted_rows": counts["deleted_rows"],
+            "odds_rows_deleted": counts["odds_rows_deleted"],
             "refused_ids": refusals}
 
 
@@ -190,6 +199,8 @@ def format_summary(summary: dict, dry_run: bool) -> str:
     lines.append(f"  twin groups found : {summary['pairs']}")
     lines.append(f"  merged            : {summary['merged']}")
     lines.append(f"  rows deleted      : {summary['deleted_rows']}")
+    lines.append(f"  older odds rows   : {summary['odds_rows_deleted']}"
+                 "  (a book quoted on both games keeps its newer row)")
     lines.append(f"  refused           : {summary['refused']}")
     if summary["refused_ids"]:
         lines.append("")

@@ -208,7 +208,9 @@ def test_merging_espn_twins_leaves_one_row_per_book(tmp_path):
     session.commit()
     session.close()
 
-    merge_twins(str(db))
+    # The dry run reports the deletion --apply will make, and makes none.
+    assert merge_twins(str(db), dry_run=True)["odds_rows_deleted"] == 1
+    assert merge_twins(str(db))["odds_rows_deleted"] == 1
 
     session = get_session(get_engine(str(db)))
     rows = sorted((r.game_id, r.bookmaker, r.moneyline_home) for r in session.query(Odds))
@@ -235,15 +237,27 @@ def test_merging_a_mirrored_combat_split_keeps_the_newer_quote_swapped():
     # Fighter B (its home) at -200.
     session.add_all([_odds(final.id, "dk", OLD, ml=-300),
                      Odds(game_id=mirrored.id, bookmaker="dk", timestamp=NEW,
-                          moneyline_home=-200, moneyline_away=170)])
+                          moneyline_home=-200, moneyline_away=170),
+                     # fd the other way round: the survivor's quote is newer,
+                     # so the dropped row's is deleted, not moved.
+                     _odds(final.id, "fd", NEW, ml=-250),
+                     _odds(mirrored.id, "fd", OLD, ml=-400)])
     session.commit()
     final_id = final.id
 
+    dry = merge_date_splits(session, "mma", apply=False)
+    # Same numbers as --apply: the newer row moves, the survivor's older
+    # one is deleted rather than counted as moved.
+    assert (dry["odds_collisions_dropped"], dry["odds_moved"]) == (2, 1)
+    assert session.query(Odds).count() == 4
+
     summary = merge_date_splits(session, "mma", apply=True)
 
-    assert summary["merged"] == 1 and summary["odds_collisions_dropped"] == 1
+    assert summary["merged"] == 1
+    assert (summary["odds_collisions_dropped"], summary["odds_moved"]) == (2, 1)
     session.expire_all()
-    row = session.query(Odds).filter_by(game_id=final_id).one()
+    row = session.query(Odds).filter_by(game_id=final_id, bookmaker="dk").one()
+    assert session.query(Odds).filter_by(game_id=final_id, bookmaker="fd").one().moneyline_home == -250
     # Newer quote, swapped onto the kept row's fighters: A (home) is +170.
     assert (row.moneyline_home, row.moneyline_away) == (170, -200)
 

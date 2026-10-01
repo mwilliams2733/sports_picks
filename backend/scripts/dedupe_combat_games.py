@@ -56,7 +56,7 @@ from backend.collectors.ufc import normalize_name
 from backend.database import get_engine, get_session, run_migrations
 from backend.models import (EloHistory, EloRating, Game, LineSnapshot, Odds,
                             PickModel, PickResult, Team)
-from backend.pipeline.odds_rows import drop_odds_collisions
+from backend.pipeline.odds_rows import collision_losers, drop_odds_collisions
 from backend.time_utils import et_today
 
 logger = logging.getLogger(__name__)
@@ -412,7 +412,13 @@ def merge_date_splits(session, sport: str = "mma", *,
             summary["refused_ids"].extend([group.keep, *group.drop])
             continue
         drop_id = group.drop[0]
-        moving = session.query(Odds).filter(Odds.game_id == drop_id).count()
+        # Counted the same way in a dry run and under --apply: a book quoted
+        # on both rows keeps only its newer row, so the older one is
+        # deleted, not moved.
+        losers = collision_losers(session, drop_id, group.keep)
+        moving = (session.query(Odds).filter(Odds.game_id == drop_id).count()
+                  - sum(1 for r in losers if r.game_id == drop_id))
+        summary["odds_collisions_dropped"] += len(losers)
         moving_snapshots = session.query(LineSnapshot).filter(
             LineSnapshot.game_id == drop_id).count()
         summary["merged"] += 1
@@ -427,8 +433,7 @@ def merge_date_splits(session, sport: str = "mma", *,
             # Same book on both rows: keep the newer quote, before the
             # reparent below, or the survivor would carry that book twice
             # (and the unique index refuses the UPDATE).
-            summary["odds_collisions_dropped"] += drop_odds_collisions(
-                session, drop_id, group.keep)
+            drop_odds_collisions(session, drop_id, group.keep)
             # Reparented, not deleted: the price this bout was offered at is
             # the only record of what the market thought, and the surviving
             # row is the one everything else now points at. Swapped in the
@@ -437,6 +442,11 @@ def merge_date_splits(session, sport: str = "mma", *,
             session.query(Odds).filter(Odds.game_id == drop_id).update(
                 _reparent_fields(Odds, Odds.game_id, group.keep, mirrored),
                 synchronize_session=False)
+            # The collision lookup loaded these rows into the session; the
+            # bulk UPDATE bypassed them, so they still show the old game_id
+            # and, when mirrored, unswapped prices. Nothing reads them before
+            # the commit today -- expire them so nothing later can.
+            session.expire_all()
             # LineSnapshot carries games.id as a NOT NULL foreign key with no
             # cascade, and foreign_keys=ON is set on every connection
             # (backend.database.get_engine). Deleting `drop_id` below without
