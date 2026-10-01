@@ -470,6 +470,61 @@ def test_a_parlay_settles_when_its_last_leg_finishes():
     session.close()
 
 
+def _seed_rematch(client, sport, *, mirrored, days_apart=180):
+    """Two scheduled games between the same two teams/fighters.
+
+    For combat this is the date-split twin -- one bout listed at two dates,
+    e.g. "Kape vs Van" at 2026-12-26 and 2027-06-30 in the live db -- and
+    ``mirrored`` lists it with home/away the other way round on the second
+    row, which is how the two sources disagree.
+    """
+    from datetime import timedelta
+    engine = client.app.state.engine
+    Base.metadata.create_all(engine)
+    session = get_session(engine)
+    a = Team(name=f"{sport}-A", abbreviation=f"{sport}A", sport=sport)
+    b = Team(name=f"{sport}-B", abbreviation=f"{sport}B", sport=sport)
+    session.add_all([a, b])
+    session.flush()
+    first = Game(sport=sport, season="2026", date=et_today() + timedelta(days=1),
+                 home_team_id=a.id, away_team_id=b.id, status="scheduled")
+    home, away = (b, a) if mirrored else (a, b)
+    second = Game(sport=sport, season="2026",
+                  date=et_today() + timedelta(days=days_apart),
+                  home_team_id=home.id, away_team_id=away.id, status="scheduled")
+    session.add_all([first, second])
+    session.commit()
+    ids = [first.id, second.id]
+    session.close()
+    for gid in ids:
+        seed_fresh_odds(engine, gid)
+    return ids
+
+
+@pytest.mark.parametrize("sport", ["mma", "boxing"])
+@pytest.mark.parametrize("mirrored", [False, True])
+def test_a_parlay_cannot_carry_one_fight_twice(sport, mirrored):
+    # A combat bout listed at two dates is one event, so combine() would
+    # price one fighter's win as two independent legs.
+    app = create_app(":memory:")
+    client = TestClient(app, headers=ALL_HEADERS)
+    game_ids = _seed_rematch(client, sport, mirrored=mirrored)
+    user_id = _make_user(client)
+    response = _parlay(client, user_id, game_ids, 100)
+    assert response.status_code == 400
+    assert response.json()["detail"] == "A parlay can't have two legs on the same market."
+    assert client.get(f"/users/{user_id}").json()["available_balance"] == 10000.0
+
+
+def test_a_team_sport_rematch_is_two_games():
+    # MLB plays the same opponent on consecutive days: two real events.
+    app = create_app(":memory:")
+    client = TestClient(app, headers=ALL_HEADERS)
+    game_ids = _seed_rematch(client, "mlb", mirrored=False, days_apart=2)
+    user_id = _make_user(client)
+    assert _parlay(client, user_id, game_ids, 100).status_code == 200
+
+
 def test_parlay_legs_stored_with_zero_stake():
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)

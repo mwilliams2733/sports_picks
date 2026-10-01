@@ -11,6 +11,7 @@ from backend.pipeline import paper_settlement
 from backend.pipeline.paper_settlement import settle_parlays
 from backend.paper import pricing
 from backend.paper.pricing import PricingError
+from backend.pipeline.team_stats import COMBAT_SPORTS
 from backend.analysis.paper_bets import player_bets
 from backend.analysis.scorecard import summarize, effective_bets
 from backend.digest.record import emailed_bets
@@ -179,6 +180,23 @@ def available_of(session, user) -> float:
     `balance_of` stays the settled number the leaderboard ranks on.
     """
     return balance_of(session, user) - open_stakes(session, user)
+
+
+def _event_key(session, game_id: int):
+    """What makes two parlay legs the same event.
+
+    The game row, except in combat: one bout is sometimes stored as two
+    games at different dates, with the two sources disagreeing about who
+    is "home" ("Kape vs Van" at 2026-12-26 and 2027-06-30), and a parlay
+    keyed on the row would price one fighter's win as two independent
+    legs. A bout is its two fighters, in either order. Team sports keep
+    the row: the same two teams on consecutive days are two real games.
+    """
+    game = session.get(Game, game_id)
+    if game is not None and game.sport in COMBAT_SPORTS:
+        return ("bout", game.sport,
+                frozenset((game.home_team_id, game.away_team_id)))
+    return game_id
 
 
 def _open_for_betting(game) -> bool:
@@ -542,9 +560,9 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
         # market) for a prop leg -- the side/outcome is deliberately left out
         # of the key so both sides of one market collide.
         market_keys = [
-            ("prop", leg.game_id, leg.prop_player, leg.prop_market)
+            ("prop", _event_key(session, leg.game_id), leg.prop_player, leg.prop_market)
             if leg.pick_type == "prop"
-            else ("game", leg.game_id, leg.pick_type)
+            else ("game", _event_key(session, leg.game_id), leg.pick_type)
             for leg in body.legs
         ]
         if len(set(market_keys)) != len(market_keys):
