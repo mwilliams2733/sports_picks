@@ -11,6 +11,8 @@ product of the legs' decimal prices.
 """
 from datetime import date, datetime, timedelta, timezone
 
+from sqlalchemy import and_, or_
+
 from backend.models import Game, PaperPick, Parlay
 from backend.pipeline.grader import (
     grade_pick, grade_prop_pick, payout_for, prop_box_score,
@@ -23,6 +25,12 @@ from backend.time_utils import et_today
 VOID_AFTER_DAYS = 2
 #: Statuses that mean the game will not produce a result on this row.
 UNPLAYED = ("canceled", "postponed")
+#: A game still "scheduled" this long after its date is not running late --
+#: nothing is ever going to update it (a combat promotion no results source
+#: covers, a bout that moved silently; 31 such rows from September alone,
+#: 2026-09-30). Longer than VOID_AFTER_DAYS because a merely late final is
+#: still possible for a few days.
+STALE_SCHEDULED_DAYS = 7
 
 
 def grade_paper_picks(session, today: date | None = None) -> list[PaperPick]:
@@ -77,17 +85,22 @@ def _push_ungradeable(session, today: date) -> list[PaperPick]:
     counted as no bet. A parlay leg pushed here pushes its parlay under the
     existing rule in `settle_parlays`.
 
-    A still-``scheduled`` game is left alone: it may yet finalize.
+    A still-``scheduled`` game gets `STALE_SCHEDULED_DAYS` instead: it may
+    yet finalize late, but one that never does would otherwise hold its
+    stake forever -- the same failure, without the status saying so.
     Runs after the grading pass, so a pending bet on a ``final`` game here
     is one that pass could not grade.
     """
     cutoff = today - timedelta(days=VOID_AFTER_DAYS)
+    stale = today - timedelta(days=STALE_SCHEDULED_DAYS)
     rows = (
         session.query(PaperPick)
         .join(Game, PaperPick.game_id == Game.id)
         .filter(PaperPick.result.is_(None))
-        .filter(Game.status.in_(UNPLAYED + ("final",)))
-        .filter(Game.date <= cutoff)
+        .filter(or_(
+            and_(Game.status.in_(UNPLAYED + ("final",)), Game.date <= cutoff),
+            and_(Game.status == "scheduled", Game.date <= stale),
+        ))
         .all()
     )
     now = datetime.now(timezone.utc)

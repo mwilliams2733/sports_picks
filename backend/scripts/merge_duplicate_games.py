@@ -66,7 +66,7 @@ from collections import Counter
 from sqlalchemy import func
 
 from backend.database import get_engine, get_session, run_migrations
-from backend.pipeline.odds_rows import collision_losers, drop_odds_collisions
+from backend.pipeline.odds_rows import drop_odds_collisions
 from backend.models import (
     EloHistory, Game, Odds, PickModel, PlayerProp, TeamStat,
 )
@@ -171,10 +171,14 @@ def run(db_path: str, *, dry_run: bool = False) -> dict:
                 refusals.append(str(rows[0].espn_id))
                 continue
             if dry_run:
-                for loser in rows:
-                    if loser.id != survivor.id:
-                        counts["odds_rows_deleted"] += len(
-                            collision_losers(session, loser.id, survivor.id))
+                # What --apply ends with: one row per book across the whole
+                # group. Counted over the group at once, not loser by loser,
+                # because apply absorbs losers in turn and a book two losers
+                # share collides only after the first has moved.
+                ids = [r.id for r in rows]
+                group_rows = session.query(Odds).filter(Odds.game_id.in_(ids)).all()
+                counts["odds_rows_deleted"] += (
+                    len(group_rows) - len({o.bookmaker for o in group_rows}))
                 continue
             for loser in rows:
                 if loser.id != survivor.id:

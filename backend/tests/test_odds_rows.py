@@ -353,3 +353,32 @@ def test_losing_the_insert_race_does_not_wedge_the_run(tmp_path, monkeypatch):
         event.remove(Odds, "before_insert", locked)
     assert fetched == ["nfl", "mlb"]
     session.query(StrategyModel).first()   # pick generation's first query
+
+
+def test_a_three_twin_dry_run_counts_what_apply_deletes(tmp_path):
+    """Re-review N3: a book on two losers but not on the survivor collides
+    only once the first loser has moved, so counting loser by loser said 0."""
+    db = tmp_path / "three.db"
+    session = get_session(get_engine(str(db)))
+    Base.metadata.create_all(session.get_bind())
+    session.add_all([Team(id=1, name="MIA", abbreviation="MIA", sport="nba"),
+                     Team(id=2, name="ORL", abbreviation="ORL", sport="nba"),
+                     StrategyModel(id=1, name="s", config_json="{}")])
+    for gid in (1, 2, 3):
+        session.add(Game(id=gid, sport="nba", season="2025-26",
+                         date=datetime.date(2026, 3, 13) + datetime.timedelta(days=gid),
+                         espn_id="401700009", home_team_id=1, away_team_id=2,
+                         status="scheduled"))
+    session.flush()
+    session.add(PickModel(id=1, game_id=1, strategy_id=1, pick_type="moneyline",
+                          pick_value="HOME ML", confidence=3, edge_pct=4.0, odds_at_pick=-110))
+    session.add_all([_odds(2, "dk", OLD, ml=-150), _odds(3, "dk", NEW, ml=-120)])
+    session.commit()
+    session.close()
+
+    assert merge_twins(str(db), dry_run=True)["odds_rows_deleted"] == 1
+    assert merge_twins(str(db))["odds_rows_deleted"] == 1
+    session = get_session(get_engine(str(db)))
+    rows = [(r.game_id, r.bookmaker, r.moneyline_home) for r in session.query(Odds)]
+    session.close()
+    assert rows == [(1, "dk", -120)]

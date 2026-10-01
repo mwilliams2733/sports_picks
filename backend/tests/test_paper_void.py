@@ -93,11 +93,19 @@ def test_a_gradeable_bet_is_graded_not_pushed(session):
     assert bet.result == "win"
 
 
-def test_a_scheduled_game_is_not_voided(session):
-    # Not part of the ruling: a late-finalizing game is still to be graded.
-    bet = _bet(session, status="scheduled", days_ago=5)
+def test_a_scheduled_game_a_few_days_past_waits(session):
+    # Could still be a late final; 6 days is inside the stale window.
+    bet = _bet(session, status="scheduled", days_ago=6)
     grade_paper_picks(session, today=TODAY)
     assert bet.result is None
+
+
+def test_a_game_stuck_at_scheduled_for_a_week_is_pushed(session):
+    # Re-review N1: a bout no results source covers stays "scheduled"
+    # forever and would hold the stake forever.
+    bet = _bet(session, status="scheduled", days_ago=7)
+    grade_paper_picks(session, today=TODAY)
+    assert (bet.result, bet.payout) == ("push", 0.0)
 
 
 def test_a_parlay_with_a_canceled_leg_pushes_and_releases_its_stake(session):
