@@ -246,3 +246,96 @@ def test_merging_a_mirrored_combat_split_keeps_the_newer_quote_swapped():
     row = session.query(Odds).filter_by(game_id=final_id).one()
     # Newer quote, swapped onto the kept row's fighters: A (home) is +170.
     assert (row.moneyline_home, row.moneyline_away) == (170, -200)
+
+
+# --- the accepted race: two writers inserting the same new book -------------
+
+def _race_setup(tmp_path, monkeypatch):
+    """A scheduled game, a fake feed quoting book "dk" on it, and a second
+    writer that commits its own "dk" row between our SELECT and our flush --
+    the one race the unique index turns from a silent duplicate into an
+    error (owner-accepted trade-off, 2026-09-30)."""
+    import asyncio
+    import backend.pipeline.full_pipeline as fp
+    engine = get_engine(str(tmp_path / "race.db"))
+    Base.metadata.create_all(engine)
+    session = get_session(engine)
+    _seed_game(session, 1, sport="nfl")
+    game = session.get(Game, 1)
+    game.status = "scheduled"
+    game.date = datetime.date.today() + datetime.timedelta(days=3)
+    session.commit()
+
+    fetched = []
+
+    class FakeCollector:
+        requests_remaining = 100
+
+        def __init__(self, key):
+            pass
+
+        async def fetch_odds(self, sport):
+            fetched.append(sport)
+            if sport != "nfl":
+                return []   # only nfl quotes the game, so mlb can't repair it
+            return [{"id": "x", "home_team": "H1", "away_team": "A1",
+                     "commence_time": f"{game.date.isoformat()}T20:00:00Z",
+                     "bookmakers": [{"key": "dk", "moneyline_home": -125,
+                                     "moneyline_away": 105, "spread_home": None,
+                                     "spread_away": None, "over_under": None}]}]
+
+        async def close(self):
+            pass
+
+    real_snapshot = fp.record_snapshot
+
+    def racing_snapshot(sess, gid, book, bk):
+        if getattr(racing_snapshot, "done", False):
+            return real_snapshot(sess, gid, book, bk)
+        racing_snapshot.done = True
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO odds (game_id, bookmaker, timestamp) "
+                              "VALUES (1, 'dk', '2026-01-01')"))
+        return real_snapshot(sess, gid, book, bk)
+
+    monkeypatch.setattr(fp, "OddsAPICollector", FakeCollector)
+    monkeypatch.setattr(fp, "_ensure_game_from_odds", lambda *a, **k: None)
+    monkeypatch.setattr(fp, "_find_game_by_teams",
+                        lambda sess, sport, h, a, when=None: sess.get(Game, 1))
+    monkeypatch.setattr(fp, "record_snapshot", racing_snapshot)
+    budget = {"monthly_limit": 10000, "daily_target": 1000, "reserve": 10}
+    run = lambda: asyncio.run(fp.fetch_and_store_odds(session, ["nfl", "mlb"], "k",
+                                                      budget=budget))
+    return session, fetched, run, fp
+
+
+def test_losing_the_insert_race_updates_the_winners_row(tmp_path, monkeypatch):
+    session, fetched, run, _ = _race_setup(tmp_path, monkeypatch)
+    run()
+    rows = session.query(Odds).filter_by(game_id=1, bookmaker="dk").all()
+    # One row, carrying OUR quote: the retry found the winner's row and
+    # updated it, which is what the upsert would have done a moment later.
+    assert [(r.moneyline_home, r.moneyline_away) for r in rows] == [(-125, 105)]
+
+
+def test_losing_the_insert_race_does_not_wedge_the_run(tmp_path, monkeypatch):
+    """The session is shared by everything after the fetch -- the next
+    sport, props, pick generation. A failed flush left it in
+    PendingRollbackError and took the whole window run with it."""
+    session, fetched, run, fp = _race_setup(tmp_path, monkeypatch)
+
+    from sqlalchemy import event
+    from sqlalchemy.exc import OperationalError
+
+    def locked(mapper, connection, target):
+        # A flush error that is not the race, so the retry does not apply
+        # -- "database is locked" is the realistic one under WAL.
+        raise OperationalError("INSERT INTO odds", {}, Exception("database is locked"))
+
+    event.listen(Odds, "before_insert", locked)
+    try:
+        run()
+    finally:
+        event.remove(Odds, "before_insert", locked)
+    assert fetched == ["nfl", "mlb"]
+    session.query(StrategyModel).first()   # pick generation's first query

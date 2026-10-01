@@ -2,6 +2,7 @@
 import logging
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from backend.config import season_label, seasons_config
 from backend.collectors.espn import CANCELED, ESPNCollector
@@ -132,19 +133,40 @@ async def fetch_and_store_odds(session: Session, sports: list[str], api_key: str
                         len(unreal),
                         ", ".join(sorted(n for _, n in unreal)[:5]),
                     )
-                # For each event, ensure a game exists (creates from Odds API if needed)
-                for event in odds_data:
-                    day = (event.get("commence_time") or "")[:10]
-                    if ((day, event.get("home_team")) in unreal
-                            or (day, event.get("away_team")) in unreal):
-                        continue
-                    _ensure_game_from_odds(session, sport, event)
-                stored = _store_odds(session, sport, odds_data, skipped=unreal)
+                # One retry, from the data already fetched -- no second API
+                # call. odds has a unique (game, bookmaker) index, so a
+                # concurrent writer (a manual refresh during a scheduled run)
+                # committing the same NEW book between our lookup and our
+                # flush raises IntegrityError. After the rollback the
+                # retry's lookup finds that row and updates it, which is what
+                # the upsert would have done a moment later anyway.
+                for attempt in (1, 2):
+                    try:
+                        # For each event, ensure a game exists (creates from Odds API if needed)
+                        for event in odds_data:
+                            day = (event.get("commence_time") or "")[:10]
+                            if ((day, event.get("home_team")) in unreal
+                                    or (day, event.get("away_team")) in unreal):
+                                continue
+                            _ensure_game_from_odds(session, sport, event)
+                        stored = _store_odds(session, sport, odds_data, skipped=unreal)
+                        break
+                    except IntegrityError:
+                        session.rollback()
+                        if attempt == 2:
+                            raise
+                        logger.warning("%s: odds insert lost a race with another "
+                                       "writer; retrying once", sport)
                 total += stored
                 logger.info(f"Stored odds for {stored} {sport} events (remaining: {collector.requests_remaining})")
             except BudgetExhaustedError:
                 raise
             except Exception as e:
+                # The session is shared with everything after this fetch --
+                # the next sport, props, pick generation. Left un-rolled-back
+                # after a failed flush it raises PendingRollbackError on every
+                # later statement, and one sport's failure takes the run.
+                session.rollback()
                 logger.warning(
                     "Odds API fetch failed for %s: %s: %s",
                     sport, type(e).__name__, redact_api_key(str(e)),
@@ -205,6 +227,8 @@ async def fetch_and_store_props(session: Session, sports: list[str], api_key: st
             except BudgetExhaustedError:
                 raise
             except Exception as e:
+                # Same shared session as the odds fetch above; see there.
+                session.rollback()
                 logger.warning(
                     "Props fetch failed for %s: %s: %s",
                     sport, type(e).__name__, redact_api_key(str(e)),
