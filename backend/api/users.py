@@ -11,6 +11,7 @@ from backend.pipeline import paper_settlement
 from backend.pipeline.paper_settlement import settle_parlays
 from backend.paper import pricing
 from backend.paper.pricing import PricingError
+from backend.pipeline.team_stats import COMBAT_SPORTS
 from backend.analysis.paper_bets import player_bets
 from backend.analysis.scorecard import summarize, effective_bets
 from backend.digest.record import emailed_bets
@@ -155,6 +156,49 @@ def balance_of(session, user) -> float:
     return user.starting_balance + straight + parlays
 
 
+def open_stakes(session, user) -> float:
+    """Stake riding on bets that have not settled yet.
+
+    A straight bet's or parlay's stake only reaches `balance_of` as the
+    payout when it settles, so until then it is in neither number. Parlay
+    legs carry stake 0 and are excluded like they are there.
+    """
+    straight = (session.query(func.coalesce(func.sum(PaperPick.stake), 0.0))
+                .filter(PaperPick.user_id == user.id, PaperPick.parlay_id.is_(None),
+                        PaperPick.result.is_(None))
+                .scalar())
+    parlays = (session.query(func.coalesce(func.sum(Parlay.stake), 0.0))
+               .filter(Parlay.user_id == user.id, Parlay.result.is_(None)).scalar())
+    return straight + parlays
+
+
+def available_of(session, user) -> float:
+    """What a player can still stake: settled balance minus open stakes.
+
+    The bet checks used `balance_of` alone, so a $10,000 bankroll could
+    place any number of $10,000 bets while the games were still to play.
+    `balance_of` stays the settled number the leaderboard ranks on.
+    """
+    return balance_of(session, user) - open_stakes(session, user)
+
+
+def _event_key(session, game_id: int):
+    """What makes two parlay legs the same event.
+
+    The game row, except in combat: one bout is sometimes stored as two
+    games at different dates, with the two sources disagreeing about who
+    is "home" ("Kape vs Van" at 2026-12-26 and 2027-06-30), and a parlay
+    keyed on the row would price one fighter's win as two independent
+    legs. A bout is its two fighters, in either order. Team sports keep
+    the row: the same two teams on consecutive days are two real games.
+    """
+    game = session.get(Game, game_id)
+    if game is not None and game.sport in COMBAT_SPORTS:
+        return ("bout", game.sport,
+                frozenset((game.home_team_id, game.away_team_id)))
+    return game_id
+
+
 def _open_for_betting(game) -> bool:
     """See backend.paper.pricing.open_for_betting -- the one definition."""
     return pricing.open_for_betting(game)
@@ -179,6 +223,7 @@ def list_users(request: Request):
                 "has_pin": u.pin_hash is not None,
                 "starting_balance": u.starting_balance,
                 "current_balance": round(current_balance, 2),
+                "available_balance": round(available_of(session, u), 2),
                 "total_wagered": round(total_wagered, 2),
                 "profit": profit,
                 "roi": round(s.roi * 100, 2) if s.roi is not None else 0,
@@ -365,6 +410,7 @@ def get_user(request: Request, user_id: int):
             "has_pin": user.pin_hash is not None,
             "starting_balance": user.starting_balance,
             "current_balance": round(current_balance, 2),
+            "available_balance": round(available_of(session, user), 2),
             "total_wagered": round(total_wagered, 2),
             "profit": profit,
             "roi": round(s.roi * 100, 2) if s.roi is not None else 0,
@@ -388,9 +434,9 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        current_balance = balance_of(session, user)
+        available = available_of(session, user)
 
-        if bet.stake > current_balance:
+        if bet.stake > available:
             raise HTTPException(status_code=400, detail="Insufficient balance")
         if bet.stake <= 0:
             raise HTTPException(status_code=400, detail="Stake must be positive")
@@ -438,7 +484,7 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
             "id": pick.id,
             "result": None,
             "payout": None,
-            "new_balance": round(current_balance, 2),
+            "new_balance": round(available - bet.stake, 2),
             **{k: v for k, v in quote.as_dict().items()
                if k in ("pick_value", "odds", "line", "quoted_at")},
         }
@@ -514,9 +560,9 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
         # market) for a prop leg -- the side/outcome is deliberately left out
         # of the key so both sides of one market collide.
         market_keys = [
-            ("prop", leg.game_id, leg.prop_player, leg.prop_market)
+            ("prop", _event_key(session, leg.game_id), leg.prop_player, leg.prop_market)
             if leg.pick_type == "prop"
-            else ("game", leg.game_id, leg.pick_type)
+            else ("game", _event_key(session, leg.game_id), leg.pick_type)
             for leg in body.legs
         ]
         if len(set(market_keys)) != len(market_keys):
@@ -524,8 +570,8 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
                                  detail="A parlay can't have two legs on the same market.")
 
         # Check balance
-        current_balance = balance_of(session, user)
-        if body.stake > current_balance:
+        available = available_of(session, user)
+        if body.stake > available:
             raise HTTPException(status_code=400, detail="Insufficient balance")
 
         # Price every leg before creating the Parlay, so a refusal writes nothing.
@@ -594,7 +640,7 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
             "potential_payout": round(body.stake * (combined_decimal - 1), 2),
             "result": parlay.result,
             "payout": parlay_payout,
-            "new_balance": round(current_balance + (parlay_payout or 0), 2),
+            "new_balance": round(available - body.stake, 2),
         }
     finally:
         session.close()

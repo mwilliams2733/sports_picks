@@ -297,31 +297,73 @@ def test_place_pick_exceeding_balance_rejected():
     assert response.json()["detail"] == "Insufficient balance"
 
 
-def test_pending_stakes_are_not_reserved():
-    # CHARACTERIZATION (known bug, see plans/README.md): place_pick computes
-    # "current balance" from settled payouts only (users.py:181-183) and never
-    # subtracts stakes on pending (unsettled) picks. So five separate $10,000
-    # stakes on a scheduled game for a user with a $10,000 starting balance all
-    # succeed, and the reported balance never drops. After the bankroll-
-    # reservation fix, picks 2-5 must return 400 (insufficient balance) and
-    # this assertion must be inverted.
+def _bet(client, user_id, game_id, stake, side="HOME"):
+    return client.post(f"/users/{user_id}/picks", json={
+        "game_id": game_id, "pick_type": "moneyline", "side": side, "stake": stake})
+
+
+def _parlay(client, user_id, game_ids, stake):
+    return client.post(f"/users/{user_id}/parlay", json={
+        "stake": stake,
+        "legs": [{"game_id": g, "pick_type": "moneyline", "side": "HOME"}
+                 for g in game_ids]})
+
+
+def test_an_open_stake_is_reserved_against_the_next_bet():
+    # Was a pinned bug (characterized in fb49c9e): the balance check counted
+    # settled payouts only, so five $10,000 bets on a $10,000 bankroll all
+    # went through while every game was still to play.
     app = create_app(":memory:")
     client = TestClient(app, headers=ALL_HEADERS)
     game_ids = _seed_games(client, [{"status": "scheduled"}])
     user_id = _make_user(client)
 
-    for _ in range(5):
-        response = client.post(f"/users/{user_id}/picks", json={
-            "game_id": game_ids[0],
-            "pick_type": "moneyline",
-            "side": "HOME",
-            "stake": 10000,
-        })
-        assert response.status_code == 200
+    first = _bet(client, user_id, game_ids[0], 6000)
+    assert first.status_code == 200
+    assert first.json()["new_balance"] == 4000.0
 
-    get_response = client.get(f"/users/{user_id}")
-    assert get_response.status_code == 200
-    assert get_response.json()["current_balance"] == 10000.0
+    second = _bet(client, user_id, game_ids[0], 4001)
+    assert second.status_code == 400
+    assert second.json()["detail"] == "Insufficient balance"
+    assert _bet(client, user_id, game_ids[0], 4000).status_code == 200
+
+    body = client.get(f"/users/{user_id}").json()
+    # The settled bankroll is untouched by an open bet; what can still be
+    # staked is not.
+    assert body["current_balance"] == 10000.0
+    assert body["available_balance"] == 0.0
+
+
+def test_an_open_parlay_stake_is_reserved_too():
+    app = create_app(":memory:")
+    client = TestClient(app, headers=ALL_HEADERS)
+    game_ids = _seed_games(client, [{"status": "scheduled"}, {"status": "scheduled"}])
+    user_id = _make_user(client)
+
+    placed = _parlay(client, user_id, game_ids, 7000)
+    assert placed.status_code == 200
+    assert placed.json()["new_balance"] == 3000.0
+    assert _bet(client, user_id, game_ids[0], 3001).status_code == 400
+    assert _parlay(client, user_id, game_ids, 3001).status_code == 400
+    listed = {u["id"]: u for u in client.get("/users/").json()}
+    assert listed[user_id]["available_balance"] == 3000.0
+
+
+def test_a_settled_bet_releases_its_stake():
+    app = create_app(":memory:")
+    client = TestClient(app, headers=ALL_HEADERS)
+    game_ids = _seed_games(client, [{"status": "scheduled"}])
+    user_id = _make_user(client)
+    assert _bet(client, user_id, game_ids[0], 1000, side="AWAY").status_code == 200
+    assert client.get(f"/users/{user_id}").json()["available_balance"] == 9000.0
+
+    _finish(client, game_ids[0], home=110, away=100)  # AWAY loses
+    _grade(client)
+
+    body = client.get(f"/users/{user_id}").json()
+    # Lost once, not twice: the stake leaves "open" as the payout lands.
+    assert body["current_balance"] == 9000.0
+    assert body["available_balance"] == 9000.0
 
 
 # --- Step 4: Parlay tests ------------------------------------------------
@@ -393,6 +435,8 @@ def test_a_winning_parlay_reaches_the_balance():
     body = get_response.json()
     assert body["current_balance"] == pytest.approx(11322.31, abs=0.01)
     assert body["profit"] == pytest.approx(1322.31, abs=0.01)
+    # Settled, so its stake is no longer held back from the next bet.
+    assert body["available_balance"] == pytest.approx(11322.31, abs=0.01)
 
 
 def test_a_parlay_settles_when_its_last_leg_finishes():
@@ -424,6 +468,61 @@ def test_a_parlay_settles_when_its_last_leg_finishes():
     parlay = session.get(Parlay, parlay_response.json()["id"])
     assert parlay.result == "win"
     session.close()
+
+
+def _seed_rematch(client, sport, *, mirrored, days_apart=180):
+    """Two scheduled games between the same two teams/fighters.
+
+    For combat this is the date-split twin -- one bout listed at two dates,
+    e.g. "Kape vs Van" at 2026-12-26 and 2027-06-30 in the live db -- and
+    ``mirrored`` lists it with home/away the other way round on the second
+    row, which is how the two sources disagree.
+    """
+    from datetime import timedelta
+    engine = client.app.state.engine
+    Base.metadata.create_all(engine)
+    session = get_session(engine)
+    a = Team(name=f"{sport}-A", abbreviation=f"{sport}A", sport=sport)
+    b = Team(name=f"{sport}-B", abbreviation=f"{sport}B", sport=sport)
+    session.add_all([a, b])
+    session.flush()
+    first = Game(sport=sport, season="2026", date=et_today() + timedelta(days=1),
+                 home_team_id=a.id, away_team_id=b.id, status="scheduled")
+    home, away = (b, a) if mirrored else (a, b)
+    second = Game(sport=sport, season="2026",
+                  date=et_today() + timedelta(days=days_apart),
+                  home_team_id=home.id, away_team_id=away.id, status="scheduled")
+    session.add_all([first, second])
+    session.commit()
+    ids = [first.id, second.id]
+    session.close()
+    for gid in ids:
+        seed_fresh_odds(engine, gid)
+    return ids
+
+
+@pytest.mark.parametrize("sport", ["mma", "boxing"])
+@pytest.mark.parametrize("mirrored", [False, True])
+def test_a_parlay_cannot_carry_one_fight_twice(sport, mirrored):
+    # A combat bout listed at two dates is one event, so combine() would
+    # price one fighter's win as two independent legs.
+    app = create_app(":memory:")
+    client = TestClient(app, headers=ALL_HEADERS)
+    game_ids = _seed_rematch(client, sport, mirrored=mirrored)
+    user_id = _make_user(client)
+    response = _parlay(client, user_id, game_ids, 100)
+    assert response.status_code == 400
+    assert response.json()["detail"] == "A parlay can't have two legs on the same market."
+    assert client.get(f"/users/{user_id}").json()["available_balance"] == 10000.0
+
+
+def test_a_team_sport_rematch_is_two_games():
+    # MLB plays the same opponent on consecutive days: two real events.
+    app = create_app(":memory:")
+    client = TestClient(app, headers=ALL_HEADERS)
+    game_ids = _seed_rematch(client, "mlb", mirrored=False, days_apart=2)
+    user_id = _make_user(client)
+    assert _parlay(client, user_id, game_ids, 100).status_code == 200
 
 
 def test_parlay_legs_stored_with_zero_stake():

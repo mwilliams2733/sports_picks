@@ -349,6 +349,45 @@ def migrate_odds_spread_total_prices(engine):
                     f"ALTER TABLE odds ADD COLUMN {column} INTEGER"))
 
 
+ODDS_UNIQUE_INDEX = "uq_odds_game_bookmaker"
+
+
+def migrate_odds_one_row_per_book(engine):
+    """Add the one-row-per-(game, bookmaker) unique index to ``odds``.
+
+    `Odds` is upserted per book, but nothing enforced it, and the game-merge
+    scripts could leave two rows for one book on the survivor -- one frozen,
+    both counted by every consensus (see `backend.pipeline.odds_rows`).
+
+    Refuses to delete anything itself. If duplicates are present the index
+    cannot be built, so this logs a warning naming the cleanup script and
+    returns, leaving the app able to start; once
+    ``backend.scripts.dedupe_odds_rows --apply`` has run, the next start
+    (or that script itself) creates it.
+    """
+    import logging
+    from sqlalchemy import inspect as sa_inspect
+    inspector = sa_inspect(engine)
+    if "odds" not in inspector.get_table_names():
+        return
+    if any(ix["name"] == ODDS_UNIQUE_INDEX for ix in inspector.get_indexes("odds")):
+        return
+    with engine.begin() as conn:
+        duplicated = conn.execute(text(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM odds GROUP BY game_id, bookmaker "
+            "HAVING COUNT(*) > 1)")).scalar()
+        if duplicated:
+            logging.getLogger(__name__).warning(
+                "odds: %d (game, bookmaker) pairs have more than one row, so the "
+                "%s unique index was not created. Run "
+                "`python -m backend.scripts.dedupe_odds_rows --db <path> --apply`.",
+                duplicated, ODDS_UNIQUE_INDEX)
+            return
+        conn.execute(text(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS {ODDS_UNIQUE_INDEX} "
+            "ON odds (game_id, bookmaker)"))
+
+
 def migrate_team_box_scores(engine):
     """Create team_box_scores if missing.
 
@@ -489,6 +528,7 @@ MIGRATIONS = (
     migrate_game_odds_api_id,
     migrate_pick_suggested_unit_size,
     migrate_odds_spread_total_prices,
+    migrate_odds_one_row_per_book,
     migrate_team_box_scores,
     migrate_emailed_pick_confidence,
     migrate_user_pin,

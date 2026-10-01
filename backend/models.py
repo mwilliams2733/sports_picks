@@ -139,6 +139,13 @@ class Odds(Base):
     under_price = Column(Integer, nullable=True)
     timestamp = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
 
+    #: One current price per book per game. Existing databases get it from
+    #: `backend.database.migrate_odds_one_row_per_book`; see
+    #: `backend.pipeline.odds_rows` for why it was not true before.
+    __table_args__ = (
+        Index("uq_odds_game_bookmaker", "game_id", "bookmaker", unique=True),
+    )
+
 class LineSnapshot(Base):
     """One observed price for one bookmaker on one game, never overwritten.
 

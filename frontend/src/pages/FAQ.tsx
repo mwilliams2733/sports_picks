@@ -288,12 +288,12 @@ const SECTIONS: FAQSection[] = [
       {
         question: 'How do I place a pick?',
         answer:
-          'Click your name on the leaderboard to open your profile. In the "Place a Pick" form, select a game, choose your bet type (Moneyline, Spread, or Over/Under), and set your stake. The odds auto-fill based on the game and bet type, but you can adjust them. Click "Place Pick" to submit. Your balance is reduced by the stake amount. Bets close when the game starts.',
+          'Click your name on the leaderboard to open your profile. In the "Place a Pick" form, select a game and bet type, pick one of the sides on offer, and set your stake. The price comes from the sportsbooks and is checked again when you place the bet, so it can move slightly -- you cannot edit it. The button shows the bet and its price (for example "Place HOME ML -110"); click it to submit. The stake comes out of your Available balance straight away; the leaderboard balance only changes when the bet settles. Bets close when the game starts.',
       },
       {
         question: 'How does grading work?',
         answer:
-          'Bets close when the game starts. After games finish, picks are graded automatically each morning (the owner can also grade on demand). Wins pay at the price you took; pushes return your stake. Parlays settle once every leg is graded; a leg whose game is postponed or canceled keeps the parlay pending.',
+          'Bets close when the game starts. After games finish, picks are graded automatically each morning (the owner can also grade on demand). Wins pay at the price you took; pushes return your stake. A bet that can never be graded -- its game is canceled or postponed, or a player prop has no stat line -- is settled as a push two days after the game date (seven days if the game is still listed as scheduled, in case its result is just late), so your stake comes back. Parlays settle once every leg is graded, and a parlay with a pushed leg pushes.',
       },
       {
         question: 'How is the leaderboard ranked?',
