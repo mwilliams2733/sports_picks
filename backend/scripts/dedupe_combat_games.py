@@ -56,6 +56,7 @@ from backend.collectors.ufc import normalize_name
 from backend.database import get_engine, get_session, run_migrations
 from backend.models import (EloHistory, EloRating, Game, LineSnapshot, Odds,
                             PickModel, PickResult, Team)
+from backend.pipeline.odds_rows import drop_odds_collisions
 from backend.time_utils import et_today
 
 logger = logging.getLogger(__name__)
@@ -403,6 +404,7 @@ def merge_date_splits(session, sport: str = "mma", *,
     """Move the market onto the surviving row and drop the emptied twin."""
     summary = {"sport": sport, "merged": 0, "odds_moved": 0,
                "snapshots_moved": 0, "mirrored": 0, "refused": 0,
+               "odds_collisions_dropped": 0,
                "refused_ids": []}
     for group in date_split_groups(session, sport):
         if group.key[1] == "conflict":
@@ -422,6 +424,11 @@ def merge_date_splits(session, sport: str = "mma", *,
             mirrored = _is_mirrored(keep_game, drop_game)
             if mirrored:
                 summary["mirrored"] += 1
+            # Same book on both rows: keep the newer quote, before the
+            # reparent below, or the survivor would carry that book twice
+            # (and the unique index refuses the UPDATE).
+            summary["odds_collisions_dropped"] += drop_odds_collisions(
+                session, drop_id, group.keep)
             # Reparented, not deleted: the price this bout was offered at is
             # the only record of what the market thought, and the surviving
             # row is the one everything else now points at. Swapped in the

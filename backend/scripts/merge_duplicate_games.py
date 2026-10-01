@@ -66,6 +66,7 @@ from collections import Counter
 from sqlalchemy import func
 
 from backend.database import get_engine, get_session, run_migrations
+from backend.pipeline.odds_rows import drop_odds_collisions
 from backend.models import (
     EloHistory, Game, Odds, PickModel, PlayerProp, TeamStat,
 )
@@ -124,6 +125,11 @@ def _absorb(session, survivor: Game, loser: Game) -> None:
     if survivor.start_time is None:
         survivor.start_time = loser.start_time
 
+    # A book quoted on both rows would land twice on the survivor: one row
+    # the collector keeps updating, one frozen, and every consensus counting
+    # that book double. The newer quote wins; the unique index now refuses
+    # the duplicate outright, so this has to run before the move.
+    drop_odds_collisions(session, loser.id, survivor.id)
     for model in REPOINTED:
         for row in session.query(model).filter(model.game_id == loser.id).all():
             row.game_id = survivor.id
