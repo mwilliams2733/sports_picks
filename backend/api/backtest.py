@@ -72,7 +72,11 @@ def _promotable(strategy_type: str) -> set[str]:
     props = {n for n, cls in STRATEGY_MAP.items() if cls is PropValueStrategy}
     if strategy_type == "prop":
         return props
-    return set(STRATEGY_MAP) - props - {"combat_sports"}
+    if strategy_type == "game":
+        return set(STRATEGY_MAP) - props - {"combat_sports"}
+    # Any other kind (create_strategy accepts any string) is read by no
+    # consumer: promoted, it would be an active row nothing ever runs.
+    return set()
 
 
 @router.patch("/strategies/{strategy_id}/promote", dependencies=[Depends(require_owner)])

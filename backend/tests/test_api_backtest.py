@@ -117,6 +117,16 @@ def test_a_strategy_the_pipeline_cannot_run_is_refused():
     assert _active(client) == {"ensemble", "prop_value"}
 
 
+def test_an_unknown_strategy_kind_cannot_be_promoted():
+    client = _client()
+    _seed_live_shape(client)
+    made = client.post("/backtest/strategies", json={
+        "name": "ensemble", "description": "d", "config": {},
+        "strategy_type": "gmae"}).json()
+    assert client.patch(f"/backtest/strategies/{made['id']}/promote").status_code == 400
+    assert _active(client) == {"ensemble", "prop_value"}
+
+
 def test_a_game_model_cannot_be_promoted_as_the_prop_strategy():
     client = _client()
     _seed_live_shape(client)
