@@ -58,13 +58,55 @@ def update_strategy(request: Request, strategy_id: int, body: StrategyUpdate):
     finally:
         session.close()
 
+def _promotable(strategy_type: str) -> set[str]:
+    """Strategy names the pipeline can actually run as the active one of a kind.
+
+    Derived from `STRATEGY_MAP`, the table `generate_and_store_picks` looks
+    names up in (an unknown name returns 0 picks, silently). `combat_sports`
+    is excluded: it is routed by name for combat games only and must stay
+    inactive, or it wins the `.first()` "the active game strategy" lookup and
+    is used for every sport (see `database.migrate_combat_sports_strategy`).
+    """
+    from backend.analysis.variants.prop_value import PropValueStrategy
+    from backend.pipeline.pick_generator import STRATEGY_MAP
+    props = {n for n, cls in STRATEGY_MAP.items() if cls is PropValueStrategy}
+    if strategy_type == "prop":
+        return props
+    if strategy_type == "game":
+        return set(STRATEGY_MAP) - props - {"combat_sports"}
+    # Any other kind (create_strategy accepts any string) is read by no
+    # consumer: promoted, it would be an active row nothing ever runs.
+    return set()
+
+
 @router.patch("/strategies/{strategy_id}/promote", dependencies=[Depends(require_owner)])
 def promote_strategy(request: Request, strategy_id: int):
+    """Make this the active strategy of its kind (game or prop).
+
+    Every consumer -- the scheduler, /pipeline, the prop pipeline,
+    fetch_odds_now -- takes "the" active strategy of a ``strategy_type`` and
+    ignores ``sport``, so that is the scope deactivated here. This used to
+    deactivate by ``sport`` instead, and with both live strategies at sport
+    NULL, promoting the prop strategy switched the game strategy off (no game
+    picks, no digest) and vice versa.
+    """
     session = get_session(request.app.state.engine)
     try:
         strat = session.get(StrategyModel, strategy_id)
         if not strat: raise HTTPException(status_code=404)
-        session.query(StrategyModel).filter(StrategyModel.sport == strat.sport).update({"is_active": False})
+        allowed = _promotable(strat.strategy_type)
+        if strat.name not in allowed:
+            # One rule (`_promotable`); the name only chooses the message.
+            if strat.name == "combat_sports":
+                detail = ("combat_sports is routed automatically for mma/boxing and must "
+                          "stay inactive; promoting it would make it the game strategy "
+                          "for every sport")
+            else:
+                detail = (f"{strat.name!r} is not a {strat.strategy_type} model the "
+                          f"pipeline can run; promotable: {', '.join(sorted(allowed))}")
+            raise HTTPException(status_code=400, detail=detail)
+        session.query(StrategyModel).filter(
+            StrategyModel.strategy_type == strat.strategy_type).update({"is_active": False})
         strat.is_active = True
         session.commit()
         return {"id": strat.id, "name": strat.name, "is_active": True}
