@@ -31,6 +31,17 @@ logger = logging.getLogger(__name__)
 from backend.time_utils import ET, et_today  # noqa: F401  (ET re-exported)
 LEAD_TIME = timedelta(hours=2)
 
+#: How often `refresh_prices` runs. A paper bet is priced only from a quote
+#: under `pricing.MAX_QUOTE_AGE` old, so this is half of that: one missed
+#: run (the laptop asleep, an API hiccup) still leaves a bettable price.
+#: Derived, so tightening the pricing rule tightens the refresh with it.
+def _price_refresh_hours() -> int:
+    from backend.paper.pricing import MAX_QUOTE_AGE
+    return max(1, int(MAX_QUOTE_AGE.total_seconds() // 3600) // 2)
+
+
+PRICE_REFRESH_HOURS = _price_refresh_hours()
+
 
 def _as_utc(dt: datetime) -> datetime:
     """Normalize a possibly-naive datetime to UTC-aware.
@@ -139,6 +150,14 @@ def configure_scheduler(config: dict, engine) -> BackgroundScheduler:
         'cron', hour=10, minute=0, id='scout_retry_10', replace_existing=True,
         **late_ok,
     )
+    # Every PRICE_REFRESH_HOURS on the half hour, clear of the on-the-hour
+    # scout, retries and digest. No catch-up after a sleep: one fresh run is
+    # all a missed one would have bought.
+    scheduler.add_job(
+        lambda: refresh_prices(config, engine),
+        'cron', hour=f'*/{PRICE_REFRESH_HOURS}', minute=30, id='price_refresh',
+        replace_existing=True, coalesce=True, misfire_grace_time=15 * 60,
+    )
     from backend.pipeline.recalibration_job import run_recalibration
     scheduler.add_job(
         lambda: run_recalibration(config["database_path"]),
@@ -188,6 +207,67 @@ def run_pipeline(config_path: str = "config.yaml"):
             time.sleep(60)
     except KeyboardInterrupt:
         scheduler.shutdown()
+
+
+def refresh_prices(config: dict, engine) -> list[str]:
+    """Re-fetch game prices so the Paper Trading page always has a live quote.
+
+    Prices otherwise come from the 8am scout and the window jobs ~2h before
+    each game, so for most of a day every quote on file was past
+    `pricing.MAX_QUOTE_AGE` and could not be bet (owner, 2026-10-01). This
+    runs every `PRICE_REFRESH_HOURS` for each in-season sport with a game
+    still scheduled today; one Odds API call per sport also refreshes that
+    sport's later games. Measured 2026-10-02 from requests_remaining: 3
+    credits a call (1 for boxing/mma, moneyline only), so at most ~5 sports
+    x 8 runs x 3 = 120 a day against a 600 daily target.
+
+    Prices only. Picks stay with the scout and the windows, so the pick
+    version history and the digest are unchanged by it. Every fetch also
+    appends to `line_snapshots` through the usual path, which gives the
+    closing-line series more depth as a side effect.
+
+    Failures are logged, never raised into APScheduler.
+    """
+    api_key = config.get("odds_api_key")
+    if not api_key:
+        return []
+    session = get_session(engine)
+    try:
+        sports = _sports_still_to_play(session, config, et_today(),
+                                       datetime.now(timezone.utc))
+        if not sports:
+            return []
+        asyncio.run(fetch_and_store_odds(
+            session, sports, api_key,
+            budget=config.get("odds_budget", DEFAULT_BUDGET)))
+        logger.info("Price refresh: %s", ", ".join(sports))
+        return sports
+    except Exception:
+        logger.exception("Price refresh failed")
+        return []
+    finally:
+        session.close()
+
+
+def _sports_still_to_play(session, config: dict, day: date, now: datetime) -> list[str]:
+    """In-season sports with a game on ``day`` that has not started.
+
+    Stricter than `slate_sports`: a game stays "scheduled" until the next
+    morning's grading pass flips it to final, so a sport whose games all
+    finished at 3pm would otherwise be fetched -- and billed -- on every
+    refresh until midnight. A game with no start time is treated as still to
+    play, the project-wide convention (`pricing.open_for_betting`).
+    """
+    from backend.time_utils import game_start_utc
+    active = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]
+    live = set()
+    for game in (session.query(Game)
+                 .filter(Game.sport.in_(active), Game.date == day,
+                         Game.status == "scheduled").all()):
+        start = game_start_utc(game)
+        if start is None or start > now:
+            live.add(game.sport)
+    return [s for s in active if s in live]
 
 
 def windowless_sports(active_sports) -> list[str]:

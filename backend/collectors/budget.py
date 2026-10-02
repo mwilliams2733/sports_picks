@@ -48,9 +48,20 @@ def check_budget(session: Session, budget: dict) -> BudgetStatus:
 
 
 def record_api_call(session: Session, endpoint: str, sport: str,
-                    requests_remaining: int | None = None) -> None:
+                    requests_remaining: int | None = None,
+                    credits_used: int | None = None) -> None:
+    """Log one Odds API call at what it actually cost.
+
+    ``credits_used`` is the API's own ``x-requests-last`` for the call. This
+    used to be hardcoded to 1, but an odds call costs 3 (one per market), a
+    props call 3-4 and an events call 0 (measured 2026-10-02), so
+    `check_budget`, which sums this column, undercounted real spend ~3x.
+    A missing header still falls back to 1, the old assumption.
+    """
+    if credits_used is None:
+        credits_used = 1
     session.add(ApiUsage(
-        endpoint=endpoint, sport=sport, credits_used=1,
+        endpoint=endpoint, sport=sport, credits_used=credits_used,
         requests_remaining=requests_remaining,
         created_at=datetime.now(tz=timezone.utc),
     ))

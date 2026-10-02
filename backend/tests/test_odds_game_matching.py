@@ -280,7 +280,7 @@ async def test_the_skipped_set_reaches_store_odds(session, monkeypatch):
               _speculative_event("Joshua", "Dubois")]
 
     class _Collector:
-        requests_remaining = 100
+        requests_remaining, requests_last = 100, 3
         def __init__(self, key): pass
         async def fetch_odds(self, sport): return events
         async def close(self): return None

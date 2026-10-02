@@ -76,6 +76,15 @@ class OddsAPICollector:
         self.api_key = api_key
         self.client = httpx.AsyncClient(timeout=30.0)
         self.requests_remaining: int | None = None
+        #: What the most recent call cost, from ``x-requests-last``. None
+        #: when the header is absent -- unknown, not free.
+        self.requests_last: int | None = None
+
+    def _read_usage(self, response) -> None:
+        """Credit headers from a response: what is left and what this call cost."""
+        self.requests_remaining = int(response.headers.get("x-requests-remaining", 0))
+        last = response.headers.get("x-requests-last")
+        self.requests_last = int(last) if last is not None else None
 
     async def fetch_odds(self, sport: str) -> list[dict]:
         sport_key = SPORT_KEYS.get(sport)
@@ -92,7 +101,7 @@ class OddsAPICollector:
         }
         response = await self.client.get(url, params=params)
         response.raise_for_status()
-        self.requests_remaining = int(response.headers.get("x-requests-remaining", 0))
+        self._read_usage(response)
         raw = response.json()
         results = []
         for event in raw:
@@ -155,7 +164,7 @@ class OddsAPICollector:
         params = {"apiKey": self.api_key}
         response = await self.client.get(url, params=params)
         response.raise_for_status()
-        self.requests_remaining = int(response.headers.get("x-requests-remaining", 0))
+        self._read_usage(response)
         return response.json()
 
     async def fetch_player_props(self, sport: str, event_id: str, markets: list[str] | None = None) -> list[dict]:
@@ -176,7 +185,7 @@ class OddsAPICollector:
         }
         response = await self.client.get(url, params=params)
         response.raise_for_status()
-        self.requests_remaining = int(response.headers.get("x-requests-remaining", 0))
+        self._read_usage(response)
         data = response.json()
 
         props = []
