@@ -27,6 +27,7 @@ def test_configure_scheduler_registers_expected_cron_jobs():
             "scout_retry_9",
             "scout_retry_10",
             "recalibration",
+            "price_refresh",
         }
         # Cron triggers — verify the hours match what the deployment expects.
         hours_by_id = {j.id: str(j.trigger) for j in scheduler.get_jobs()}
