@@ -283,7 +283,7 @@ def _race_setup(tmp_path, monkeypatch):
     fetched = []
 
     class FakeCollector:
-        requests_remaining = 100
+        requests_remaining, requests_last = 100, 3
 
         def __init__(self, key):
             pass

@@ -121,7 +121,8 @@ async def fetch_and_store_odds(session: Session, sports: list[str], api_key: str
                         logger.warning(f"Budget reserve exhausted, stopping odds fetch for {sport}")
                         break
                 odds_data = await collector.fetch_odds(sport)
-                record_api_call(session, "odds", sport, collector.requests_remaining)
+                record_api_call(session, "odds", sport, collector.requests_remaining,
+                                credits_used=collector.requests_last)
                 # Futures markets arrive looking exactly like fixtures. A
                 # competitor facing several different opponents at one time
                 # cannot be a schedule, so no game is created for any of them
@@ -200,7 +201,8 @@ async def fetch_and_store_props(session: Session, sports: list[str], api_key: st
                         summary = get_credit_summary(session, budget)
                         raise BudgetExhaustedError(summary["monthly_used"], budget["monthly_limit"], summary["daily_used"])
                 events = await collector.fetch_events(sport)
-                record_api_call(session, "events", sport, collector.requests_remaining)
+                record_api_call(session, "events", sport, collector.requests_remaining,
+                                credits_used=collector.requests_last)
                 for event in events:
                     event_id = event.get("id")
                     if not event_id:
@@ -218,7 +220,8 @@ async def fetch_and_store_props(session: Session, sports: list[str], api_key: st
                             logger.warning(f"Budget limit reached, stopping prop fetch for {sport}")
                             break
                     props = await collector.fetch_player_props(sport, event_id)
-                    record_api_call(session, "player_props", sport, collector.requests_remaining)
+                    record_api_call(session, "player_props", sport, collector.requests_remaining,
+                                    credits_used=collector.requests_last)
                     if not props:
                         continue
                     stored = _store_props(session, game.id, props)
