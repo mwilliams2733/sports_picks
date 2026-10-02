@@ -233,8 +233,8 @@ def refresh_prices(config: dict, engine) -> list[str]:
         return []
     session = get_session(engine)
     try:
-        active = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]
-        sports = slate_sports(session, active, et_today())
+        sports = _sports_still_to_play(session, config, et_today(),
+                                       datetime.now(timezone.utc))
         if not sports:
             return []
         asyncio.run(fetch_and_store_odds(
@@ -247,6 +247,27 @@ def refresh_prices(config: dict, engine) -> list[str]:
         return []
     finally:
         session.close()
+
+
+def _sports_still_to_play(session, config: dict, day: date, now: datetime) -> list[str]:
+    """In-season sports with a game on ``day`` that has not started.
+
+    Stricter than `slate_sports`: a game stays "scheduled" until the next
+    morning's grading pass flips it to final, so a sport whose games all
+    finished at 3pm would otherwise be fetched -- and billed -- on every
+    refresh until midnight. A game with no start time is treated as still to
+    play, the project-wide convention (`pricing.open_for_betting`).
+    """
+    from backend.time_utils import game_start_utc
+    active = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]
+    live = set()
+    for game in (session.query(Game)
+                 .filter(Game.sport.in_(active), Game.date == day,
+                         Game.status == "scheduled").all()):
+        start = game_start_utc(game)
+        if start is None or start > now:
+            live.add(game.sport)
+    return [s for s in active if s in live]
 
 
 def windowless_sports(active_sports) -> list[str]:

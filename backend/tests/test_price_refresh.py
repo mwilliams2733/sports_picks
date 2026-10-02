@@ -86,6 +86,20 @@ def test_no_api_key_means_no_fetch(engine, calls):
     assert calls["odds"] == []
 
 
+def test_a_sport_whose_games_today_have_all_started_is_not_fetched(engine, calls):
+    # Games stay "scheduled" until the next morning's grading, so status
+    # alone would keep billing a finished slate every 3 hours.
+    s = get_session(engine)
+    nfl = s.query(Game).filter_by(sport="nfl").one()
+    nfl.start_time = datetime.datetime(2000, 1, 1, 17, 0)   # long started
+    mma = s.query(Game).filter_by(sport="mma").one()
+    mma.start_time = datetime.datetime(2999, 1, 1, 17, 0)   # still to come
+    s.commit()
+    s.close()
+    sch.refresh_prices(_config(), engine)
+    assert calls["odds"] == [["mma"]]
+
+
 def test_nothing_to_play_today_spends_no_credit(engine, calls, monkeypatch):
     monkeypatch.setattr(sch, "et_today", lambda: TODAY + datetime.timedelta(days=30))
     sch.refresh_prices(_config(), engine)
