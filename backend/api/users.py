@@ -172,6 +172,25 @@ def open_stakes(session, user) -> float:
     return straight + parlays
 
 
+def hold_bankroll(session, user_id: int) -> None:
+    """Take the database write lock before a bet reads what is available.
+
+    Placing a bet reads `available_of` and then inserts, two steps another
+    request from the same player can interleave (a double-click, two tabs;
+    sync endpoints run in a threadpool): both read $10,000, both stake
+    $6,000. A no-op UPDATE is the transaction's first write, so SQLite hands
+    out its single write lock here -- a second bet waits (the driver's 5s
+    busy timeout) until the first commits or rolls back, then reads a
+    balance that includes it. The lock is database-wide, not per player:
+    every other writer (other players' bets, the scheduler) waits too, for
+    the few milliseconds a bet takes. It must come before the balance read: in WAL a
+    transaction that has already read cannot then take the lock on a newer
+    snapshot. The lock is released when the session commits or closes.
+    """
+    session.query(UserProfile).filter(UserProfile.id == user_id).update(
+        {UserProfile.id: UserProfile.id}, synchronize_session=False)
+
+
 def available_of(session, user) -> float:
     """What a player can still stake: settled balance minus open stakes.
 
@@ -434,12 +453,14 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
+        if bet.stake <= 0:
+            raise HTTPException(status_code=400, detail="Stake must be positive")
+
+        hold_bankroll(session, user_id)
         available = available_of(session, user)
 
         if bet.stake > available:
             raise HTTPException(status_code=400, detail="Insufficient balance")
-        if bet.stake <= 0:
-            raise HTTPException(status_code=400, detail="Stake must be positive")
 
         # Check if the game exists
         game = session.get(Game, bet.game_id)
@@ -570,6 +591,7 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
                                  detail="A parlay can't have two legs on the same market.")
 
         # Check balance
+        hold_bankroll(session, user_id)
         available = available_of(session, user)
         if body.stake > available:
             raise HTTPException(status_code=400, detail="Insufficient balance")
