@@ -85,8 +85,14 @@ def _game_with_pickem_odds(sport: str = "nba") -> GameData:
     )
 
 
-def test_all_variants_agree_on_devigged_edge(monkeypatch):
+def test_all_variants_agree_on_break_even_edge(monkeypatch):
     """Design doc §1f: "Update all edge calculations across strategy variants."
+
+    Since 2026-10-03 every variant measures edge over BREAK-EVEN
+    (`odds_utils.value_edge`), not over the de-vigged fair price. A model
+    that agrees exactly with the fair price at -110/-110 therefore shows
+    -2.38 everywhere: it would lose the vig. The history below explains
+    why the variants must agree at all.
 
     Before plan 003, ensemble already de-vigged (this file's own
     test_edge_uses_vig_adjusted_prob documented that the four other variants
@@ -117,7 +123,7 @@ def test_all_variants_agree_on_devigged_edge(monkeypatch):
     ):
         picks = strategy.predict(game)
         assert len(picks) == 1, f"{strategy.name} produced {len(picks)} picks"
-        assert picks[0].edge_pct == pytest.approx(0.0, abs=0.5), strategy.name
+        assert picks[0].edge_pct == pytest.approx(-2.38, abs=0.05), strategy.name
 
     combat_game = _game_with_pickem_odds(sport="mma")
     combat_game.home_fighter = FighterStats(elo_rating=1500, recent_form_score=0.5,
@@ -129,4 +135,4 @@ def test_all_variants_agree_on_devigged_edge(monkeypatch):
     combat_strategy = CombatSportsStrategy(name="combat_sports", config=config)
     combat_picks = combat_strategy.predict(combat_game)
     assert len(combat_picks) == 1
-    assert combat_picks[0].edge_pct == pytest.approx(0.0, abs=0.5)
+    assert combat_picks[0].edge_pct == pytest.approx(-2.38, abs=0.05)

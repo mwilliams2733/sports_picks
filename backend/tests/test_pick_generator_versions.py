@@ -72,7 +72,10 @@ def test_a_refresh_that_changes_the_price_writes_version_2_with_source_refresh(
     pick_id = _the_pick(db_session).id
 
     # Move the market: same game, different odds on the next run.
-    db_session.query(Odds).filter(Odds.game_id == 1).update({"moneyline_home": -170})
+    # Both sides move. Since 2026-10-03 an edge is over the picked side's own
+    # break-even price, so moving only the other side changes nothing.
+    db_session.query(Odds).filter(Odds.game_id == 1).update(
+        {"moneyline_home": -170, "moneyline_away": 150})
     db_session.commit()
     generate_and_store_picks(db_session, strategy_id=1, target_date=DAY)
 
@@ -210,7 +213,10 @@ def test_a_version_collision_does_not_abort_the_generation_run(
 
     monkeypatch.setattr(pick_versions, "_next_version",
                         lambda session, pick_id: (1, None))
-    db_session.query(Odds).filter(Odds.game_id == 1).update({"moneyline_home": -170})
+    # Both sides move. Since 2026-10-03 an edge is over the picked side's own
+    # break-even price, so moving only the other side changes nothing.
+    db_session.query(Odds).filter(Odds.game_id == 1).update(
+        {"moneyline_home": -170, "moneyline_away": 150})
     db_session.commit()
 
     added = generate_and_store_picks(db_session, strategy_id=1, target_date=DAY)

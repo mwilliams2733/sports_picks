@@ -186,7 +186,7 @@ def _implied_prob_raw(odds: int | None) -> float | None:
 
 
 def _market_prob_novig(pick_type: str, model_prob: float | None,
-                       edge_pct: float | None) -> float | None:
+                       edge_pct: float | None, stored: float | None = None) -> float | None:
     """The fair (no-vig) market probability the pick's edge was measured
     against.
 
@@ -210,6 +210,12 @@ def _market_prob_novig(pick_type: str, model_prob: float | None,
     """
     if pick_type == "prop":
         return None
+    if pick_type == "prop":
+        return None
+    # Stored since 2026-10-03, when edge_pct became "over break-even" and
+    # model - edge stopped meaning model - fair.
+    if stored is not None:
+        return stored
     if pick_type in ("moneyline", "spread", "over_under"):
         if model_prob is None or edge_pct is None:
             return None
@@ -305,7 +311,7 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
                p.pick_type, p.pick_value, p.confidence, p.edge_pct,
                p.odds_at_pick, p.model_prob, p.suggested_unit_size,
                p.rationale_json, p.prop_player, p.prop_market,
-               p.odds_reconstructed, p.tracking_only,
+               p.odds_reconstructed, p.tracking_only, p.market_prob_novig,
                g.sport, g.season, g.date AS game_date, g.start_time,
                g.status AS game_status, g.home_score, g.away_score,
                ht.name AS home_name, at.name AS away_name,
@@ -417,7 +423,8 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
                 "model_prob": r["model_prob"],
                 "edge_pct": r["edge_pct"],
                 "market_prob_novig": _market_prob_novig(
-                    r["pick_type"], r["model_prob"], r["edge_pct"]),
+                    r["pick_type"], r["model_prob"], r["edge_pct"],
+                    stored=r["market_prob_novig"]),
                 "confidence": r["confidence"],
                 "suggested_unit_size": r["suggested_unit_size"],
                 "factors": _factors(r["rationale_json"]),

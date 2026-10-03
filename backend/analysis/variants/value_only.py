@@ -1,6 +1,6 @@
 from backend.analysis.strategy import Strategy
 from backend.analysis.confidence import calculate_confidence
-from backend.analysis.odds_utils import american_to_implied_prob, remove_vig
+from backend.analysis.odds_utils import american_to_implied_prob, remove_vig, value_edge
 from backend.data_types import GameData, Pick
 
 
@@ -31,8 +31,8 @@ class ValueOnlyStrategy(Strategy):
             raw_home = american_to_implied_prob(avg_odds["moneyline_home"])
             raw_away = american_to_implied_prob(avg_odds["moneyline_away"])
             implied_home, implied_away = remove_vig(raw_home, raw_away)
-            home_edge = (home_prob - implied_home) * 100
-            away_edge = (away_prob - implied_away) * 100
+            home_edge = value_edge(home_prob, avg_odds["moneyline_home"])
+            away_edge = value_edge(away_prob, avg_odds["moneyline_away"])
 
             # Only pick the side with the larger edge, and only if it meets threshold
             if home_edge >= min_edge and home_edge >= away_edge:

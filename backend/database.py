@@ -255,6 +255,24 @@ def migrate_pick_tracking_only(engine):
                     "BOOLEAN NOT NULL DEFAULT 0"))
 
 
+def migrate_pick_market_prob_novig(engine):
+    """Add picks.market_prob_novig if missing.
+
+    The de-vigged fair probability of a pick's side. On 2026-10-03 edge_pct
+    moved from ``model - fair`` to ``model - break-even``, so the fair price
+    can no longer be backed out of edge_pct and is stored instead. NULL for
+    every earlier row is correct, since their edge still recovers it.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "picks" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("picks")]
+        if "market_prob_novig" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE picks ADD COLUMN market_prob_novig FLOAT"))
+
+
 def migrate_game_neutral_site(engine):
     """Add games.neutral_site if missing.
 
@@ -552,6 +570,7 @@ MIGRATIONS = (
     migrate_emailed_pick_confidence,
     migrate_user_pin,
     migrate_pick_tracking_only,
+    migrate_pick_market_prob_novig,
 )
 
 #: Migrations that can destroy data. run_migrations passes each of these an
