@@ -70,7 +70,7 @@ anything price-derived.
 | `odds_at_pick` | The American price stored at pick time -- or, for a refreshed game pick, at the time of the **last refresh before kickoff** (see "known traps: picks are refreshed in place"). Null for a small number of legacy rows. |
 | `implied_prob_raw` | What `odds_at_pick` implies, vig included (not de-vigged). Computed with `backend.analysis.odds_utils.american_to_implied_prob`. Blank if `odds_at_pick` is null or not a valid American price. |
 | `model_prob` | The model's own win probability for the pick, where stored. Nullable, especially for props and older rows. |
-| `edge_pct` | The stored edge in percentage points. **See "Known traps": a prop's `edge_pct` is on a completely different, incompatible scale from a game pick's.** |
+| `edge_pct` | The stored edge in percentage points. **For game picks the definition changed on 2026-10-03.** Before that it was `model_prob - market_prob_novig`, which is disagreement with the fair price. From 2026-10-03 it is `model_prob - implied_prob_raw`: the edge over the **break-even** price, after the vig, about 1.7 points smaller for the same pick. `min_edge` (3) and the tier thresholds were kept, so the bar is stricter from that date and stars shift down. **Never pool the two regimes.** **See "Known traps": a prop's `edge_pct` is on a completely different, incompatible scale from a game pick's.** |
 | `market_prob_novig` | See below. |
 | `confidence` | The stored star rating (1-5), still recorded even though stars are hidden from users in the email and frontend (see "known traps"). |
 | `suggested_unit_size` | Kelly stake in units, where one unit is 1% of bankroll. Null for picks made before this was persisted (not a computed 0); 0.0 means the sizer looked at the bet and declined it. **See "known traps": the sizer returned a constant 0.5 internally before 2026-09-20, but that value was never persisted -- every pick before 2026-09-21 is NULL here, not 0.5.** |
@@ -88,8 +88,11 @@ anything price-derived.
 
 ### `market_prob_novig`
 
-This is the fair (no-vig) market probability the pick's `edge_pct` was
-measured against -- not an independently computed number:
+The fair (no-vig) market probability of the pick's side. **From
+2026-10-03 it is stored** (`picks.market_prob_novig`) and exported as-is,
+because `edge_pct` is now measured over break-even and no longer encodes
+it. Rows before then have nothing stored, and it is recovered from
+`edge_pct`, which for them WAS measured against this price:
 
 - **moneyline**: `model_prob - edge_pct / 100`. `edge_pct = (model_prob -
   market_prob) * 100`, so this is arithmetic on the two stored columns, not

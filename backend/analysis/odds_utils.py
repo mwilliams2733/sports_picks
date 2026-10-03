@@ -44,6 +44,22 @@ def remove_vig(home_implied: float, away_implied: float) -> tuple[float, float]:
     return home_implied / total, away_implied / total
 
 
+def value_edge(prob: float, price: int) -> float:
+    """Edge in percentage points over the BREAK-EVEN probability of ``price``.
+
+    Break-even is the raw implied probability, vig included: the win rate at
+    which a bet at this price returns exactly nothing. Until 2026-10-03 every
+    game edge was measured against the de-vigged fair price instead, which
+    is disagreement with the market, not value -- the bet still pays the
+    vig. On 212 recent published moneylines that overstated edge by 1.73
+    points on average, 3.86 at most.
+
+    Every strategy variant calls this, so they cannot disagree about what
+    an edge is.
+    """
+    return (prob - american_to_implied_prob(price)) * 100
+
+
 def no_vig_implied_prob(side: str, home_odds: int, away_odds: int) -> float:
     """Get vig-adjusted implied probability for a specific side.
 

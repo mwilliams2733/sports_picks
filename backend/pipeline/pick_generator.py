@@ -310,6 +310,7 @@ def generate_and_store_picks(session: Session, strategy_id: int,
                         suggested_unit_size=pick.suggested_unit_size,
                         rationale_json=_rationale_json(pick),
                         tracking_only=getattr(pick, "tracking_only", False),
+                        market_prob_novig=getattr(pick, "implied_probability", None),
                         created_at=datetime.now(tz=timezone.utc))
                     session.add(db_pick)
                     record_pick_version(session, db_pick, "insert")
@@ -471,6 +472,7 @@ def _refresh_pick(existing: PickModel, pick) -> None:
     # A market can move between tracked and published (a sport validated
     # mid-season), and the row must say which it is now.
     existing.tracking_only = getattr(pick, "tracking_only", False)
+    existing.market_prob_novig = getattr(pick, "implied_probability", None)
     existing.created_at = datetime.now(timezone.utc)
 
 def _build_game_data(session: Session, game,

@@ -1,4 +1,8 @@
-"""Spread and total edges are measured against the de-vigged market price.
+"""Spread and total picks record the de-vigged market price.
+
+(Since 2026-10-03 the EDGE is measured over break-even instead -- see
+test_vig_adjusted_edge.py. The fair price below is still what
+implied_probability and PickModel.market_prob_novig hold.)
 
 Moneyline edge has always been ``model - fair``, where ``fair`` is the
 quoted price with the vig removed proportionally (`remove_vig`). Spreads
@@ -26,13 +30,12 @@ QUOTES = {"HOME": (-105, -115), "AWAY": (-115, -105),
 
 
 @pytest.mark.parametrize("market", ["spread", "over_under"])
-def test_the_edge_is_against_the_devigged_price(market):
+def test_the_recorded_fair_price_is_devigged(market):
     (pick,) = _picks(_game("nfl"), market)
     fair = _fair(*QUOTES[pick.pick_value.split()[0]])
 
     assert fair != pytest.approx(0.5, abs=0.005), "the fixture must price the sides apart"
     assert pick.implied_probability == pytest.approx(fair, abs=1e-4)
-    assert pick.edge_pct == pytest.approx((pick.model_probability - fair) * 100, abs=0.06)
 
 
 def test_equal_prices_devig_to_one_half():
@@ -57,12 +60,10 @@ def test_a_market_with_one_side_unquoted_makes_no_pick(market, missing):
     assert _picks(game, market) == []
 
 
-def test_the_export_derives_the_fair_price_for_line_picks_like_moneyline():
-    """One definition for every game pick: model_prob - edge_pct / 100.
-
-    A pick from before this change was measured against 0.5, and the same
-    arithmetic recovers 0.5 for it, within the storage rounding.
-    """
+def test_the_export_derives_the_fair_price_for_legacy_line_picks():
+    """With nothing stored, every game pick falls back to model_prob -
+    edge_pct / 100. That is right for picks made before 2026-10-03, whose
+    edge was measured against the fair price (0.5 for line picks)."""
     from backend.scripts.export_picks import _market_prob_novig
 
     assert _market_prob_novig("spread", 0.58, 9.16) == pytest.approx(0.4884)

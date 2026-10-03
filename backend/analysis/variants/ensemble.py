@@ -7,7 +7,8 @@ from scipy.stats import norm
 from backend.analysis.strategy import Strategy
 from backend.analysis.confidence import calculate_confidence
 from backend.analysis.odds_utils import (STANDARD_JUICE,
-                                         american_to_implied_prob, remove_vig)
+                                         american_to_implied_prob, remove_vig,
+                                         value_edge)
 from backend.analysis.calibrated_model import CalibratedModel, extract_features, features_to_array, _stat_value
 from backend.analysis.ml_model import LightGBMModel, MIN_ML_GAMES
 from backend.analysis.kelly import fractional_kelly
@@ -302,13 +303,14 @@ class EnsembleStrategy(Strategy):
         avg_odds = self._average_odds(game)
         if avg_odds is None: return []
 
-        # Moneyline picks — use vig-adjusted implied probabilities
+        # Moneyline picks. Edge is over break-even (`value_edge`); the
+        # de-vigged fair price is kept as implied_probability.
         if avg_odds["moneyline_home"] is not None:
             raw_home = american_to_implied_prob(avg_odds["moneyline_home"])
             raw_away = american_to_implied_prob(avg_odds["moneyline_away"])
             implied_home, implied_away = remove_vig(raw_home, raw_away)
-            home_edge = (home_prob - implied_home) * 100
-            away_edge = (away_prob - implied_away) * 100
+            home_edge = value_edge(home_prob, avg_odds["moneyline_home"])
+            away_edge = value_edge(away_prob, avg_odds["moneyline_away"])
             if _takeable(home_edge, "moneyline", avg_odds["moneyline_home"]):
                 models, available = self._count_agreeing_models(game, "home")
                 picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="HOME ML",
@@ -348,13 +350,14 @@ class EnsembleStrategy(Strategy):
             spread_fallback = None if spread_tracked else STANDARD_JUICE
             home_spread_price = avg_odds.get("spread_home_price") or spread_fallback
             away_spread_price = avg_odds.get("spread_away_price") or spread_fallback
-            # Measured against the de-vigged price, as the moneyline is. One
-            # quoted side cannot be de-vigged, so it makes no pick.
+            # Edge over break-even, as the moneyline. The fair price is
+            # recorded too, and one quoted side cannot be de-vigged, so a
+            # market with one side unquoted makes no pick.
             spread_quoted = home_spread_price is not None and away_spread_price is not None
             if spread_quoted:
                 home_spread_fair, away_spread_fair = _devigged(home_spread_price, away_spread_price)
-                home_spread_edge = (home_cover_prob - home_spread_fair) * 100
-                away_spread_edge = (away_cover_prob - away_spread_fair) * 100
+                home_spread_edge = value_edge(home_cover_prob, home_spread_price)
+                away_spread_edge = value_edge(away_cover_prob, away_spread_price)
             if spread_quoted and _takeable(home_spread_edge, "spread"):
                 models, available = self._count_agreeing_models(game, "home")
                 pick_value = f"HOME {spread_home:+g}"
@@ -430,8 +433,8 @@ class EnsembleStrategy(Strategy):
             totals_quoted = over_price is not None and under_price is not None
             if totals_quoted:
                 over_fair, under_fair = _devigged(over_price, under_price)
-                over_edge = (over_prob - over_fair) * 100
-                under_edge = (under_prob - under_fair) * 100
+                over_edge = value_edge(over_prob, over_price)
+                under_edge = value_edge(under_prob, under_price)
             if totals_quoted and _takeable(over_edge, "over_under"):
                 models, available = self._count_total_agreeing_models(game, True)
                 pick_value = f"Over {ou_line:g}"

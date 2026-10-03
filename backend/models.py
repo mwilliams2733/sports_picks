@@ -259,6 +259,12 @@ class PickModel(Base):
     #: picks filters on `published()` rather than on this column directly.
     tracking_only = Column(Boolean, nullable=False, default=False,
                            server_default="0")
+    #: The de-vigged fair probability of the picked side at pick time.
+    #: Stored since 2026-10-03, when edge_pct moved to "over break-even"
+    #: and stopped being ``model_prob - fair``. NULL before then and for
+    #: props; for an older game pick, ``model_prob - edge_pct / 100``
+    #: recovers it (see export_picks._market_prob_novig).
+    market_prob_novig = Column(Float, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
     game = relationship("Game")
 
