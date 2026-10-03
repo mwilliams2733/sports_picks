@@ -62,7 +62,10 @@ HEALTH_LOG = os.path.join(REPO, "digest_health.log")
 MAX_BYTES = 128 * 1024
 KEEP = 3
 
-_SENT_RE = re.compile(r"Digest sent to (\d+) recipient")
+#: Written by backend/digest/job.py after a real send, dated by its message.
+#: The sender's undated "Digest sent to N recipient(s)" is deliberately not
+#: read: scheduler.log has no timestamps, so nothing in it says which day.
+_SENT_RE = re.compile(r"Digest for (\d{4}-\d{2}-\d{2}) sent to (\d+) recipient")
 _EMPTY_RE = re.compile(r"Digest for (\d{4}-\d{2}-\d{2}) is empty")
 _SLATE_RE = re.compile(r"Morning slate for (\d{4}-\d{2}-\d{2}): (.+?)\s*$")
 #: The empty-day email (added alongside the send bar) DOES send and DOES log
@@ -146,18 +149,17 @@ def digest_lines(lines, target_date) -> list[str]:
     day or yesterday's success reads as today's and the check reports healthy
     every morning forever.
 
-    An "empty" line carries the date it is ABOUT, which is authoritative --
-    a run just after midnight UTC would otherwise be filed under the wrong
-    day. A "sent" line carries no date, so its leading timestamp is used.
+    Both lines carry the date they are ABOUT in the message, which is
+    authoritative -- a run just after midnight UTC would otherwise be filed
+    under the wrong day. This used to date the "sent" line by a leading
+    timestamp, which scheduler.log lines do not have, so no sent digest was
+    ever found (see tests/test_digest_check_real_log.py).
     """
     stamp = target_date.isoformat()
     out = []
     for line in lines:
-        empty = _EMPTY_RE.search(line)
-        if empty:
-            if empty.group(1) == stamp:
-                out.append(line)
-        elif _SENT_RE.search(line) and line.lstrip().startswith(stamp):
+        m = _EMPTY_RE.search(line) or _SENT_RE.search(line)
+        if m and m.group(1) == stamp:
             out.append(line)
     return out
 
@@ -273,6 +275,24 @@ def picks_for(db_path: str, target_date) -> int:
         con.close()
 
 
+def read_logs(path: str) -> list[str]:
+    """`path`'s lines, preceded by its rotated ``.prev`` if one exists.
+
+    start_scheduler.ps1 moves scheduler.log to .prev on every restart, so a
+    restart between the 11:00 ET send and this check hid the morning's lines.
+    On 2026-10-03 a restart at 11:54 ET did exactly that. A missing .prev is
+    normal; a missing current log is still an error.
+    """
+    lines: list[str] = []
+    prev = path + ".prev"
+    if os.path.exists(prev):
+        with open(prev, encoding="utf-8", errors="replace") as fh:
+            lines.extend(fh.readlines())
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        lines.extend(fh.readlines())
+    return lines
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--log", default=DEFAULT_LOG)
@@ -300,8 +320,7 @@ def main(argv=None) -> int:
         return code
 
     try:
-        with open(args.log, encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
+        lines = read_logs(args.log)
     except OSError as e:
         return _emit(f"CANNOT READ LOG {args.log}: {type(e).__name__}", 1)
 

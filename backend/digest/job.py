@@ -105,6 +105,14 @@ def send_daily_digest(config: dict, engine, target_date=None) -> dict:
             api_key=os.environ.get("RESEND_API_KEY"),
             dry_run_path=dry_run_path,
         )
+        # The line check_digest reads, dated by its message. The sender's own
+        # "Digest sent to N recipient(s)" carries no date, and scheduler.log
+        # lines carry no timestamp, so the check could never tell which day
+        # it was about and reported "never-ran" every morning (2026-09-23 to
+        # 2026-10-03). Real sends only: a dry run reached nobody.
+        if result["sent"] and dry_run_path is None:
+            logger.info("Digest for %s sent to %d recipient(s)", target_date,
+                        len(cfg.get("recipients", [])))
         # Only a real send is a record: a dry run reached nobody. Recorded
         # after the send, and a failure here is logged, never raised -- the
         # email has already gone and must not be reported as failed. An

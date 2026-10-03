@@ -24,23 +24,17 @@ from backend.scripts.check_digest import (Outcome, classify, digest_lines,
 
 TODAY = datetime.date(2026, 9, 23)
 
-SENT = ("2026-09-23 11:00:02 INFO:backend.digest.job:"
-        "Digest sent to 4 recipient(s)")
-EMPTY = ("2026-09-23 11:00:02 INFO:backend.digest.job:"
-         "Digest for 2026-09-23 is empty; nothing sent")
-SLATE = ("2026-09-23 08:00:11 INFO:backend.pipeline.scheduler:"
-         "Morning slate for 2026-09-23: mlb, nfl")
-SLATE_EMPTY = ("2026-09-23 08:00:11 INFO:backend.pipeline.scheduler:"
-               "Morning slate for 2026-09-23: nothing scheduled")
-YESTERDAY_SENT = ("2026-09-22 11:00:02 INFO:backend.digest.job:"
-                  "Digest sent to 4 recipient(s)")
-#: Logged by backend/digest/job.py only when EVERY in-season sport with
-#: games generated zero picks -- the scout-fetched-nothing fault. The
-#: empty-day email still sends and still logs SENT, so this marker is how
-#: the health check tells that apart from "picks were generated but none
-#: cleared the bar" (which stays healthy).
-NO_PICKS = ("2026-09-23 11:00:02 INFO:backend.digest.job:"
-           "Digest for 2026-09-23: no picks were generated for any sport")
+# The real scheduler.log format: logging.basicConfig's default, with NO
+# timestamp. These fixtures used to prefix one, which production never
+# writes, and the check passed here while failing every real morning --
+# see test_digest_check_real_log.py.
+SENT = "INFO:backend.digest.job:Digest for 2026-09-23 sent to 4 recipient(s)"
+EMPTY = "INFO:backend.digest.job:Digest for 2026-09-23 is empty; nothing sent"
+SLATE = "INFO:__main__:Morning slate for 2026-09-23: mlb, nfl"
+SLATE_EMPTY = "INFO:__main__:Morning slate for 2026-09-23: nothing scheduled"
+YESTERDAY_SENT = "INFO:backend.digest.job:Digest for 2026-09-22 sent to 4 recipient(s)"
+NO_PICKS = ("INFO:backend.digest.job:"
+            "Digest for 2026-09-23: no picks were generated for any sport")
 
 
 # --- reading the log ------------------------------------------------------
