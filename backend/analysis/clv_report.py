@@ -23,6 +23,17 @@ timestamp -- so the recorded CLV contained the gap between one arbitrary
 book and the field on top of any real movement. Before ``7463de7`` that row
 was frequently an in-play price as well.
 
+**The price is the one first advised, not the last refresh.** A pick is
+refreshed in place until shortly before kickoff, so ``odds_at_pick`` is
+the last refresh -- median 1.7h before the game on 2026-10-03, within the
+hour for 49 of 117 measurable picks -- and usually the very observation the
+close is built from. 92% of the 133 measurable moneylines then read CLV of
+exactly zero: a price compared with itself. `load_samples` measures from
+`pick_versions` version 1 (source "insert", live from 2026-09-30), else the
+as-sent `emailed_picks` price, else nothing. A pick whose side changed after
+first advice is excluded, because the close on record is the final side's.
+The last-refresh figure stays as a labelled diagnostic.
+
 **Absent is never zero.** A pick with no closing price on record is dropped,
 not counted as zero CLV. Counting it drags every average toward "no edge",
 which is the one conclusion a broken pipeline produces by default.
@@ -95,6 +106,15 @@ class ClvSample:
     #: A tracking pick (PickModel.tracking_only): measured, never published.
     #: Reported in its own groups and never pooled with published picks.
     tracking_only: bool = False
+    #: Which price ``clv`` was measured from: "first_advice" (pick_versions
+    #: v1, source "insert"), "emailed" (the as-sent price), or None when
+    #: neither exists, in which case ``clv`` is None too.
+    basis: str | None = None
+    #: CLV from ``odds_at_pick``, the last refresh. Diagnostic only: it is
+    #: structurally near zero, which is why it is not ``clv``.
+    clv_last_refresh: float | None = None
+    #: The first advice was on the other side; excluded, not measured.
+    side_changed: bool = False
 
 
 @dataclass(frozen=True)
@@ -172,6 +192,35 @@ def summarize(samples) -> Summary:
 
 # --- loading --------------------------------------------------------------
 
+def _side(pick_value: str | None) -> str | None:
+    """"HOME" / "AWAY" / "Over" / "Under": the first word of a pick_value."""
+    return pick_value.split()[0] if pick_value else None
+
+
+def first_advice_prices(session, pick_ids) -> dict[int, tuple[str, str, int]]:
+    """``pick_id -> (basis, pick_value, odds)`` for the price first advised.
+
+    pick_versions version 1 when it was written live (source "insert"); a
+    "backfill" version 1 is the final state reconstructed afterwards, so it
+    falls through to the earliest as-sent emailed price. Picks with neither
+    are absent from the result.
+    """
+    from backend.models import EmailedPick, PickVersion
+
+    ids = list(pick_ids) or [-1]
+    out: dict[int, tuple[str, str, int]] = {}
+    for e in (session.query(EmailedPick).filter(EmailedPick.pick_id.in_(ids))
+              .order_by(EmailedPick.sent_at.desc())):
+        # Descending, so the earliest send is written last and wins.
+        out[e.pick_id] = ("emailed", e.pick_value, e.odds)
+    for v in (session.query(PickVersion)
+              .filter(PickVersion.pick_id.in_(ids), PickVersion.version == 1,
+                      PickVersion.source == "insert",
+                      PickVersion.odds_at_pick.isnot(None))):
+        out[v.pick_id] = ("first_advice", v.pick_value, v.odds_at_pick)
+    return out
+
+
 def load_samples(session, *, sport: str | None = None) -> list[ClvSample]:
     """Build a CLV sample for every graded pick with a stored close."""
     from backend.analysis.odds_utils import compute_pick_clv
@@ -183,18 +232,28 @@ def load_samples(session, *, sport: str | None = None) -> list[ClvSample]:
     if sport:
         q = q.filter(Game.sport == sport)
 
-    out: list[ClvSample] = []
-    for pr, pm, game in q.all():
+    rows = q.all()
+    advice = first_advice_prices(session, [pm.id for _, pm, _ in rows])
+
+    def _clv(pm, pr, value, odds):
         clv_pct, clv_points = compute_pick_clv(
-            pm.pick_type, pm.pick_value, pm.odds_at_pick,
-            pr.odds_at_close, pr.line_at_close)
+            pm.pick_type, value, odds, pr.odds_at_close, pr.line_at_close)
         # Exactly one of the two is meaningful per market, and they are in
         # different units -- see PRICE_MARKETS / LINE_MARKETS.
-        clv = clv_pct if pm.pick_type in PRICE_MARKETS else clv_points
+        return clv_pct if pm.pick_type in PRICE_MARKETS else clv_points
+
+    out: list[ClvSample] = []
+    for pr, pm, game in rows:
+        basis, value, odds = advice.get(pm.id, (None, None, None))
+        side_changed = basis is not None and _side(value) != _side(pm.pick_value)
+        clv = None if basis is None or side_changed else _clv(pm, pr, value, odds)
         out.append(ClvSample(pick_id=pm.id, game_id=pm.game_id,
                              sport=game.sport, market=pm.pick_type, clv=clv,
                              reconstructed=bool(pm.odds_reconstructed),
-                             tracking_only=bool(pm.tracking_only)))
+                             tracking_only=bool(pm.tracking_only),
+                             basis=None if side_changed else basis,
+                             clv_last_refresh=_clv(pm, pr, pm.pick_value, pm.odds_at_pick),
+                             side_changed=side_changed))
 
     depths = series_depth(session, {s.game_id for s in out})
     return [replace(s, depth=depths.get(s.game_id, 0)) for s in out]
@@ -232,16 +291,27 @@ def group_report(samples, markets) -> dict[str, Summary]:
 def format_report(samples, *, include_reconstructed: bool) -> str:
     raw = list(samples)
     kept = usable(raw, include_reconstructed=include_reconstructed)
-    no_close = sum(1 for s in raw if s.clv is None)
     recon = sum(1 for s in raw if s.clv is not None and s.reconstructed)
-
+    no_advice = sum(1 for s in raw if s.basis is None and not s.side_changed)
+    flipped = sum(1 for s in raw if s.side_changed)
+    no_close = sum(1 for s in raw if s.basis is not None and s.clv is None)
+    by_basis = {b: sum(1 for s in kept if s.basis == b)
+                for b in ("first_advice", "emailed")}
     out = ["=" * 74, "CLOSING LINE VALUE", "=" * 74, "",
+           "  Measured from the first-advice price (pick_versions v1, else the",
+           "  as-sent email), not the last refresh -- see LAST-REFRESH below.",
+           "",
            f"  graded picks examined     : {len(raw)}",
+           f"  no first-advice price on record: {no_advice}"
+           "   (before 2026-09-30 and never emailed)",
+           f"  side changed after first advice: {flipped}   (excluded)",
            f"  no closing price on record: {no_close}"
            "   (dropped -- absent is not zero)",
            f"  reconstructed odds_at_pick: {recon}"
            f"   ({'included' if include_reconstructed else 'dropped'})",
-           f"  contributing to the report: {len(kept)}", ""]
+           f"  contributing to the report: {len(kept)}"
+           f"   (first advice {by_basis['first_advice']}, emailed {by_basis['emailed']})",
+           ""]
 
     deep = measurable(kept)
     flat = len(kept) - len(deep)
@@ -279,6 +349,18 @@ def format_report(samples, *, include_reconstructed: bool) -> str:
                        f"{s.mean:>+9.3f}{s.median:>+9.3f}{beat}"
                        f"{s.p_value:>9.4f}")
         out.append("")
+
+    last = [s for s in measurable(raw) if s.clv_last_refresh is not None
+            and (include_reconstructed or not s.reconstructed)]
+    if last:
+        zero_share = sum(1 for s in last if s.clv_last_refresh == 0) / len(last)
+        out += ["-" * 74,
+                "LAST-REFRESH CLV -- diagnostic only, structurally near zero",
+                "-" * 74,
+                f"    {len(last)} measurable picks, mean "
+                f"{statistics.fmean(s.clv_last_refresh for s in last):+.3f}, "
+                f"{zero_share:.0%} exactly zero. odds_at_pick is the last",
+                "    refresh, usually the same observation as the close.", ""]
 
     out += [
         "-" * 74,
