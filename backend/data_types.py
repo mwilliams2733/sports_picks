@@ -79,6 +79,8 @@ class Pick:
     odds_at_pick: int
     suggested_unit_size: float = 1.0
     factors: list[PickFactor] = field(default_factory=list)
+    #: Generated to measure CLV, not to publish. See PickModel.tracking_only.
+    tracking_only: bool = False
 
 @dataclass
 class PropAnalysis:

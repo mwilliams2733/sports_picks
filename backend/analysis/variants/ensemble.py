@@ -205,6 +205,26 @@ TOTALS_VALIDATED_SPORTS: frozenset[str] = frozenset()
 #: line on a sample worth the name, and put the numbers in this comment.
 SPREAD_VALIDATED_SPORTS: frozenset[str] = frozenset()
 
+#: Sports whose spreads and totals are generated as TRACKING picks: graded
+#: and kept so closing line value can be measured, but never published.
+#: They carry PickModel.tracking_only, and every public reader filters on
+#: PickModel.published(). A sport in a VALIDATED set publishes instead.
+#:
+#: Owner decision 2026-10-03, made with the models still losing to the line
+#: (re-measured that day; best spread k vs line MAE):
+#:
+#:     spread  nfl  10.19 vs  9.57  (1188 games, 264 dates)
+#:             mlb   3.29 vs  3.00  (136 vs the line, 13 dates)
+#:             ncaaf 24.22 vs 9.88  (141 vs the line, 6 dates)
+#:     total   nfl  10.51 vs 10.19   mlb 3.26 vs 3.15   ncaaf 12.83 vs 11.49
+#:
+#: A tracked pick needs a quoted price for its side; the STANDARD_JUICE
+#: fallback is refused. All 241 spread/total picks made before 2026-09-20
+#: were priced at that fallback, and CLV against an invented price
+#: measures nothing.
+SPREAD_TRACKED_SPORTS: frozenset[str] = frozenset({"nfl", "mlb", "ncaaf"})
+TOTALS_TRACKED_SPORTS: frozenset[str] = frozenset({"nfl", "mlb", "ncaaf"})
+
 
 class EnsembleStrategy(Strategy):
     _calibrated: CalibratedModel | None = None
@@ -296,10 +316,13 @@ class EnsembleStrategy(Strategy):
                     factors=self._build_factors(game, "away")))
 
         # Spread picks — distribution-based: P(cover) via normal CDF.
-        # Gated per sport on the margin model having been shown to beat the
-        # line; see SPREAD_VALIDATED_SPORTS.
+        # Published only where the margin model has been shown to beat the
+        # line (SPREAD_VALIDATED_SPORTS); tracked, at a real price only,
+        # where it has not (SPREAD_TRACKED_SPORTS).
+        spread_tracked = (game.sport in SPREAD_TRACKED_SPORTS
+                          and game.sport not in SPREAD_VALIDATED_SPORTS)
         if (avg_odds.get("spread_home") is not None
-                and game.sport in SPREAD_VALIDATED_SPORTS):
+                and (game.sport in SPREAD_VALIDATED_SPORTS or spread_tracked)):
             predicted_diff, diff_std = self._predicted_point_diff_ml(game)
             spread_home = avg_odds["spread_home"]  # e.g., -3.5 for home favorite
             # Home covers when margin > abs(spread) for favorites
@@ -310,11 +333,14 @@ class EnsembleStrategy(Strategy):
             # The price each side is actually quoted at. STANDARD_JUICE only
             # where no book quoted one, which is every Odds row written
             # before the collector stopped discarding the price.
-            home_spread_price = avg_odds.get("spread_home_price") or STANDARD_JUICE
-            away_spread_price = avg_odds.get("spread_away_price") or STANDARD_JUICE
+            # A tracked pick takes no fallback: its whole purpose is CLV,
+            # which needs the price that was actually on offer.
+            spread_fallback = None if spread_tracked else STANDARD_JUICE
+            home_spread_price = avg_odds.get("spread_home_price") or spread_fallback
+            away_spread_price = avg_odds.get("spread_away_price") or spread_fallback
             home_spread_edge = (home_cover_prob - spread_fair) * 100
             away_spread_edge = (away_cover_prob - spread_fair) * 100
-            if _takeable(home_spread_edge, "spread"):
+            if home_spread_price is not None and _takeable(home_spread_edge, "spread"):
                 models, available = self._count_agreeing_models(game, "home")
                 pick_value = f"HOME {spread_home:+g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="spread",
@@ -324,8 +350,9 @@ class EnsembleStrategy(Strategy):
                     model_probability=round(home_cover_prob, 4),
                     implied_probability=spread_fair,
                     odds_at_pick=home_spread_price,
-                    suggested_unit_size=fractional_kelly(home_cover_prob, home_spread_price, kelly_fraction)))
-            elif _takeable(away_spread_edge, "spread"):
+                    suggested_unit_size=fractional_kelly(home_cover_prob, home_spread_price, kelly_fraction),
+                    tracking_only=spread_tracked))
+            elif away_spread_price is not None and _takeable(away_spread_edge, "spread"):
                 models, available = self._count_agreeing_models(game, "away")
                 spread_away = avg_odds["spread_away"]
                 pick_value = f"AWAY +{spread_away:g}" if spread_away >= 0 else f"AWAY {spread_away:g}"
@@ -336,7 +363,8 @@ class EnsembleStrategy(Strategy):
                     model_probability=round(away_cover_prob, 4),
                     implied_probability=spread_fair,
                     odds_at_pick=away_spread_price,
-                    suggested_unit_size=fractional_kelly(away_cover_prob, away_spread_price, kelly_fraction)))
+                    suggested_unit_size=fractional_kelly(away_cover_prob, away_spread_price, kelly_fraction),
+                    tracking_only=spread_tracked))
 
         # Over/Under picks — distribution-based: P(over) via normal CDF.
         #
@@ -369,8 +397,10 @@ class EnsembleStrategy(Strategy):
         # there -- and the CDF saturates, giving model_prob 1.0 and edge 50.0.
         # Graded, it came out at 52.0% over 50 picks at -110: a coin flip
         # paying the vig. No signal, no bet.
+        totals_tracked = (game.sport in TOTALS_TRACKED_SPORTS
+                          and game.sport not in TOTALS_VALIDATED_SPORTS)
         if (avg_odds.get("over_under") is not None
-                and game.sport in TOTALS_VALIDATED_SPORTS
+                and (game.sport in TOTALS_VALIDATED_SPORTS or totals_tracked)
                 and game.home_stats.points_for is not None
                 and game.home_stats.points_against is not None
                 and game.away_stats.points_for is not None
@@ -380,11 +410,12 @@ class EnsembleStrategy(Strategy):
             over_prob = self._over_probability(predicted_total, ou_line, std=get_total_points_std(game.sport))
             under_prob = 1.0 - over_prob
             ou_fair = 0.5  # O/U markets are ~50/50 after vig by design
-            over_price = avg_odds.get("over_price") or STANDARD_JUICE
-            under_price = avg_odds.get("under_price") or STANDARD_JUICE
+            totals_fallback = None if totals_tracked else STANDARD_JUICE
+            over_price = avg_odds.get("over_price") or totals_fallback
+            under_price = avg_odds.get("under_price") or totals_fallback
             over_edge = (over_prob - ou_fair) * 100
             under_edge = (under_prob - ou_fair) * 100
-            if _takeable(over_edge, "over_under"):
+            if over_price is not None and _takeable(over_edge, "over_under"):
                 models, available = self._count_total_agreeing_models(game, True)
                 pick_value = f"Over {ou_line:g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="over_under",
@@ -394,8 +425,9 @@ class EnsembleStrategy(Strategy):
                     model_probability=round(over_prob, 4),
                     implied_probability=ou_fair,
                     odds_at_pick=over_price,
-                    suggested_unit_size=fractional_kelly(over_prob, over_price, kelly_fraction)))
-            elif _takeable(under_edge, "over_under"):
+                    suggested_unit_size=fractional_kelly(over_prob, over_price, kelly_fraction),
+                    tracking_only=totals_tracked))
+            elif under_price is not None and _takeable(under_edge, "over_under"):
                 models, available = self._count_total_agreeing_models(game, False)
                 pick_value = f"Under {ou_line:g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="over_under",
@@ -405,7 +437,8 @@ class EnsembleStrategy(Strategy):
                     model_probability=round(under_prob, 4),
                     implied_probability=ou_fair,
                     odds_at_pick=under_price,
-                    suggested_unit_size=fractional_kelly(under_prob, under_price, kelly_fraction)))
+                    suggested_unit_size=fractional_kelly(under_prob, under_price, kelly_fraction),
+                    tracking_only=totals_tracked))
 
         return picks
 

@@ -160,7 +160,8 @@ def grade_prop_pick(pick_value: str, market: str, player_stat) -> tuple[str, flo
     return ("win", 1.0) if won else ("loss", -1.0)
 
 
-def capture_closing_odds(session, pick_result, game_id: int, pick_type: str, pick_value: str, odds_at_pick: int | None = None):
+def capture_closing_odds(session, pick_result, game_id: int, pick_type: str, pick_value: str,
+                         odds_at_pick: int | None = None, *, price_is_quoted: bool = False):
     """Store closing odds (and, for spread/total, the closing line) on a PickResult.
 
     Called during grading when a game reaches 'final' status.
@@ -174,13 +175,18 @@ def capture_closing_odds(session, pick_result, game_id: int, pick_type: str, pic
     movement CLV is for. Before 7463de7 that last write was often an in-play
     price too.
 
-    For moneyline bets the price moves materially, so odds_at_close stores the
-    closing moneyline price. For spread/total bets the price (juice) is rarely
-    stored historically and barely moves; the meaningful CLV is in the line
-    number, which is stored in line_at_close. odds_at_close stays
-    ``odds_at_pick`` for those bet types so price-CLV is a deliberate no-op:
-    a real closing price against an ``odds_at_pick`` that fell back to
-    STANDARD_JUICE would fabricate movement in the other direction.
+    For moneyline bets odds_at_close is the closing moneyline price. For
+    spread/total bets the main CLV is in the line number, stored in
+    line_at_close. What goes in odds_at_close depends on ``price_is_quoted``:
+
+    * True (tracked picks since 2026-10-03, which refuse the fallback): the
+      real closing price for the picked side, or None if no book quoted
+      one. Never a copy, which would report zero movement as if measured.
+    * False (every spread/total pick made before then): a copy of
+      ``odds_at_pick``. Those picks were priced at the STANDARD_JUICE
+      fallback, and a real close against an invented price would fabricate
+      movement. `backfill_closing_lines` re-runs this on them, which is why
+      the caller must say which kind of pick it holds.
 
     Records nothing when there is no pre-game price on record. An absent
     close must stay absent -- a guessed one enters the CLV average silently.
@@ -197,14 +203,15 @@ def capture_closing_odds(session, pick_result, game_id: int, pick_type: str, pic
         else:
             pick_result.odds_at_close = closing["moneyline_away"]
     elif pick_type == "spread":
-        if "HOME" in pick_value:
-            pick_result.line_at_close = closing["spread_home"]
-        else:
-            pick_result.line_at_close = closing["spread_away"]
-        pick_result.odds_at_close = odds_at_pick
+        side = "home" if "HOME" in pick_value else "away"
+        pick_result.line_at_close = closing[f"spread_{side}"]
+        pick_result.odds_at_close = (closing.get(f"spread_{side}_price")
+                                     if price_is_quoted else odds_at_pick)
     elif pick_type == "over_under":
         pick_result.line_at_close = closing["over_under"]
-        pick_result.odds_at_close = odds_at_pick
+        pick_result.odds_at_close = (
+            closing.get("over_price" if pick_value.startswith("Over") else "under_price")
+            if price_is_quoted else odds_at_pick)
 
 
 def _apply_combat_elo_update(session, game) -> None:

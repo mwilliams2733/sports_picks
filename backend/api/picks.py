@@ -26,7 +26,8 @@ def get_today_picks(request: Request, sport: str | None = None, min_confidence: 
         else:
             # Show today's picks; if none, show tomorrow's
             day = et_today()
-            today_count = session.query(PickModel).join(Game).filter(Game.date == day).count()
+            today_count = (session.query(PickModel).join(Game)
+                           .filter(Game.date == day, PickModel.published()).count())
             if today_count == 0:
                 day = day + timedelta(days=1)
         from sqlalchemy.orm import aliased
@@ -35,7 +36,7 @@ def get_today_picks(request: Request, sport: str | None = None, min_confidence: 
             .join(Game, PickModel.game_id == Game.id)
             .join(Team, Game.home_team_id == Team.id)
             .join(AwayTeam, Game.away_team_id == AwayTeam.id)
-            .filter(Game.date == day))
+            .filter(Game.date == day, PickModel.published()))
         if sport: query = query.filter(Game.sport == sport)
         if min_confidence > 0: query = query.filter(PickModel.confidence >= min_confidence)
         if pick_type: query = query.filter(PickModel.pick_type == pick_type)
@@ -66,6 +67,7 @@ def get_picks_history(request: Request, sport: str | None = None, page: int = 1,
             .join(Team, Game.home_team_id == Team.id)
             .join(AwayTeam, Game.away_team_id == AwayTeam.id)
             .outerjoin(PickResult, PickResult.pick_id == PickModel.id)
+            .filter(PickModel.published())
             .order_by(Game.date.desc()))
         if sport: query = query.filter(Game.sport == sport)
         offset = (page - 1) * per_page

@@ -99,6 +99,7 @@ def trailing_record(session, sport: str, target_date, days: int = TRAILING_DAYS)
             .filter(Game.sport == sport,
                     Game.date >= cutoff, Game.date < target_date,
                     PickModel.pick_type != "prop",
+                    PickModel.published(),
                     PickResult.result.in_(("win", "loss")))
             .all())
     if not rows:
@@ -324,7 +325,8 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
             session.query(PickModel)
             .filter(PickModel.game_id.in_(list(games_by_id)),
                     PickModel.confidence >= 1,
-                    PickModel.pick_type != "prop")
+                    PickModel.pick_type != "prop",
+                    PickModel.published())
             .all()
         )
         picks = _dedupe_latest(picks)

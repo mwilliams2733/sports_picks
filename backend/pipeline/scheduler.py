@@ -813,6 +813,7 @@ def grade_pending_picks(session) -> dict:
             capture_closing_odds(
                 session, pick_result, game.id,
                 pick.pick_type, pick.pick_value, pick.odds_at_pick,
+                price_is_quoted=bool(pick.tracking_only),
             )
             session.add(pick_result)
     session.commit()

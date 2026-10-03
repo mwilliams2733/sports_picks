@@ -78,10 +78,11 @@ anything price-derived.
 | `prop_player` / `prop_market` | Only populated for `pick_type == "prop"`: the player's name and the market key (e.g. `player_pass_yds`), not the display label. |
 | `result` | `win` / `loss` / `push`, or blank if the pick has not been graded yet. A push means the bet is void -- see "How grading works". |
 | `payout` | Net units from `backend.pipeline.grader.payout_for(result, odds_at_pick)`, **for a flat 1-unit stake** -- it is NOT scaled by `suggested_unit_size`. A pick sized at 0.3 units by Kelly and a pick sized at 2.0 units show the identical `payout` for the identical price and result; multiply by `suggested_unit_size` yourself if you want bankroll-scaled P&L. Blank if ungraded. |
-| `odds_at_close` / `line_at_close` | The price/line at game close, captured for CLV. Blank if never captured (see "line snapshots" below). **For `spread` and `over_under` picks, `odds_at_close` is a deliberate copy of `odds_at_pick`, not a real closing price** -- see "What CLV means here". |
+| `odds_at_close` / `line_at_close` | The price/line at game close, captured for CLV. Blank if never captured (see "line snapshots" below). **For published (`tracking_only = False`) `spread` and `over_under` picks, `odds_at_close` is a deliberate copy of `odds_at_pick`, not a real closing price.** For `tracking_only` picks (from 2026-10-03) it is the real closing price for the picked side, or blank if no book quoted one. See "What CLV means here". |
 | `clv_price_pp` / `clv_line_pts` | Closing line value for this pick, split by unit -- see "What CLV means here" below. Exactly one is filled per row (or neither, if there is no close); **never pool the two columns together.** |
 | `series_depth` | The deepest per-bookmaker observation count `line_snapshots` has for this pick's game (see `line_history.csv` below). `0` means the game has no line snapshots at all (most games before 2026-09-22). `1` means no book was ever seen to change its price for that game, so any `odds_at_close`/`line_at_close`/CLV value drawn from it is the SAME observation as the opening price, not a real close. `backend.analysis.clv_report.measurable()` keeps only `series_depth > 1`, so it drops both `0` and `1` rows from its own reporting; use this column to reproduce that filter here. |
 | `odds_reconstructed` | `True` when `odds_at_pick` was rebuilt afterwards from surviving book rows rather than recorded live (`backend/scripts/repair_invalid_odds.py`). Treat these as an approximation in any ROI/CLV figure. `backend.analysis.clv_report.usable()` excludes these by default too (`include_reconstructed=False`). |
+| `tracking_only` | `True` for a pick generated only to measure CLV, on a market whose model is known to lose to the line. Since 2026-10-03 that means every spread and total for nfl, mlb and ncaaf. These picks are graded like any other, but were never emailed, shown on the site, counted in the record or bankroll, or used to recalibrate. **Never pool them with `False` rows** in any ROI, win-rate or CLV figure. `clv_report` reports them as separate "(tracked)" groups. |
 | `emailed` | `True` if this pick appears at least once in `emailed_picks`. |
 | `emailed_odds` / `emailed_at` / `emailed_pick_value` / `emailed_digest_date` / `emailed_confidence` | What the email actually said, at the time it was sent, for the **most recent** digest that included this pick -- not what the pick's own (possibly since-refreshed) columns say now. A pick can be emailed on more than one digest date (the uniqueness constraint on `emailed_picks` is per `(digest_date, pick_id)`, not per pick); this export keeps the row with the latest `sent_at` and folds the rest away, so one `pick_id` is always exactly one `picks.csv` row. `emailed_pick_value` and `emailed_odds` are the side/price as displayed that day and can differ from the current `pick_value`/`odds_at_pick` if the pick was refreshed after sending (see `created_at` above). `emailed_confidence` is the star rating as sent (nullable -- rows recorded before 2026-09-29 don't always carry it). All five are blank before 2026-09-28, when `emailed_picks` recording began (nothing before that date was recorded, regardless of whether it was actually emailed). |
 
@@ -221,8 +222,10 @@ applies when it computes its own CLV summaries, and which this export does
 NOT apply for you -- filter for them yourself if you want a comparable
 number:**
 
-1. **For `spread` and `over_under` picks, `odds_at_close` is a deliberate
-   copy of `odds_at_pick`, not a real closing price.** `grader.py`'s
+1. **For published `spread` and `over_under` picks, `odds_at_close` is a
+   deliberate copy of `odds_at_pick`, not a real closing price.** For
+   `tracking_only` picks (from 2026-10-03) it is real; see that column
+   above. `grader.py`'s
    `capture_closing_odds` sets `odds_at_close = odds_at_pick` for these two
    pick types (the juice on a line bet is rarely tracked historically and
    barely moves; the real CLV for these is in `line_at_close` /
@@ -248,6 +251,22 @@ number:**
    above.
 
 ## Known traps
+
+- **Spreads and totals returned on 2026-10-03, as tracking picks
+  (`tracking_only = True`).** None were generated from 2026-09-20 to
+  2026-10-03, because the models lose to the market line. They are
+  generated again for nfl, mlb and ncaaf, for one purpose: to measure CLV on
+  real prices. Three things differ from the 241 spread/total picks made
+  before 2026-09-20:
+  - each carries a real quoted price, never the -110 fallback, and a side
+    with no quote gets no pick;
+  - `odds_at_close` is the real closing price;
+  - none was ever published.
+
+  Their win rate and ROI describe a model known to be worse than the line,
+  so they are not a track record. Read them for CLV, split from published
+  picks. The owner made this decision on 2026-10-03, with the numbers in
+  `SPREAD_TRACKED_SPORTS` (`backend/analysis/variants/ensemble.py`).
 
 Each bullet below was checked against the code, docs, or git history in
 this repository as of 2026-09-30 (commit `1c81e33` and this branch's work
@@ -551,8 +570,9 @@ stated explicitly rather than left silent.
   `implied_prob_raw` / `market_prob_novig` as the baseline, not a flat coin
   flip.
 - **Label regimes by the change dates above.** Kelly sizing, prop dedupe,
-  MMA/boxing voids, the combat-vs-ensemble routing switch, and the send-bar
-  change each split this data into a "before" that should not be pooled
+  MMA/boxing voids, the combat-vs-ensemble routing switch, the send-bar
+  change, and the 2026-10-03 return of spreads/totals as `tracking_only`
+  picks each split this data into a "before" that should not be pooled
   with an "after" without accounting for the change.
 - **Use ROI and CLV, not win %.** Win rate ignores price -- a -110 win and
   a +300 win are not the same size. Units won (`payout`) and CLV

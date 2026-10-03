@@ -16,7 +16,8 @@ def get_record(request: Request, sport: str | None = None):
     try:
         query = (session.query(PickResult, PickModel, Game)
             .join(PickModel, PickResult.pick_id == PickModel.id)
-            .join(Game, PickModel.game_id == Game.id))
+            .join(Game, PickModel.game_id == Game.id)
+            .filter(PickModel.published()))
         if sport: query = query.filter(Game.sport == sport)
         rows = query.all()
         wins = sum(1 for r, _, _ in rows if r.result == "win")
@@ -37,7 +38,8 @@ def get_daily(request: Request, sport: str | None = None):
     try:
         query = (session.query(Game.date, PickResult.result, PickResult.payout)
             .join(PickModel, PickResult.pick_id == PickModel.id)
-            .join(Game, PickModel.game_id == Game.id))
+            .join(Game, PickModel.game_id == Game.id)
+            .filter(PickModel.published()))
         if sport: query = query.filter(Game.sport == sport)
         rows = query.order_by(Game.date).all()
         daily = {}
@@ -69,6 +71,7 @@ def get_calibration(request: Request, sport: str | None = None):
             session.query(PickModel.confidence, PickResult.result)
             .join(PickResult, PickResult.pick_id == PickModel.id)
             .join(Game, PickModel.game_id == Game.id)
+            .filter(PickModel.published())
         )
         if sport:
             query = query.filter(Game.sport == sport)
@@ -151,6 +154,7 @@ def get_clv_stats(request: Request):
         results = (
             session.query(PickResult, PickModel)
             .join(PickModel, PickResult.pick_id == PickModel.id)
+            .filter(PickModel.published())
             .all()
         )
 

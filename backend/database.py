@@ -236,6 +236,25 @@ def migrate_pick_odds_reconstructed(engine):
                     "BOOLEAN NOT NULL DEFAULT 0"))
 
 
+def migrate_pick_tracking_only(engine):
+    """Add picks.tracking_only if missing.
+
+    Marks a pick made only to measure closing line value, on a market whose
+    model loses to the line. Spreads and totals for nfl, mlb and ncaaf were
+    re-enabled on that basis on 2026-10-03. Every earlier row is a published
+    pick, so the default of 0 is the truth for them, not a placeholder.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "picks" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("picks")]
+        if "tracking_only" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE picks ADD COLUMN tracking_only "
+                    "BOOLEAN NOT NULL DEFAULT 0"))
+
+
 def migrate_game_neutral_site(engine):
     """Add games.neutral_site if missing.
 
@@ -532,6 +551,7 @@ MIGRATIONS = (
     migrate_team_box_scores,
     migrate_emailed_pick_confidence,
     migrate_user_pin,
+    migrate_pick_tracking_only,
 )
 
 #: Migrations that can destroy data. run_migrations passes each of these an
