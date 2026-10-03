@@ -92,6 +92,9 @@ class ClvSample:
     #: never seen to move, so the "close" is the same observation the pick
     #: was priced from -- see `measurable`.
     depth: int = 1
+    #: A tracking pick (PickModel.tracking_only): measured, never published.
+    #: Reported in its own groups and never pooled with published picks.
+    tracking_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -190,7 +193,8 @@ def load_samples(session, *, sport: str | None = None) -> list[ClvSample]:
         clv = clv_pct if pm.pick_type in PRICE_MARKETS else clv_points
         out.append(ClvSample(pick_id=pm.id, game_id=pm.game_id,
                              sport=game.sport, market=pm.pick_type, clv=clv,
-                             reconstructed=bool(pm.odds_reconstructed)))
+                             reconstructed=bool(pm.odds_reconstructed),
+                             tracking_only=bool(pm.tracking_only)))
 
     depths = series_depth(session, {s.game_id for s in out})
     return [replace(s, depth=depths.get(s.game_id, 0)) for s in out]
@@ -208,12 +212,20 @@ def measurable(samples) -> list[ClvSample]:
 
 
 def group_report(samples, markets) -> dict[str, Summary]:
-    """Summaries keyed by sport for one family of markets, plus ``ALL``."""
-    scoped = [s for s in samples if s.market in markets]
-    out = {sport: summarize([s for s in scoped if s.sport == sport])
-           for sport in sorted({s.sport for s in scoped})}
-    if scoped:
-        out["ALL"] = summarize(scoped)
+    """Summaries keyed by sport for one family of markets, plus ``ALL``.
+
+    Tracking picks get their own keys (``"nfl (tracked)"``, ``"ALL
+    (tracked)"``). They come from markets the model is known to lose on, so
+    pooling them would blur exactly the comparison they exist for.
+    """
+    out: dict[str, Summary] = {}
+    for tracked, suffix in ((False, ""), (True, " (tracked)")):
+        scoped = [s for s in samples
+                  if s.market in markets and s.tracking_only == tracked]
+        for sport in sorted({s.sport for s in scoped}):
+            out[sport + suffix] = summarize([s for s in scoped if s.sport == sport])
+        if scoped:
+            out["ALL" + suffix] = summarize(scoped)
     return out
 
 
@@ -259,11 +271,11 @@ def format_report(samples, *, include_reconstructed: bool) -> str:
         if not groups:
             out += ["    no picks on these markets", ""]
             continue
-        out.append(f"    {'sport':<8}{'picks':>7}{'games':>7}{'mean':>9}"
+        out.append(f"    {'sport':<16}{'picks':>7}{'games':>7}{'mean':>9}"
                    f"{'median':>9}{'beat%':>8}{'p':>9}")
         for sport, s in groups.items():
             beat = "     n/a" if s.beat_rate is None else f"{s.beat_rate:7.1%}"
-            out.append(f"    {sport:<8}{s.n:>7}{s.games:>7}"
+            out.append(f"    {sport:<16}{s.n:>7}{s.games:>7}"
                        f"{s.mean:>+9.3f}{s.median:>+9.3f}{beat}"
                        f"{s.p_value:>9.4f}")
         out.append("")

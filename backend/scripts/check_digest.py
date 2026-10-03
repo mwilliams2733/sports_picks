@@ -263,7 +263,11 @@ def picks_for(db_path: str, target_date) -> int:
     try:
         return con.execute(
             "select count(*) from picks p join games g on g.id = p.game_id "
-            "where g.date = ? and p.pick_type != 'prop'",
+            "where g.date = ? and p.pick_type != 'prop' "
+            # Published only, the same rule as PickModel.published(): a
+            # tracked pick never reaches the digest, so it cannot mean the
+            # digest missed something.
+            "and p.tracking_only = 0",
             (target_date.isoformat(),)).fetchone()[0]
     finally:
         con.close()

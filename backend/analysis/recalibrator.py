@@ -89,6 +89,7 @@ class Recalibrator:
                 .filter(
                     Game.sport == self.sport,
                     PickModel.confidence == tier,
+                    PickModel.published(),
                 )
                 # Newest first, then capped: the cap has to keep the *recent*
                 # picks, or a tier with a long history would be judged forever

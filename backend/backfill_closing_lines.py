@@ -57,7 +57,8 @@ def backfill(db_path: str = "sports_picks.db", dry_run: bool = False) -> dict:
             pr.odds_at_close = None
             pr.line_at_close = None
             capture_closing_odds(session, pr, pm.game_id, pm.pick_type,
-                                 pm.pick_value, pm.odds_at_pick)
+                                 pm.pick_value, pm.odds_at_pick,
+                                 price_is_quoted=bool(pm.tracking_only))
             after = (pr.odds_at_close, pr.line_at_close)
 
             if before[0] != after[0]:

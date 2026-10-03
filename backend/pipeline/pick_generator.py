@@ -65,6 +65,8 @@ def _bankroll_state(session: Session) -> tuple[float, float]:
     historical stake was not persisted, so it cannot be weighted.
     """
     rows = (session.query(PickResult.result, PickResult.payout)
+            .join(PickModel, PickModel.id == PickResult.pick_id)
+            .filter(PickModel.published())
             .order_by(PickResult.id.asc()).all())
     return bankroll_from_results(rows)
 
@@ -274,7 +276,10 @@ def generate_and_store_picks(session: Session, strategy_id: int,
             # Correlation is the only per-game term: several picks on one
             # game are several bets on one outcome. Counted over the picks
             # that will actually be stored, not everything predicted.
-            keepers = [p for p in picks if p.confidence >= 1]
+            # Tracked picks are excluded: they are not bets, so they must
+            # not shrink the stake of the picks that are.
+            keepers = [p for p in picks if p.confidence >= 1
+                       and not getattr(p, "tracking_only", False)]
             game_fraction = sizing_fraction(
                 base_fraction, calibration_deviation=deviation,
                 current_balance=balance, peak_balance=peak,
@@ -304,6 +309,7 @@ def generate_and_store_picks(session: Session, strategy_id: int,
                         model_prob=pick.model_probability,
                         suggested_unit_size=pick.suggested_unit_size,
                         rationale_json=_rationale_json(pick),
+                        tracking_only=getattr(pick, "tracking_only", False),
                         created_at=datetime.now(tz=timezone.utc))
                     session.add(db_pick)
                     record_pick_version(session, db_pick, "insert")
@@ -462,6 +468,9 @@ def _refresh_pick(existing: PickModel, pick) -> None:
     # pair a fresh price with a stake computed against the previous one.
     existing.suggested_unit_size = getattr(pick, "suggested_unit_size", None)
     existing.rationale_json = _rationale_json(pick)
+    # A market can move between tracked and published (a sport validated
+    # mid-season), and the row must say which it is now.
+    existing.tracking_only = getattr(pick, "tracking_only", False)
     existing.created_at = datetime.now(timezone.utc)
 
 def _build_game_data(session: Session, game,

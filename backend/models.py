@@ -251,8 +251,21 @@ class PickModel(Base):
     #: which any raw INSERT (tests, scripts) then violates.
     odds_reconstructed = Column(Boolean, nullable=False, default=False,
                                 server_default="0")
+    #: True for a pick generated only to measure CLV, on a market whose
+    #: model has not been shown to beat the line (spreads and totals since
+    #: 2026-10-03; see SPREAD_TRACKED_SPORTS in ensemble.py). Such a pick is
+    #: graded and kept, but never emailed, shown, counted in the record or
+    #: the bankroll, or used to recalibrate. Every reader of published
+    #: picks filters on `published()` rather than on this column directly.
+    tracking_only = Column(Boolean, nullable=False, default=False,
+                           server_default="0")
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
     game = relationship("Game")
+
+    @classmethod
+    def published(cls):
+        """Filter clause for picks a person may see or that move money."""
+        return cls.tracking_only.is_(False)
 
 class PickResult(Base):
     __tablename__ = "pick_results"
