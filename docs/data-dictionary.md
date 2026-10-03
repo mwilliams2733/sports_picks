@@ -99,15 +99,18 @@ measured against -- not an independently computed number:
   `backend/analysis/variants/ensemble.py:284-285` and `:292-293`), so the
   recovered value is accurate to within roughly ±0.0005 of what the
   strategy actually computed internally.
-- **spread / over_under**: `0.5` **only when `model_prob` is itself
-  present** on the row. The model does not store a de-vigged market win
-  probability for a line pick; `edge_pct` for these is measured against a
-  flat 0.5 fair-coin value when a real pick was made, and `0.5` here
-  documents that convention rather than computing anything. A row with no
-  `model_prob` at all -- every one of the 284 legacy spread/over_under
-  picks from before 2026-09-17 (see "known traps" below) -- gets a **blank**
-  here instead: writing `0.5` for those would claim their edge was measured
-  against a fair coin flip when nothing on the row says it was.
+- **spread / over_under**: the same arithmetic, `model_prob - edge_pct /
+  100`. **From 2026-10-03** these edges are measured against the de-vigged
+  price, just as the moneyline is: both sides' quoted prices with the vig
+  removed proportionally. At -105 / -115 the home side is 0.4884. **Before
+  2026-10-03** they were measured against a flat 0.5, and the arithmetic
+  recovers 0.5 for those rows, within the rounding above. A flat 0.5 equals
+  the de-vigged price only when both sides are priced alike, so on an
+  asymmetric market an old row's `edge_pct` is off by up to a couple of
+  points. Do not pool the two regimes without accounting for that.
+  A row with no `model_prob` at all -- every one of the 284 legacy
+  spread/over_under picks from before 2026-09-17 (see "known traps" below)
+  -- gets a **blank** here instead.
 - **prop**: blank. Props are never de-vigged against a market probability
   at all (see "known traps").
 
