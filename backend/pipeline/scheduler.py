@@ -192,6 +192,18 @@ def _digest_after_scout(config: dict, engine, scheduler) -> None:
     send_daily_digest(config, engine)
 
 
+def start_scheduler(config: dict, engine) -> BackgroundScheduler:
+    """Configure, restore today's windows, start. The one way to start it.
+
+    Both the standalone process and the FastAPI lifespan come through here,
+    so neither can start without the window restore.
+    """
+    scheduler = configure_scheduler(config, engine)
+    restore_today_windows(config, engine, scheduler)
+    scheduler.start()
+    return scheduler
+
+
 def run_pipeline(config_path: str = "config.yaml"):
     config = load_config(config_path)
     engine = get_engine(config["database_path"])
@@ -199,8 +211,7 @@ def run_pipeline(config_path: str = "config.yaml"):
     # standalone process can never fall behind the web app's schema.
     run_migrations(engine)
 
-    scheduler = configure_scheduler(config, engine)
-    scheduler.start()
+    scheduler = start_scheduler(config, engine)
     logger.info("Scheduler started (morning scout at 8 AM ET, recalibration at 3 AM ET)")
     try:
         while True:
@@ -446,6 +457,12 @@ def morning_scout(config, engine, scheduler, is_retry=False, wait=False):
         _scout_lock.release()
 
 
+def _scheduled_sports(config) -> list[str]:
+    """In-season sports whose games come from ESPN, so they get windows."""
+    return [s for s in ALL_SPORTS
+            if is_sport_in_season(s, config["seasons"]) and s in ESPN_TEAM_SPORTS]
+
+
 def _scout(config, engine, scheduler, is_retry):
     global _last_scout_success
     session = get_session(engine)
@@ -519,7 +536,7 @@ def _scout(config, engine, scheduler, is_retry):
             session.rollback()
         grade_completed_games(session)
         active_sports = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]
-        scheduled_sports = [s for s in active_sports if s in ESPN_TEAM_SPORTS]
+        scheduled_sports = _scheduled_sports(config)
         if not scheduled_sports:
             logger.info("No auto-scheduled sports in season today")
             _last_scout_success = et_today()
@@ -575,62 +592,8 @@ def _scout(config, engine, scheduler, is_retry):
                     ", ".join(slate) if slate else "nothing scheduled")
         fetch_odds_and_pick(config, engine, slate)
 
-        existing_jobs = {j.id for j in scheduler.get_jobs()}
-        # Windows already due are collected here and run after every sport has
-        # been scheduled, not inline. Running one inline blocks the loop for as
-        # long as that pipeline takes -- on 2026-09-19 a ncaaf window held it
-        # for over 25 minutes fetching player stats, so mlb, later in the list,
-        # never had a window created at all and went the day without odds.
-        due_now: list[tuple[str, dict, str]] = []
-        for sport in scheduled_sports:
-            games = session.query(Game).filter(
-                Game.sport == sport, Game.date == today,
-                Game.status == "scheduled", Game.start_time.isnot(None),
-            ).all()
-            if not games:
-                logger.info(f"No {sport} games scheduled for today, no windows created")
-                continue
-            game_dicts = [{"id": g.id, "start_time": g.start_time} for g in games]
-            windows = cluster_game_windows(game_dicts)
-
-            # If an earlier run today (8/9/10 AM retries) clustered a
-            # different number/order of windows, drop any window job for
-            # this sport/day that the fresh clustering no longer produces —
-            # otherwise it's orphaned (never fires, never gets cleaned up).
-            window_prefix = f"window_{sport}_{today}_"
-            fresh_job_ids = {f"{window_prefix}{i}" for i in range(len(windows))}
-            stale_job_ids = {j for j in existing_jobs
-                              if j.startswith(window_prefix) and j not in fresh_job_ids}
-            for stale_id in stale_job_ids:
-                try:
-                    scheduler.remove_job(stale_id)
-                    logger.info(f"Removed stale window job {stale_id} (recluster shifted windows)")
-                except Exception:
-                    pass
-
-            for i, window in enumerate(windows):
-                job_id = f"window_{sport}_{today}_{i}"
-                if job_id in existing_jobs:
-                    continue
-                run_at = window["run_at"]
-                now_utc = datetime.now(tz=timezone.utc)
-                if run_at <= now_utc:
-                    logger.info(f"Window {job_id} run_at is past, queued to run "
-                                "after scheduling completes")
-                    due_now.append((sport, window, job_id))
-                else:
-                    run_at_et = run_at.astimezone(ET)
-                    scheduler.add_job(
-                        lambda c=config, e=engine, s=sport, w=window: _run_window(c, e, s, w),
-                        'date', run_date=run_at_et, id=job_id, replace_existing=True,
-                    )
-                    earliest_et = window["window_start"].astimezone(ET)
-                    n_games = len(window["games"])
-                    logger.info(
-                        f"Scheduled {sport} window: {n_games} games tipping off "
-                        f"~{earliest_et.strftime('%I:%M %p')} ET, pipeline run at "
-                        f"{run_at_et.strftime('%I:%M %p')} ET"
-                    )
+        due_now = _schedule_windows(config, engine, scheduler, session,
+                                    scheduled_sports, today)
 
         # Still serialised, deliberately: these share a database and hit the
         # same ESPN endpoints, so running them concurrently would trade one
@@ -647,6 +610,115 @@ def _scout(config, engine, scheduler, is_retry):
         logger.error(f"Morning scout error: {e}", exc_info=True)
     finally:
         session.close()
+
+
+def _schedule_windows(config, engine, scheduler, session, sports, today, *,
+                      now: datetime | None = None,
+                      run_overdue: bool = True) -> list[tuple[str, dict, str]]:
+    """Add today's game windows as date-jobs. Returns the overdue ones.
+
+    Shared by the morning scout and `restore_today_windows`, so both number
+    windows from the same clustering and agree on every job id. An id that
+    already exists is left alone.
+
+    ``run_overdue=False`` drops a window whose run time has passed instead of
+    returning it to run now. The restore after a restart uses that: a fresh
+    process cannot tell whether such a window already ran.
+    """
+    now = now or datetime.now(tz=timezone.utc)
+    existing_jobs = {j.id for j in scheduler.get_jobs()}
+    # Windows already due are collected here and run after every sport has
+    # been scheduled, not inline. Running one inline blocks the loop for as
+    # long as that pipeline takes -- on 2026-09-19 a ncaaf window held it
+    # for over 25 minutes fetching player stats, so mlb, later in the list,
+    # never had a window created at all and went the day without odds.
+    due_now: list[tuple[str, dict, str]] = []
+    for sport in sports:
+        games = session.query(Game).filter(
+            Game.sport == sport, Game.date == today,
+            Game.status == "scheduled", Game.start_time.isnot(None),
+        ).all()
+        if not games:
+            logger.info(f"No {sport} games scheduled for today, no windows created")
+            continue
+        game_dicts = [{"id": g.id, "start_time": g.start_time} for g in games]
+        windows = cluster_game_windows(game_dicts)
+
+        # If an earlier run today (8/9/10 AM retries) clustered a
+        # different number/order of windows, drop any window job for
+        # this sport/day that the fresh clustering no longer produces —
+        # otherwise it's orphaned (never fires, never gets cleaned up).
+        window_prefix = f"window_{sport}_{today}_"
+        fresh_job_ids = {f"{window_prefix}{i}" for i in range(len(windows))}
+        stale_job_ids = {j for j in existing_jobs
+                          if j.startswith(window_prefix) and j not in fresh_job_ids}
+        for stale_id in stale_job_ids:
+            try:
+                scheduler.remove_job(stale_id)
+                logger.info(f"Removed stale window job {stale_id} (recluster shifted windows)")
+            except Exception:
+                pass
+
+        for i, window in enumerate(windows):
+            job_id = f"window_{sport}_{today}_{i}"
+            if job_id in existing_jobs:
+                continue
+            run_at = window["run_at"]
+            if run_at <= now:
+                if run_overdue:
+                    logger.info(f"Window {job_id} run_at is past, queued to run "
+                                "after scheduling completes")
+                    due_now.append((sport, window, job_id))
+                else:
+                    logger.info(f"Window {job_id} run_at is past; not restored "
+                                "(it may already have run before the restart)")
+            else:
+                run_at_et = run_at.astimezone(ET)
+                scheduler.add_job(
+                    lambda c=config, e=engine, s=sport, w=window: _run_window(c, e, s, w),
+                    'date', run_date=run_at_et, id=job_id, replace_existing=True,
+                )
+                earliest_et = window["window_start"].astimezone(ET)
+                n_games = len(window["games"])
+                logger.info(
+                    f"Scheduled {sport} window: {n_games} games tipping off "
+                    f"~{earliest_et.strftime('%I:%M %p')} ET, pipeline run at "
+                    f"{run_at_et.strftime('%I:%M %p')} ET"
+                )
+
+    return due_now
+
+
+def restore_today_windows(config, engine, scheduler, *,
+                          now: datetime | None = None) -> None:
+    """Re-create today's window jobs after a restart.
+
+    The scout adds windows to the in-memory scheduler only, so a process
+    started after 8am ET used to have none. On 2026-10-03 a restart at 11:54
+    ET silently dropped 13 windows, about 43 ncaaf games and 3 mlb.
+
+    Before 8am this does nothing: the scout has not fetched today's games
+    yet, and it keeps any id that already exists. Never raises -- a
+    failure here must not stop the cron jobs from starting.
+    """
+    now = now or datetime.now(tz=timezone.utc)
+    now_et = now.astimezone(ET)
+    if now_et.hour < 8:
+        logger.info("Startup before 8am ET; the morning scout will schedule "
+                    "today's windows")
+        return
+    today = now_et.date()
+    try:
+        sports = _scheduled_sports(config)
+        session = get_session(engine)
+        try:
+            _schedule_windows(config, engine, scheduler, session, sports, today,
+                              now=now.astimezone(timezone.utc), run_overdue=False)
+        finally:
+            session.close()
+    except Exception:
+        logger.exception("Could not restore today's windows at startup; "
+                         "the 3-hourly price refresh still runs")
 
 
 def _run_window(config, engine, sport: str, window: dict):

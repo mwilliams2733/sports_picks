@@ -38,15 +38,14 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
         if os.environ.get("ENABLE_SCHEDULER", "0") == "1":
             try:
                 from backend.config import load_config
-                from backend.pipeline.scheduler import configure_scheduler
+                from backend.pipeline.scheduler import start_scheduler
                 config_path = os.environ.get("CONFIG_PATH", "config.yaml")
                 config = load_config(config_path)
                 # Honor whatever DB path the app was created with — the
                 # config.yaml default ("sports_picks.db") may be wrong in
                 # deployment (where DATABASE_PATH=/data/sports_picks.db).
                 config["database_path"] = db_path
-                scheduler = configure_scheduler(config, app.state.engine)
-                scheduler.start()
+                scheduler = start_scheduler(config, app.state.engine)
                 app.state.scheduler = scheduler
                 logger.info("APScheduler started inside FastAPI lifespan")
             except Exception:
