@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from sqlalchemy import (
     Column, Integer, String, Float, Date, DateTime, ForeignKey, Boolean, Text,
-    Index, UniqueConstraint
+    Index, UniqueConstraint, and_
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -265,13 +265,25 @@ class PickModel(Base):
     #: props; for an older game pick, ``model_prob - edge_pct / 100``
     #: recovers it (see export_picks._market_prob_novig).
     market_prob_novig = Column(Float, nullable=True)
+    #: When a run stopped producing this pick while it could still change
+    #: (game not started, not graded, never emailed). The row keeps its last
+    #: values; `published()` hides it and grading skips it. Cleared again if
+    #: a later run produces the market once more. See
+    #: pick_generator._withdraw_stale.
+    withdrawn_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
     game = relationship("Game")
 
+    @property
+    def withdrawn(self) -> bool:
+        """Mirrors ``PickVersion.withdrawn``, which pick_versions tracks."""
+        return self.withdrawn_at is not None
+
     @classmethod
     def published(cls):
-        """Filter clause for picks a person may see or that move money."""
-        return cls.tracking_only.is_(False)
+        """Filter clause for picks a person may see or that move money:
+        neither a tracking pick nor one withdrawn."""
+        return and_(cls.tracking_only.is_(False), cls.withdrawn_at.is_(None))
 
 class PickResult(Base):
     __tablename__ = "pick_results"
@@ -360,6 +372,11 @@ class PickVersion(Base):
     model_prob = Column(Float, nullable=True)
     suggested_unit_size = Column(Float, nullable=True)
     rationale_json = Column(Text, nullable=True)
+    #: Whether the pick was withdrawn as of this version (source
+    #: "withdraw"), or reinstated (False on a later "refresh"). NOT NULL with
+    #: a 0 default, so versions written before this column existed compare
+    #: equal to a live pick and no spurious version is minted for them.
+    withdrawn = Column(Boolean, nullable=False, default=False, server_default="0")
 
 
 class PlayerProp(Base):

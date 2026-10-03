@@ -83,6 +83,7 @@ anything price-derived.
 | `series_depth` | The deepest per-bookmaker observation count `line_snapshots` has for this pick's game (see `line_history.csv` below). `0` means the game has no line snapshots at all (most games before 2026-09-22). `1` means no book was ever seen to change its price for that game, so any `odds_at_close`/`line_at_close`/CLV value drawn from it is the SAME observation as the opening price, not a real close. `backend.analysis.clv_report.measurable()` keeps only `series_depth > 1`, so it drops both `0` and `1` rows from its own reporting; use this column to reproduce that filter here. |
 | `odds_reconstructed` | `True` when `odds_at_pick` was rebuilt afterwards from surviving book rows rather than recorded live (`backend/scripts/repair_invalid_odds.py`). Treat these as an approximation in any ROI/CLV figure. `backend.analysis.clv_report.usable()` excludes these by default too (`include_reconstructed=False`). |
 | `tracking_only` | `True` for a pick generated only to measure CLV, on a market whose model is known to lose to the line. Since 2026-10-03 that means every spread and total for nfl, mlb and ncaaf. These picks are graded like any other, but were never emailed, shown on the site, counted in the record or bankroll, or used to recalibrate. **Never pool them with `False` rows** in any ROI, win-rate or CLV figure. `clv_report` reports them as separate "(tracked)" groups. |
+| `withdrawn_at` | When the pick was withdrawn: a later run before kickoff stopped producing it (the market moved, or the 2026-10-03 edge change put it under the bar). Blank if never withdrawn, or if reinstated by a later run. A withdrawn pick was never graded and is not in the published record. Graded, started-game and emailed picks are never withdrawn. Each withdrawal is a `pick_versions` row with `source = withdraw`. **Before 2026-10-03 nothing was ever withdrawn**, so stale picks from that period stayed in the record. |
 | `emailed` | `True` if this pick appears at least once in `emailed_picks`. |
 | `emailed_odds` / `emailed_at` / `emailed_pick_value` / `emailed_digest_date` / `emailed_confidence` | What the email actually said, at the time it was sent, for the **most recent** digest that included this pick -- not what the pick's own (possibly since-refreshed) columns say now. A pick can be emailed on more than one digest date (the uniqueness constraint on `emailed_picks` is per `(digest_date, pick_id)`, not per pick); this export keeps the row with the latest `sent_at` and folds the rest away, so one `pick_id` is always exactly one `picks.csv` row. `emailed_pick_value` and `emailed_odds` are the side/price as displayed that day and can differ from the current `pick_value`/`odds_at_pick` if the pick was refreshed after sending (see `created_at` above). `emailed_confidence` is the star rating as sent (nullable -- rows recorded before 2026-09-29 don't always carry it). All five are blank before 2026-09-28, when `emailed_picks` recording began (nothing before that date was recorded, regardless of whether it was actually emailed). |
 
@@ -257,6 +258,13 @@ number:**
    above.
 
 ## Known traps
+
+- **From 2026-10-03, picks that stop qualifying are withdrawn
+  (`withdrawn_at`).** Before then a stored pick was refreshed while it still
+  qualified but never removed when it stopped, so the pre-2026-10-03 record
+  includes picks whose edge had gone by kickoff. Since then such a pick is
+  withdrawn, ungraded, and out of every published figure, unless it was
+  already emailed, graded or underway.
 
 - **Spreads and totals returned on 2026-10-03, as tracking picks
   (`tracking_only = True`).** None were generated from 2026-09-20 to
