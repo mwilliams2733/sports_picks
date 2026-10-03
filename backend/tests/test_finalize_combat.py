@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import create_engine
 
 from backend.database import get_session
-from backend.models import Base, Game, Team
+from backend.models import ApiUsage, Base, Game, Team
 from backend.scripts.finalize_combat import finalize_from_scores, stuck_combat
 
 TODAY = datetime.date(2026, 9, 20)
@@ -53,9 +53,12 @@ def _event(home, away, winner):
                        {"name": loser, "score": "0"}]}
 
 
-def _stub(events):
-    async def fetch(client, api_key, sport, days_from=3):
+def _stub(events, remaining=19940, last=2):
+    """Stands in for fetch_scores, reporting credit headers like the real one."""
+    async def fetch(client, api_key, sport, days_from=3, *, on_usage=None):
         from backend.collectors.odds_scores import bouts_from_scores
+        if on_usage is not None:
+            on_usage(remaining, last)
         return bouts_from_scores(events)
     return fetch
 
@@ -156,3 +159,45 @@ def test_stuck_combat_is_scoped_to_one_sport(session):
 
     assert len(stuck_combat(session, "boxing", TODAY)) == 1
     assert len(stuck_combat(session, "mma", TODAY)) == 1
+
+
+# -- credit accounting -------------------------------------------------------
+# Each /scores call costs 2 credits. Until 2026-10-03 none were logged, so
+# check_budget missed 4 credits every morning (mma + boxing). The 12:00 UTC
+# drop in requests_remaining had no matching api_usage row.
+
+def test_a_scores_call_is_logged_at_its_real_cost(session, monkeypatch):
+    _bout(session, TODAY - datetime.timedelta(days=1), "A Fighter", "B Fighter")
+    session.commit()
+    monkeypatch.setattr("backend.scripts.finalize_combat.fetch_scores",
+                        _stub([], remaining=19940, last=2))
+
+    finalize_from_scores(session, "boxing", "KEY", today=TODAY)
+
+    rows = session.query(ApiUsage).all()
+    assert [(r.endpoint, r.sport, r.credits_used, r.requests_remaining)
+            for r in rows] == [("scores", "boxing", 2, 19940)]
+
+
+def test_a_dry_run_still_logs_the_credits_it_spent(session, monkeypatch):
+    """Dry run leaves the games alone, but the API charged for the call all
+    the same. If the row were skipped, the budget would miss real spend."""
+    _bout(session, TODAY - datetime.timedelta(days=1), "A Fighter", "B Fighter")
+    session.commit()
+    monkeypatch.setattr("backend.scripts.finalize_combat.fetch_scores",
+                        _stub([_event("A Fighter", "B Fighter", "A Fighter")]))
+
+    finalize_from_scores(session, "boxing", "KEY", today=TODAY, dry_run=True)
+
+    assert session.query(ApiUsage).count() == 1
+
+
+def test_no_stuck_bouts_means_no_call_and_no_row(session, monkeypatch):
+    def explode(*a, **k):
+        raise AssertionError("nothing to finalize; the call is waste")
+
+    monkeypatch.setattr("backend.scripts.finalize_combat.fetch_scores", explode)
+
+    finalize_from_scores(session, "boxing", "KEY", today=TODAY)
+
+    assert session.query(ApiUsage).count() == 0

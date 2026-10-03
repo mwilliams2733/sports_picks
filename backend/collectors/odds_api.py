@@ -64,6 +64,19 @@ SPORT_KEYS = {
     "mlb": "baseball_mlb",
 }
 
+def read_usage(response) -> tuple[int, int | None]:
+    """``(requests_remaining, requests_last)`` from an Odds API response.
+
+    ``requests_last`` is what this call cost, or None when the header is
+    absent; `record_api_call` turns None into its fallback of 1. Every
+    caller that hits the API reads its headers here, so no two paths can
+    parse them differently.
+    """
+    remaining = int(response.headers.get("x-requests-remaining", 0))
+    last = response.headers.get("x-requests-last")
+    return remaining, (int(last) if last is not None else None)
+
+
 class OddsAPICollector:
     BASE_URL = "https://api.the-odds-api.com/v4/sports"
 
@@ -82,9 +95,7 @@ class OddsAPICollector:
 
     def _read_usage(self, response) -> None:
         """Credit headers from a response: what is left and what this call cost."""
-        self.requests_remaining = int(response.headers.get("x-requests-remaining", 0))
-        last = response.headers.get("x-requests-last")
-        self.requests_last = int(last) if last is not None else None
+        self.requests_remaining, self.requests_last = read_usage(response)
 
     async def fetch_odds(self, sport: str) -> list[dict]:
         sport_key = SPORT_KEYS.get(sport)
