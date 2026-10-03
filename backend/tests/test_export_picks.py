@@ -627,3 +627,28 @@ def test_manifest_has_no_absence_note_when_the_table_is_present(tmp_path, fixtur
         since=None, sports=None, counts=counts)
     text = open(manifest_path, encoding="utf-8").read()
     assert "no pick_versions table" not in text
+
+
+def test_a_db_predating_the_newer_pick_columns_still_exports(tmp_path, fixture_db):
+    """tracking_only, market_prob_novig and withdrawn_at were added on
+    2026-10-03. A `pre-*.db` snapshot has none of them, and the export is
+    read-only, so it cannot migrate: each must read as the value an older
+    row truly has, not crash with "no such column"."""
+    import sqlite3
+    con = sqlite3.connect(fixture_db)
+    con.execute("ALTER TABLE picks DROP COLUMN tracking_only")
+    con.execute("ALTER TABLE picks DROP COLUMN market_prob_novig")
+    con.execute("ALTER TABLE picks DROP COLUMN withdrawn_at")
+    con.commit()
+    con.close()
+
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path / "out"))
+    finally:
+        conn.close()
+
+    rows = _read_csv(counts["picks_path"])
+    assert rows
+    assert {r["tracking_only"] for r in rows} == {"False"}
+    assert {r["withdrawn_at"] for r in rows} == {""}

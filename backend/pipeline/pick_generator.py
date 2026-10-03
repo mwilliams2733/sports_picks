@@ -4,7 +4,7 @@ import math
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
-from backend.models import Game, PickModel, PickResult, StrategyModel, Odds, TeamStat, EloRating, EloHistory, Team
+from backend.models import Game, PickModel, PickResult, StrategyModel, Odds, TeamStat, EloRating, EloHistory, Team, EmailedPick
 from backend.pipeline.pick_versions import record_pick_version
 from backend.data_types import GameData, TeamStats, OddsSnapshot, FighterStats
 from backend.analysis.variants.ensemble import EnsembleStrategy
@@ -202,6 +202,11 @@ def generate_and_store_picks(session: Session, strategy_id: int,
         .filter(PickModel.strategy_id.in_(strategy_ids_in_play),
                 PickModel.game_id.in_(game_ids))
     }
+    # An emailed pick was advice people acted on, so it is never withdrawn.
+    emailed_pick_ids = {
+        pid for (pid,) in session.query(EmailedPick.pick_id)
+        .filter(EmailedPick.pick_id.in_([p.id for p in already.values()] or [-1]))
+    }
     # A graded pick is a recorded wager, not advice, and is never rewritten.
     graded_pick_ids = {
         pid for (pid,) in session.query(PickResult.pick_id)
@@ -227,6 +232,7 @@ def generate_and_store_picks(session: Session, strategy_id: int,
 
     count = 0
     refreshed = 0
+    withdrawn = 0
     thresholds_by_sport: dict[str, dict] = {}
     for game in games:
         try:
@@ -315,6 +321,9 @@ def generate_and_store_picks(session: Session, strategy_id: int,
                     session.add(db_pick)
                     record_pick_version(session, db_pick, "insert")
                     count += 1
+            withdrawn += _withdraw_stale(
+                session, game, already, {p.pick_type for p in picks if p.confidence >= 1},
+                graded_pick_ids, emailed_pick_ids)
         except Exception:
             logger.exception("Pick generation failed for game %s", game.id)
             continue
@@ -323,6 +332,8 @@ def generate_and_store_picks(session: Session, strategy_id: int,
         # Reported separately: a refreshed pick is not a new opportunity, it
         # is the same market re-priced because its inputs changed.
         logger.info("Refreshed %d pick(s) whose game had not started", refreshed)
+    if withdrawn:
+        logger.info("Withdrew %d pick(s) that no longer qualify", withdrawn)
     return count
 
 def _check_schedule_fatigue(session: Session, team_id: int, game_date: date, sport: str) -> tuple[bool, float]:
@@ -440,6 +451,35 @@ def _rationale_json(pick) -> str:
     return json.dumps([asdict(f) for f in pick.factors])
 
 
+def _withdraw_stale(session: Session, game, already: dict, produced: set,
+                    graded_pick_ids: set, emailed_pick_ids: set) -> int:
+    """Withdraw this game's stored picks whose market this run did not
+    produce. Returns how many.
+
+    Without this, a pick that stopped qualifying -- the market moved, or the
+    edge definition changed -- stayed published with an edge that no longer
+    existed: the generator refreshed picks that still qualified and never
+    touched the rest.
+
+    Called only after the strategy answered for the game: a prediction that
+    raised is no answer, not the answer "no pick". Never withdraws history:
+    a graded pick, one whose game has started (`_refreshable`), or one
+    already emailed. A withdrawn pick that qualifies again is reinstated by
+    `_refresh_pick`.
+    """
+    now = datetime.now(timezone.utc)
+    n = 0
+    for (game_id, pick_type), row in already.items():
+        if (game_id != game.id or row is None or pick_type in produced
+                or row.withdrawn_at is not None or row.id in emailed_pick_ids
+                or not _refreshable(row, game, graded_pick_ids)):
+            continue
+        row.withdrawn_at = now
+        record_pick_version(session, row, "withdraw")
+        n += 1
+    return n
+
+
 def _refresh_pick(existing: PickModel, pick) -> None:
     """Overwrite a stored pick in place with a freshly computed one.
 
@@ -473,6 +513,8 @@ def _refresh_pick(existing: PickModel, pick) -> None:
     # mid-season), and the row must say which it is now.
     existing.tracking_only = getattr(pick, "tracking_only", False)
     existing.market_prob_novig = getattr(pick, "implied_probability", None)
+    # Produced again, so no longer withdrawn.
+    existing.withdrawn_at = None
     existing.created_at = datetime.now(timezone.utc)
 
 def _build_game_data(session: Session, game,

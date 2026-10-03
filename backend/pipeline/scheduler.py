@@ -777,6 +777,9 @@ def grade_pending_picks(session) -> dict:
         session.query(PickModel, Game)
         .join(Game, PickModel.game_id == Game.id)
         .filter(Game.status == "final")
+        # A withdrawn pick was not a pick when its game started. Grading it
+        # would put a result on advice nobody was given.
+        .filter(PickModel.withdrawn_at.is_(None))
         .filter(~PickModel.id.in_(session.query(PickResult.pick_id)))
         .all()
     )

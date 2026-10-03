@@ -77,6 +77,7 @@ PICKS_FIELDS = [
     "series_depth",
     "odds_reconstructed",
     "tracking_only",
+    "withdrawn_at",
     "emailed", "emailed_odds", "emailed_at",
     "emailed_pick_value", "emailed_digest_date", "emailed_confidence",
 ]
@@ -261,6 +262,23 @@ def _git_head(repo_root: str) -> str:
         return f"(unavailable: {type(e).__name__})"
 
 
+#: Columns added to `picks` after older snapshots were taken, with the value
+#: a row that predates each one truly has. Selected as that literal when the
+#: column is absent, so a `pre-*.db` exports instead of crashing on
+#: "no such column" -- the same degrade-not-crash rule as `_table_exists`.
+OPTIONAL_PICK_COLUMNS = {"tracking_only": "0", "market_prob_novig": "NULL",
+                         "withdrawn_at": "NULL"}
+
+
+def _optional_pick_columns(conn: sqlite3.Connection) -> str:
+    """SELECT-list text for OPTIONAL_PICK_COLUMNS. Interpolated into the
+    picks query, which is safe only because every name and default here
+    is a constant in this module -- never caller input."""
+    present = {row[1] for row in conn.execute("PRAGMA table_info(picks)")}
+    return ", ".join(f"p.{c}" if c in present else f"{default} AS {c}"
+                     for c, default in OPTIONAL_PICK_COLUMNS.items())
+
+
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     """Whether `name` exists in this db's schema.
 
@@ -306,12 +324,13 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
     os.makedirs(out_dir, exist_ok=True)
     sports_set = set(sports) if sports else None
 
-    all_pick_rows = conn.execute("""
+    optional_pick_columns = _optional_pick_columns(conn)
+    all_pick_rows = conn.execute(f"""
         SELECT p.id AS pick_id, p.created_at, p.game_id, p.strategy_id,
                p.pick_type, p.pick_value, p.confidence, p.edge_pct,
                p.odds_at_pick, p.model_prob, p.suggested_unit_size,
                p.rationale_json, p.prop_player, p.prop_market,
-               p.odds_reconstructed, p.tracking_only, p.market_prob_novig,
+               p.odds_reconstructed, {optional_pick_columns},
                g.sport, g.season, g.date AS game_date, g.start_time,
                g.status AS game_status, g.home_score, g.away_score,
                ht.name AS home_name, at.name AS away_name,
@@ -439,6 +458,7 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
                 "series_depth": depth_by_game.get(r["game_id"], 0),
                 "odds_reconstructed": bool(r["odds_reconstructed"]),
                 "tracking_only": bool(r["tracking_only"]),
+                "withdrawn_at": r["withdrawn_at"] or "",
                 "emailed": emailed_row is not None,
                 "emailed_odds": emailed_row["odds"] if emailed_row else "",
                 "emailed_at": _iso_z(emailed_row["sent_at"]) if emailed_row else "",

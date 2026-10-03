@@ -273,6 +273,29 @@ def migrate_pick_market_prob_novig(engine):
                     "ALTER TABLE picks ADD COLUMN market_prob_novig FLOAT"))
 
 
+def migrate_pick_withdrawal(engine):
+    """Add picks.withdrawn_at and pick_versions.withdrawn if missing.
+
+    A pick that stops qualifying before its game starts is withdrawn rather
+    than left published (2026-10-03). NULL / 0 is correct for every earlier
+    row: nothing was ever withdrawn before this existed.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    tables = inspector.get_table_names()
+    with engine.begin() as conn:
+        if "picks" in tables:
+            cols = [c["name"] for c in inspector.get_columns("picks")]
+            if "withdrawn_at" not in cols:
+                conn.execute(text("ALTER TABLE picks ADD COLUMN withdrawn_at DATETIME"))
+        if "pick_versions" in tables:
+            cols = [c["name"] for c in inspector.get_columns("pick_versions")]
+            if "withdrawn" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE pick_versions ADD COLUMN withdrawn "
+                    "BOOLEAN NOT NULL DEFAULT 0"))
+
+
 def migrate_game_neutral_site(engine):
     """Add games.neutral_site if missing.
 
@@ -571,6 +594,7 @@ MIGRATIONS = (
     migrate_user_pin,
     migrate_pick_tracking_only,
     migrate_pick_market_prob_novig,
+    migrate_pick_withdrawal,
 )
 
 #: Migrations that can destroy data. run_migrations passes each of these an

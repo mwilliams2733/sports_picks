@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 #: and tracking a field nothing ever changes would only ever write version 1.
 TRACKED_FIELDS: tuple[str, ...] = (
     "pick_value", "confidence", "edge_pct", "odds_at_pick", "model_prob",
-    "suggested_unit_size", "rationale_json",
+    "suggested_unit_size", "rationale_json", "withdrawn",
 )
 
 
@@ -113,6 +113,7 @@ def record_pick_version(session: Session, pick: PickModel,
         model_prob=pick.model_prob,
         suggested_unit_size=pick.suggested_unit_size,
         rationale_json=pick.rationale_json,
+        withdrawn=pick.withdrawn,
     )
     try:
         with session.begin_nested():
