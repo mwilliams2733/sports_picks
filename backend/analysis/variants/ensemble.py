@@ -226,6 +226,17 @@ SPREAD_TRACKED_SPORTS: frozenset[str] = frozenset({"nfl", "mlb", "ncaaf"})
 TOTALS_TRACKED_SPORTS: frozenset[str] = frozenset({"nfl", "mlb", "ncaaf"})
 
 
+def _devigged(price: int, other: int) -> tuple[float, float]:
+    """``(fair, other_fair)``: the moneyline's own `remove_vig`, applied to a
+    two-sided line market.
+
+    Spreads and totals used a flat 0.5 here. That equals the de-vigged price
+    only when both sides are priced alike; at -105 / -115 the home side is
+    0.4884, so 0.5 moved 1.2 points of edge from one side to the other.
+    """
+    return remove_vig(american_to_implied_prob(price), american_to_implied_prob(other))
+
+
 class EnsembleStrategy(Strategy):
     _calibrated: CalibratedModel | None = None
 
@@ -329,7 +340,6 @@ class EnsembleStrategy(Strategy):
             cover_threshold = -spread_home  # -(-3.5) = 3.5: home must win by >3.5
             home_cover_prob = self._spread_cover_prob(predicted_diff, cover_threshold, std=diff_std)
             away_cover_prob = 1.0 - home_cover_prob
-            spread_fair = 0.5  # spread markets are ~50/50 after vig by design
             # The price each side is actually quoted at. STANDARD_JUICE only
             # where no book quoted one, which is every Odds row written
             # before the collector stopped discarding the price.
@@ -338,9 +348,14 @@ class EnsembleStrategy(Strategy):
             spread_fallback = None if spread_tracked else STANDARD_JUICE
             home_spread_price = avg_odds.get("spread_home_price") or spread_fallback
             away_spread_price = avg_odds.get("spread_away_price") or spread_fallback
-            home_spread_edge = (home_cover_prob - spread_fair) * 100
-            away_spread_edge = (away_cover_prob - spread_fair) * 100
-            if home_spread_price is not None and _takeable(home_spread_edge, "spread"):
+            # Measured against the de-vigged price, as the moneyline is. One
+            # quoted side cannot be de-vigged, so it makes no pick.
+            spread_quoted = home_spread_price is not None and away_spread_price is not None
+            if spread_quoted:
+                home_spread_fair, away_spread_fair = _devigged(home_spread_price, away_spread_price)
+                home_spread_edge = (home_cover_prob - home_spread_fair) * 100
+                away_spread_edge = (away_cover_prob - away_spread_fair) * 100
+            if spread_quoted and _takeable(home_spread_edge, "spread"):
                 models, available = self._count_agreeing_models(game, "home")
                 pick_value = f"HOME {spread_home:+g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="spread",
@@ -348,11 +363,11 @@ class EnsembleStrategy(Strategy):
                     confidence=calculate_confidence(home_spread_edge, models, self.thresholds, available),
                     edge_pct=round(home_spread_edge, 1),
                     model_probability=round(home_cover_prob, 4),
-                    implied_probability=spread_fair,
+                    implied_probability=round(home_spread_fair, 4),
                     odds_at_pick=home_spread_price,
                     suggested_unit_size=fractional_kelly(home_cover_prob, home_spread_price, kelly_fraction),
                     tracking_only=spread_tracked))
-            elif away_spread_price is not None and _takeable(away_spread_edge, "spread"):
+            elif spread_quoted and _takeable(away_spread_edge, "spread"):
                 models, available = self._count_agreeing_models(game, "away")
                 spread_away = avg_odds["spread_away"]
                 pick_value = f"AWAY +{spread_away:g}" if spread_away >= 0 else f"AWAY {spread_away:g}"
@@ -361,7 +376,7 @@ class EnsembleStrategy(Strategy):
                     confidence=calculate_confidence(away_spread_edge, models, self.thresholds, available),
                     edge_pct=round(away_spread_edge, 1),
                     model_probability=round(away_cover_prob, 4),
-                    implied_probability=spread_fair,
+                    implied_probability=round(away_spread_fair, 4),
                     odds_at_pick=away_spread_price,
                     suggested_unit_size=fractional_kelly(away_cover_prob, away_spread_price, kelly_fraction),
                     tracking_only=spread_tracked))
@@ -409,13 +424,15 @@ class EnsembleStrategy(Strategy):
             ou_line = avg_odds["over_under"]
             over_prob = self._over_probability(predicted_total, ou_line, std=get_total_points_std(game.sport))
             under_prob = 1.0 - over_prob
-            ou_fair = 0.5  # O/U markets are ~50/50 after vig by design
             totals_fallback = None if totals_tracked else STANDARD_JUICE
             over_price = avg_odds.get("over_price") or totals_fallback
             under_price = avg_odds.get("under_price") or totals_fallback
-            over_edge = (over_prob - ou_fair) * 100
-            under_edge = (under_prob - ou_fair) * 100
-            if over_price is not None and _takeable(over_edge, "over_under"):
+            totals_quoted = over_price is not None and under_price is not None
+            if totals_quoted:
+                over_fair, under_fair = _devigged(over_price, under_price)
+                over_edge = (over_prob - over_fair) * 100
+                under_edge = (under_prob - under_fair) * 100
+            if totals_quoted and _takeable(over_edge, "over_under"):
                 models, available = self._count_total_agreeing_models(game, True)
                 pick_value = f"Over {ou_line:g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="over_under",
@@ -423,11 +440,11 @@ class EnsembleStrategy(Strategy):
                     confidence=calculate_confidence(over_edge, models, self.thresholds, available),
                     edge_pct=round(over_edge, 1),
                     model_probability=round(over_prob, 4),
-                    implied_probability=ou_fair,
+                    implied_probability=round(over_fair, 4),
                     odds_at_pick=over_price,
                     suggested_unit_size=fractional_kelly(over_prob, over_price, kelly_fraction),
                     tracking_only=totals_tracked))
-            elif under_price is not None and _takeable(under_edge, "over_under"):
+            elif totals_quoted and _takeable(under_edge, "over_under"):
                 models, available = self._count_total_agreeing_models(game, False)
                 pick_value = f"Under {ou_line:g}"
                 picks.append(Pick(game_id=game.game_id, pick_type="over_under",
@@ -435,7 +452,7 @@ class EnsembleStrategy(Strategy):
                     confidence=calculate_confidence(under_edge, models, self.thresholds, available),
                     edge_pct=round(under_edge, 1),
                     model_probability=round(under_prob, 4),
-                    implied_probability=ou_fair,
+                    implied_probability=round(under_fair, 4),
                     odds_at_pick=under_price,
                     suggested_unit_size=fractional_kelly(under_prob, under_price, kelly_fraction),
                     tracking_only=totals_tracked))

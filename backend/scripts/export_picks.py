@@ -197,29 +197,23 @@ def _market_prob_novig(pick_type: str, model_prob: float | None,
       themselves rounded before storage (edge_pct to 0.1 percentage points,
       model_prob to 4 decimal places), so this is accurate to within about
       +/-0.0005 of what the strategy computed internally, not bit-exact.
-    - spread / over_under: edge_pct is measured against a flat 0.5 (the
-      fair coin-flip value the model used for a line pick), not a de-vigged
-      market probability -- there is no market-side win probability stored
-      for a spread/total pick. 0.5 is the documented convention, not a
-      computed value, and is written only when `model_prob` is itself
-      present -- a pick with no stored `model_prob` (all 141 legacy
-      spread/over_under picks from before 2026-09-17; see
-      docs/data-dictionary.md's known traps) gets a blank here rather than
-      a fabricated 0.5, since 0.5 documents what a REAL pick's edge was
-      measured against and a legacy row's edge was not necessarily measured
-      against anything at all.
+    - spread / over_under: the same arithmetic. Since 2026-10-03 these
+      edges are measured against the de-vigged price, exactly like the
+      moneyline. Before that they were measured against a flat 0.5, and the
+      arithmetic recovers 0.5 for those rows, within the same rounding. A
+      pick with no stored `model_prob` (all 141 legacy spread/over_under
+      picks from before 2026-09-17; see docs/data-dictionary.md's known
+      traps) gets a blank rather than a fabricated value.
     - prop: props are never de-vigged against a market probability at all
       (edge_pct is a stat-unit gap -- see docs/data-dictionary.md's known
       traps). Blank.
     """
     if pick_type == "prop":
         return None
-    if pick_type == "moneyline":
+    if pick_type in ("moneyline", "spread", "over_under"):
         if model_prob is None or edge_pct is None:
             return None
         return model_prob - edge_pct / 100.0
-    if pick_type in ("spread", "over_under"):
-        return 0.5 if model_prob is not None else None
     return None
 
 
