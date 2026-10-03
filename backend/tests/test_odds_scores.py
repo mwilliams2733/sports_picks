@@ -194,3 +194,40 @@ async def test_an_unmapped_sport_makes_no_request_at_all():
 
     assert result == []
     assert client.url is None
+
+
+class _HeaderClient(_RecordingClient):
+    def __init__(self, headers):
+        super().__init__()
+        self.headers = headers
+
+    async def get(self, url, params=None):
+        response = await super().get(url, params)
+        response.headers = self.headers
+        return response
+
+
+@pytest.mark.asyncio
+async def test_on_usage_receives_remaining_and_the_calls_cost():
+    """The caller logs the cost to api_usage. A /scores call costs 2 credits,
+    not the 1 that a missing header falls back to."""
+    seen = []
+    client = _HeaderClient({"x-requests-remaining": "19940",
+                            "x-requests-last": "2"})
+
+    await __import__("backend.collectors.odds_scores", fromlist=["x"])         .fetch_scores(client, "KEY", "mma",
+                      on_usage=lambda rem, last: seen.append((rem, last)))
+
+    assert seen == [(19940, 2)]
+
+
+@pytest.mark.asyncio
+async def test_a_missing_cost_header_reports_none():
+    """None, not 0: record_api_call turns None into the fallback of 1."""
+    seen = []
+    client = _HeaderClient({"x-requests-remaining": "19940"})
+
+    await __import__("backend.collectors.odds_scores", fromlist=["x"])         .fetch_scores(client, "KEY", "mma",
+                      on_usage=lambda rem, last: seen.append((rem, last)))
+
+    assert seen == [(19940, None)]

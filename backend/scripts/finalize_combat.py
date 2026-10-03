@@ -42,6 +42,7 @@ from datetime import date, timedelta
 
 import httpx
 
+from backend.collectors.budget import record_api_call
 from backend.collectors.odds_scores import MAX_DAYS_FROM, fetch_scores
 from backend.collectors.ufc import match_bout, winner_is
 from backend.config import load_config
@@ -81,8 +82,14 @@ async def _finalize(session, sport: str, api_key: str, today: date,
 
     names = {t.id: t.abbreviation for t in
              session.query(Team).filter(Team.sport == sport)}
+    # Logged even on a dry run. Dry run leaves the games alone, but the API
+    # charges for the call either way, and check_budget can only count what
+    # api_usage holds.
+    def log_usage(remaining: int, last: int | None) -> None:
+        record_api_call(session, "scores", sport, remaining, credits_used=last)
+
     async with httpx.AsyncClient(timeout=30.0) as client:
-        bouts = await fetch_scores(client, api_key, sport)
+        bouts = await fetch_scores(client, api_key, sport, on_usage=log_usage)
 
     for game in games:
         summary["considered"] += 1

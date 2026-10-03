@@ -39,8 +39,10 @@ Limits, both measured 2026-09-20
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
-from backend.collectors.odds_api import SPORT_KEYS, install_log_redaction
+from backend.collectors.odds_api import (SPORT_KEYS, install_log_redaction,
+                                         read_usage)
 from backend.collectors.ufc import BoutResult, normalize_name
 
 logger = logging.getLogger(__name__)
@@ -120,7 +122,9 @@ def bouts_from_scores(events) -> list[BoutResult]:
 
 
 async def fetch_scores(client, api_key: str, sport: str,
-                       days_from: int = MAX_DAYS_FROM) -> list[BoutResult]:
+                       days_from: int = MAX_DAYS_FROM, *,
+                       on_usage: Callable[[int, int | None], None] | None = None,
+                       ) -> list[BoutResult]:
     """Decided bouts for one sport over the last ``days_from`` days.
 
     ``days_from`` is clamped to `MAX_DAYS_FROM` rather than passed through:
@@ -141,8 +145,12 @@ async def fetch_scores(client, api_key: str, sport: str,
                 "daysFrom": max(1, min(days_from, MAX_DAYS_FROM))},
     )
     response.raise_for_status()
-    remaining = response.headers.get("x-requests-remaining")
-    if remaining is not None:
-        logger.info("Odds API scores for %s: %s credits remaining",
-                    sport, remaining)
+    remaining, last = read_usage(response)
+    logger.info("Odds API scores for %s: %s credits remaining",
+                sport, remaining)
+    # The collector has no session, so the caller logs the cost to
+    # api_usage. Until 2026-10-03 nobody did, and check_budget missed these
+    # 2-credit calls entirely.
+    if on_usage is not None:
+        on_usage(remaining, last)
     return bouts_from_scores(response.json())
