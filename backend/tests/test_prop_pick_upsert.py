@@ -119,7 +119,7 @@ def test_eighteen_runs_of_four_lines_is_one_pick(session):
 def test_the_stored_line_is_the_best_edge_whatever_the_order(session):
     """Storage itself must go through the line collapse. Without it the key
     still yields one row, but it is whichever line happened to come last."""
-    added, _ = _store_prop_picks(session, [
+    added, _, _ = _store_prop_picks(session, [
         _a(line=204.5, edge=12.0), _a(line=211.5, edge=8.0),
         _a(line=207.5, edge=10.0)], strategy_id=7)
 
@@ -132,7 +132,7 @@ def test_a_rerun_refreshes_the_pick_in_place(session):
     _store_prop_picks(session, [_a(line=205.5, odds=-110)], strategy_id=7)
     first_id = _props(session)[0].id
 
-    added, refreshed = _store_prop_picks(
+    added, refreshed, _ = _store_prop_picks(
         session, [_a(line=207.5, odds=-105)], strategy_id=7)
 
     (pick,) = _props(session)
@@ -157,7 +157,7 @@ def test_a_graded_pick_is_never_rewritten_or_duplicated(session):
 
 def test_a_started_game_gets_no_new_prop_pick(session):
     """In-play prop prices are not takeable, the same rule as skip_started."""
-    added, _ = _store_prop_picks(session, [_a(game_id=2)], strategy_id=7)
+    added, _, _ = _store_prop_picks(session, [_a(game_id=2)], strategy_id=7)
 
     assert added == 0
     assert _props(session) == []
@@ -181,7 +181,7 @@ def test_existing_duplicates_do_not_multiply_or_crash(session):
                               created_at=datetime.now(timezone.utc)))
     session.commit()
 
-    added, refreshed = _store_prop_picks(session, [_a()], strategy_id=7)
+    added, refreshed, _ = _store_prop_picks(session, [_a()], strategy_id=7)
 
     assert added == 0 and refreshed == 1
     assert len(_props(session)) == 3

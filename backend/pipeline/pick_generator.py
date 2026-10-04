@@ -470,14 +470,28 @@ def _withdraw_stale(session: Session, game, already: dict, produced: set,
     now = datetime.now(timezone.utc)
     n = 0
     for (game_id, pick_type), row in already.items():
-        if (game_id != game.id or row is None or pick_type in produced
-                or row.withdrawn_at is not None or row.id in emailed_pick_ids
-                or not _refreshable(row, game, graded_pick_ids)):
+        if game_id != game.id or row is None or pick_type in produced:
             continue
-        row.withdrawn_at = now
-        record_pick_version(session, row, "withdraw")
-        n += 1
+        n += withdraw_pick(session, row, game, graded_pick_ids,
+                           emailed_pick_ids, now)
     return n
+
+
+def withdraw_pick(session: Session, row: PickModel, game, graded_pick_ids: set,
+                  emailed_pick_ids: set, now: datetime) -> bool:
+    """Withdraw one stored pick that this run did not produce, unless it is
+    history. Returns whether it was withdrawn.
+
+    The one eligibility rule for game picks (`_withdraw_stale`) and prop
+    picks (`prop_pipeline._store_prop_picks`): never a pick already
+    withdrawn, already emailed, graded, or whose game has started.
+    """
+    if (row.withdrawn_at is not None or row.id in emailed_pick_ids
+            or not _refreshable(row, game, graded_pick_ids)):
+        return False
+    row.withdrawn_at = now
+    record_pick_version(session, row, "withdraw")
+    return True
 
 
 def _refresh_pick(existing: PickModel, pick) -> None:
