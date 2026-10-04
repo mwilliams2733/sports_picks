@@ -22,8 +22,9 @@ def _dedup_prop_analyses(analyses: list[PropAnalysis]) -> list[PropAnalysis]:
     """Collapse the same prop offered by multiple bookmakers into one pick.
 
     A prop is stored once per book, so the same (game, player, market, outcome,
-    line) appears N times with an identical edge (edge ignores odds). Keep only
-    the row with the best price (highest payout) for the bettor.
+    line) appears N times. Keep only the row with the best price (highest
+    payout) for the bettor -- since 2026-10-04 also the row with the most
+    edge, because edge is measured against the price.
     """
     best: dict[tuple, PropAnalysis] = {}
     for a in analyses:
@@ -385,7 +386,7 @@ def _refresh_prop_pick(existing: PickModel, analysis: PropAnalysis) -> None:
     """
     fresh = _build_prop_pick(analysis, existing.strategy_id)
     for field in ("pick_value", "confidence", "edge_pct", "odds_at_pick",
-                  "created_at"):
+                  "model_prob", "created_at"):
         setattr(existing, field, getattr(fresh, field))
     # Produced again, so no longer withdrawn.
     existing.withdrawn_at = None
@@ -425,6 +426,7 @@ def _build_prop_pick(analysis, strategy_id: int) -> PickModel:
         confidence=analysis.confidence, edge_pct=analysis.edge_pct,
         odds_at_pick=analysis.odds, created_at=datetime.now(tz=timezone.utc),
         prop_player=analysis.player_name, prop_market=analysis.market,
+        model_prob=getattr(analysis, "model_probability", None),
     )
 
 

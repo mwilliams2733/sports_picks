@@ -2,6 +2,7 @@ from backend.models import PlayerProp, PlayerStat
 from backend.data_types import PropAnalysis
 from backend.analysis.prop_confidence import calculate_prop_confidence
 from backend.analysis.prop_markets import MARKET_STAT_MAP
+from backend.analysis.odds_utils import InvalidOddsError, value_edge
 
 try:
     from scipy.stats import norm, poisson
@@ -189,10 +190,16 @@ class PropAnalyzer:
         else:
             directional_prob = 1.0 - exceedance_prob
 
-        # 0.5 = no edge, 0.75 = 50% edge, 1.0 = 100% edge.
-        edge_pct = (directional_prob - 0.5) * 200
-
-        if edge_pct < 0:
+        # Edge over the price's break-even, the definition every game pick
+        # has used since 2026-10-03 (odds_utils.value_edge). It used to be
+        # (prob - 0.5) * 200, which ignored the price: a -300 line scored the
+        # same as a -110 line at the same probability, so a juiced rung of a
+        # book's ladder read as a large edge. Thresholds were kept (owner,
+        # 2026-10-04), so the bar is stricter: 1 star at -110 needs 57.4%,
+        # not 52.5%.
+        try:
+            edge_pct = value_edge(directional_prob, prop.odds)
+        except InvalidOddsError:
             return None
         if edge_pct < self.min_edge:
             return None
@@ -224,6 +231,7 @@ class PropAnalyzer:
             game_id=prop.game_id,
             odds=prop.odds,
             bookmaker=prop.bookmaker,
+            model_probability=round(directional_prob, 4),
         )
 
     @staticmethod
