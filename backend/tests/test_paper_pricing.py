@@ -89,19 +89,67 @@ def test_a_stale_moneyline_book_does_not_pull_the_price(session):
     assert _price(session, g, GameBet(g.id, "moneyline", "HOME")).odds == -110
 
 
-def test_spread_uses_the_consensus_line_and_price(session):
-    """Review Focus 3: books at -3 and -4 -> the bet is at -3.5."""
+def test_spread_is_the_line_most_books_quote_priced_by_those_books(session):
+    """Owner, 2026-10-04: a line a book offers, not the average. Books at
+    -3.5, -3.5 and -3 used to give HOME -3.3, a line nobody quotes."""
+    g = _game(session)
+    for book, line, price in (("dk", -3.5, -110), ("fd", -3.5, -120), ("mgm", -3.0, -140)):
+        _odds(session, g, book, moneyline_home=-150, moneyline_away=130,
+              spread_home=line, spread_away=-line,
+              spread_home_price=price, spread_away_price=100)
+    home = _price(session, g, GameBet(g.id, "spread", "HOME"))
+    away = _price(session, g, GameBet(g.id, "spread", "AWAY"))
+    assert (home.pick_value, home.line, home.odds) == ("HOME -3.5", -3.5, -115)
+    assert (away.pick_value, away.line) == ("AWAY +3.5", 3.5)
+
+
+def test_a_tied_spread_goes_to_the_line_worse_for_the_bettor(session):
+    """Books at -3 and -4, one each: equally common, equally near the
+    average. Each side gets the line worse for its bettor, at the price of
+    the book quoting it -- a tie never hands out the better number."""
     g = _game(session)
     _odds(session, g, "dk", moneyline_home=-150, moneyline_away=130,
           spread_home=-3.0, spread_away=3.0,
-          spread_home_price=-110, spread_away_price=100)
+          spread_home_price=-110, spread_away_price=105)
     _odds(session, g, "fd", moneyline_home=-150, moneyline_away=130,
           spread_home=-4.0, spread_away=4.0,
           spread_home_price=-130, spread_away_price=110)
     home = _price(session, g, GameBet(g.id, "spread", "HOME"))
     away = _price(session, g, GameBet(g.id, "spread", "AWAY"))
-    assert (home.pick_value, home.line, home.odds) == ("HOME -3.5", -3.5, -120)
-    assert (away.pick_value, away.line, away.odds) == ("AWAY +3.5", 3.5, 105)
+    assert (home.pick_value, home.odds) == ("HOME -4", -130)
+    assert (away.pick_value, away.odds) == ("AWAY +3", 105)
+
+
+def test_a_tied_total_gives_each_side_its_worse_line(session):
+    g = _game(session)
+    _odds(session, g, "dk", moneyline_home=-150, moneyline_away=130,
+          over_under=42.5, over_price=-110, under_price=-110)
+    _odds(session, g, "fd", moneyline_home=-150, moneyline_away=130,
+          over_under=43.5, over_price=-105, under_price=-115)
+    over = _price(session, g, GameBet(g.id, "over_under", "Over"))
+    under = _price(session, g, GameBet(g.id, "over_under", "Under"))
+    assert (over.pick_value, over.odds) == ("Over 43.5", -105)
+    assert (under.pick_value, under.odds) == ("Under 42.5", -110)
+
+
+def test_a_whole_number_line_can_push(session):
+    """The averaged line was never a whole number in practice, so a paper
+    spread could never push. A quoted -3 can, and the grader agrees."""
+    g = _game(session)
+    _odds(session, g, "dk", moneyline_home=-150, moneyline_away=130,
+          spread_home=-3.0, spread_away=3.0,
+          spread_home_price=-110, spread_away_price=-110)
+    home = _price(session, g, GameBet(g.id, "spread", "HOME"))
+    assert grade_pick("spread", home.pick_value, 24, 21, home.odds)[0] == "push"
+
+
+def test_quoted_line_unit():
+    from backend.analysis.strategy import quoted_line
+    assert quoted_line([]) is None
+    assert quoted_line([-3.5, -3.5, -3.0]) == -3.5
+    assert quoted_line([-3.0, -4.0, -7.0]) == -4.0, "nearest the average -4.67"
+    assert quoted_line([42.5, 43.5]) == 42.5
+    assert quoted_line([42.5, 43.5], higher_is_worse=True) == 43.5
 
 
 def test_total_uses_the_consensus_line_and_price(session):

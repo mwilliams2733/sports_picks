@@ -47,6 +47,27 @@ def consensus_line(lines) -> float | None:
     return round(sum(lines) / len(lines), 1)
 
 
+def quoted_line(lines, *, higher_is_worse: bool = False) -> float | None:
+    """The line a bet can actually be placed at: the one most books quote.
+
+    `consensus_line` averages, which gives lines no book offers (HOME -11.6,
+    O/U 42.4) and that can never push. Paper bets are priced here instead.
+
+    Ties go to the line nearest the average, then to the one worse for the
+    bettor, so a tie never hands out a better line than the market's middle.
+    For a spread (either side) and an Under, a lower line is worse;
+    ``higher_is_worse`` says so for an Over. None for an empty list.
+    """
+    if not lines:
+        return None
+    counts: dict[float, int] = {}
+    for line in lines:
+        counts[line] = counts.get(line, 0) + 1
+    mean = sum(lines) / len(lines)
+    worse = (lambda x: -x) if higher_is_worse else (lambda x: x)
+    return min(counts, key=lambda x: (-counts[x], abs(x - mean), worse(x)))
+
+
 def average_odds(odds) -> dict | None:
     """Average book-level odds into a single consensus quote.
 
