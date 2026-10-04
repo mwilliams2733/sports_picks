@@ -98,6 +98,9 @@ class PropAnalysis:
     game_id: int
     odds: int
     bookmaker: str
+    #: P(this outcome) from the projection's distribution. Defaulted so
+    #: callers that build a PropAnalysis by hand keep working.
+    model_probability: float | None = None
 
 @dataclass
 class GameData:

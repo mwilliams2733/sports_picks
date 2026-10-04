@@ -69,8 +69,8 @@ anything price-derived.
 | `line` | The numeric line parsed out of `pick_value` (e.g. `-1.5`, `8.5`), blank for a moneyline pick (there is no line) or when nothing parses. |
 | `odds_at_pick` | The American price stored at pick time -- or, for a refreshed game pick, at the time of the **last refresh before kickoff** (see "known traps: picks are refreshed in place"). Null for a small number of legacy rows. |
 | `implied_prob_raw` | What `odds_at_pick` implies, vig included (not de-vigged). Computed with `backend.analysis.odds_utils.american_to_implied_prob`. Blank if `odds_at_pick` is null or not a valid American price. |
-| `model_prob` | The model's own win probability for the pick, where stored. Nullable, especially for props and older rows. |
-| `edge_pct` | The stored edge in percentage points. **For game picks the definition changed on 2026-10-03.** Before that it was `model_prob - market_prob_novig`, which is disagreement with the fair price. From 2026-10-03 it is `model_prob - implied_prob_raw`: the edge over the **break-even** price, after the vig, about 1.7 points smaller for the same pick. `min_edge` (3) and the tier thresholds were kept, so the bar is stricter from that date and stars shift down. **Never pool the two regimes.** **See "Known traps": a prop's `edge_pct` is on a completely different, incompatible scale from a game pick's.** |
+| `model_prob` | The model's own win probability for the pick, where stored. Nullable for older rows. **Props had none until 2026-10-04**; from then it is the prop's directional probability. |
+| `edge_pct` | The stored edge in percentage points. **For game picks the definition changed on 2026-10-03.** Before that it was `model_prob - market_prob_novig`, which is disagreement with the fair price. From 2026-10-03 it is `model_prob - implied_prob_raw`: the edge over the **break-even** price, after the vig, about 1.7 points smaller for the same pick. `min_edge` (3) and the tier thresholds were kept, so the bar is stricter from that date and stars shift down. **Never pool the two regimes.** **See "Known traps": a prop's `edge_pct` before 2026-10-04 is on a different, incompatible scale; from 2026-10-04 it uses the game-pick definition.** |
 | `market_prob_novig` | See below. |
 | `confidence` | The stored star rating (1-5), still recorded even though stars are hidden from users in the email and frontend (see "known traps"). |
 | `suggested_unit_size` | Kelly stake in units, where one unit is 1% of bankroll. Null for picks made before this was persisted (not a computed 0); 0.0 means the sizer looked at the bet and declined it. **See "known traps": the sizer returned a constant 0.5 internally before 2026-09-20, but that value was never persisted -- every pick before 2026-09-21 is NULL here, not 0.5.** |
@@ -532,14 +532,18 @@ stated explicitly rather than left silent.
 - **Emailed picks have only been recorded since 2026-09-28.** Verified via
   git history: `697d6fc` ("feat(digest): record the picks each email sent,
   and grade them as sent") is dated 2026-09-28 (23:07 UTC).
-- **Prop `edge_pct` is NOT a probability difference.** Verified by code
-  intent: `backend/digest/selector.py`'s docstring (in the notes on prop
-  ranking, not `render.py`) states explicitly that a prop's edge is
-  price-blind and "not comparable to a game pick's de-vigged edge", which
-  is also why the daily email never shows a prop's edge (see this branch's
-  own change removing edge display for props while adding it for game
-  picks). It is a stat-unit gap (e.g. projected yards minus line) stored in
-  the same numeric column as a game pick's percentage-point edge. A raw
+- **Prop `edge_pct` changed definition on 2026-10-04; never pool the two.**
+  Before: `(model_prob - 0.5) * 200` -- price-blind, on double the scale of
+  a probability difference, so a -300 prop scored the same as a -110 one at
+  the same probability. (An earlier version of this entry called it a
+  stat-unit gap; it was not.) From 2026-10-04 it is the edge over the
+  price's break-even, `odds_utils.value_edge`, the same definition game
+  picks have used since 2026-10-03, and `model_prob` is stored for props.
+  The star thresholds (5/7/10/15/20) were kept, so a star means a much
+  higher probability than before. Measured on 09-27..10-03 props: 85% would
+  still be 5-star -- prop probabilities are overconfident (5 stars at -110
+  implies >=72%; those picks won about half), so stars carry little
+  information for props in either regime. A raw
   stored prop `pick_value` ends in the API market key when `market_label`
   does not recognize it -- e.g. `"Zach Ertz Over 10.5 player_reception_yds"`
   (`backend/digest/render.py:94`, `backend/tests/test_prop_market_labels.py`)
