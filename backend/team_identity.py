@@ -117,9 +117,13 @@ def _normalise(label: str) -> str:
     return _ST.sub("State", label)
 
 
-@functools.lru_cache(maxsize=None)
-def _espn_ids(sport: str) -> dict[str, str]:
-    return {r["abbreviation"]: r["espn_id"] for r in _table(sport)}
+def has_snapshot(sport: str) -> bool:
+    """Whether ``backend/data/<sport>_teams.json`` is committed.
+
+    For such a sport the snapshot is the whole answer: an abbreviation it
+    does not resolve is unknown, not something to ask ESPN about.
+    """
+    return bool(_table(sport))
 
 
 def espn_id_for(sport: str, abbreviation: str) -> str | None:

@@ -102,3 +102,39 @@ async def test_an_unknown_team_makes_no_request_at_all():
     src._client = _Counting()
     assert await src.fetch_season_averages("nba", "ZZZ") == []
     assert calls == [], f"made {len(calls)} pointless request(s): {calls}"
+
+
+@pytest.mark.asyncio
+async def test_a_sport_without_a_snapshot_still_asks_espn(monkeypatch):
+    """The fallback the fix above must not remove: with no committed
+    snapshot, ESPN's /teams endpoint is the only source of the id."""
+    from backend import team_identity
+
+    monkeypatch.setattr(team_identity, "has_snapshot", lambda sport: False)
+    monkeypatch.setattr(team_identity, "espn_team_id", lambda sport, abbr: None)
+    src = EspnStatsSource()
+    calls = []
+
+    class _Teams:
+        async def get(self, url, **kwargs):
+            calls.append(url)
+
+            class _Resp:
+                def raise_for_status(self):
+                    pass
+
+                def json(self):
+                    return {"sports": [{"leagues": [{"teams": [
+                        {"team": {"abbreviation": "ZZZ", "id": 99}}]}]}]}
+            return _Resp()
+
+    src._client = _Teams()
+    assert await src._find_team_id("nba", "ZZZ") == "99"
+    assert len(calls) == 1 and calls[0].endswith("/nba/teams")
+
+
+def test_has_snapshot_matches_the_committed_files():
+    from backend import team_identity
+
+    assert team_identity.has_snapshot("nba") is True
+    assert team_identity.has_snapshot("boxing") is False

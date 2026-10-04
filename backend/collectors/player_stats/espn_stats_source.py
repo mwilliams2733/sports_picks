@@ -115,30 +115,6 @@ class EspnStatsSource(PlayerStatsSource):
         #: committed snapshot. One request per sport per process, not per team.
         self._team_ids: dict[str, dict[str, str]] = {}
 
-    async def _find_team_id(self, sport: str, team_abbr: str) -> str | None:
-        """ESPN's numeric team id for ``team_abbr``, or None.
-
-        This method was called by fetch_season_averages but never written, so
-        every season-average fetch raised AttributeError. The collector caught
-        it and logged a warning, which is why it survived: 284 warnings per
-        scheduled run and stats_fetched: 0, with nothing ever failing loudly.
-
-        Resolved from the committed team snapshot rather than ESPN's /teams
-        endpoint: no network call, and it cannot drift from the abbreviations
-        team_identity resolves to, because both read the same file.
-        """
-        from backend.team_identity import espn_id_for
-
-        team_id = espn_id_for(sport, team_abbr)
-        if team_id is None:
-            logger.warning(
-                "ESPN: no team id for %r in %s. If the team is real, the "
-                "snapshot is stale -- re-run "
-                "backend.scripts.refresh_team_tables --sport %s",
-                team_abbr, sport, sport,
-            )
-        return team_id
-
     async def fetch_season_averages(self, sport: str, team_abbr: str) -> list[dict]:
         sport = sport.lower()
         if sport not in ESPN_SPORT_URLS:
@@ -214,10 +190,24 @@ class EspnStatsSource(PlayerStatsSource):
         Sports with no snapshot fall back to ESPN's teams endpoint, cached per
         sport. Combat sports have no teams endpoint and resolve to None --
         a fighter is not a team, so that is the right answer, not an error.
+
+        A sport WITH a snapshot never falls back: a miss there is an unknown
+        team, and asking ESPN's /teams for it is a request that cannot help.
+        It used to: two fixes on 2026-09-19 (ae412df, 4ed3630) each defined
+        this method, the merge kept both, and the later one -- this one --
+        fell back on every miss. ESPN 403s a client that asks quickly enough.
         """
         espn_id = team_identity.espn_team_id(sport, team_abbr)
         if espn_id:
             return espn_id
+        if team_identity.has_snapshot(sport):
+            logger.warning(
+                "ESPN: no team id for %r in %s. If the team is real, the "
+                "snapshot is stale -- re-run "
+                "backend.scripts.refresh_team_tables --sport %s",
+                team_abbr, sport, sport,
+            )
+            return None
 
         teams_url = ESPN_SPORT_URLS[sport].get("teams")
         if not teams_url:
