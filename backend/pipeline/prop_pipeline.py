@@ -1,5 +1,5 @@
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from backend.models import Game, Team, PlayerProp, PlayerStat, PickModel, StrategyModel, TeamStat
 from backend.pipeline.pick_versions import record_pick_version
@@ -13,7 +13,7 @@ from backend.analysis.prop_confidence import get_prop_thresholds
 from backend.analysis.prop_markets import market_label
 from backend.analysis.odds_utils import calculate_payout, InvalidOddsError
 from backend.data_types import PropAnalysis
-from backend.time_utils import et_today
+from backend.time_utils import as_utc, et_today
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,11 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
             # what the box-score collector writes. Removing it drops one HTTP
             # call per player per run for no loss.
 
-    props = session.query(PlayerProp).join(Game).filter(Game.date == target_date).all()
+    # Only the games in scope. Unscoped, every window analysed every sport's
+    # props for the date under one sport's thresholds, and re-priced them.
+    all_props = (session.query(PlayerProp)
+                 .filter(PlayerProp.game_id.in_([g.id for g in games])).all())
+    props = current_props(all_props)
 
     # Build game -> teams map and opponent defensive ratings cache
     game_teams = {}
@@ -137,12 +141,18 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
                 "recent_weight": cfg.get("recent_weight", 0.6),
                 "min_edge": cfg.get("min_edge", 5.0),
             }
-    # One PropAnalyzer serves every game for this target_date, which may span
-    # multiple sports; thresholds are keyed by sport, so use the first game's
-    # sport as representative (matches this pipeline's existing single-analyzer
-    # design rather than introducing per-sport analyzers here).
-    analyzer_kwargs["thresholds"] = get_prop_thresholds(session, games[0].sport)
-    analyzer = PropAnalyzer(**analyzer_kwargs)
+    # One PropAnalyzer per sport (below): thresholds are keyed by sport, and an
+    # unscoped call (fetch_odds_now, the pipeline API) spans several. This
+    # used to build one analyzer from games[0]'s sport for all of them.
+    sport_of = {g.id: g.sport for g in games}
+    analyzers: dict[str, PropAnalyzer] = {}
+
+    def analyzer_for(game_id: int) -> PropAnalyzer:
+        sport = sport_of[game_id]
+        if sport not in analyzers:
+            analyzers[sport] = PropAnalyzer(
+                **analyzer_kwargs, thresholds=get_prop_thresholds(session, sport))
+        return analyzers[sport]
 
     # Generate game predictions for game script correlation
     from backend.pipeline.pick_generator import STRATEGY_MAP, _build_game_data
@@ -177,11 +187,11 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
     props_analyzed = 0
     winning: list[PropAnalysis] = []
     # (game, player, market) keys this run gave an answer for. Only these
-    # can be withdrawn: a stored prop this run never analysed is no answer,
-    # not the answer "no pick". `props` is not scoped to `games` (it spans
-    # every sport on the date), so a window for one sport must not withdraw
-    # another sport's props it analysed under the wrong sport's thresholds.
-    answered: set[tuple] = set()
+    # can be withdrawn: a stored prop this run never looked at is no answer,
+    # not the answer "no pick". Every key on an in-scope game is answered --
+    # analysed if a book still offers it, and "no longer offered" if no book
+    # does (`current_props`) -- so a pulled prop's pick is withdrawn too.
+    answered: set[tuple] = {(p.game_id, p.player_name, p.market) for p in all_props}
 
     for prop in props:
         season_avg = session.query(PlayerStat).filter_by(
@@ -212,12 +222,10 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
                     "player_is_home": player_team_id == home_id_gs,
                 }
 
-        analysis = analyzer.analyze(prop, season_avg, recent,
+        analysis = analyzer_for(prop.game_id).analyze(prop, season_avg, recent,
                                     opponent_def_rating=opponent_def,
                                     game_script=game_script)
         props_analyzed += 1
-        if prop.game_id in game_teams:
-            answered.add((prop.game_id, prop.player_name, prop.market))
         if analysis and analysis.confidence >= 1:
             winning.append(analysis)
 
@@ -232,6 +240,35 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
     return {"games": len(games), "stats_fetched": stats_count,
             "props_analyzed": props_analyzed, "picks_generated": picks_generated,
             "picks_refreshed": picks_refreshed, "picks_withdrawn": picks_withdrawn}
+
+
+#: Rows written by one prop fetch carry timestamps seconds apart; fetches
+#: for a game are a window (hours) apart. Anything this far behind the
+#: game's latest row was not in the latest fetch.
+PROP_FETCH_SLACK = timedelta(minutes=10)
+
+
+def current_props(rows: list[PlayerProp]) -> list[PlayerProp]:
+    """The rows each game's most recent prop fetch returned.
+
+    `full_pipeline._store_props` upserts per (game, book, market, player,
+    outcome) and restamps ``fetched_at`` on every row a fetch returns. A
+    row a book stopped offering -- the player was ruled out, the market
+    pulled -- is never deleted and keeps its old stamp, so analysing every
+    row kept publishing a prop no book offered, at its last line.
+
+    Relative to the game's own latest fetch, not to the clock: a game not
+    re-fetched since an earlier window still has current rows. Known gap:
+    a fetch that returns nothing writes nothing, so a game whose books
+    pulled every prop keeps its previous fetch as "current".
+    """
+    latest: dict[int, datetime] = {}
+    for r in rows:
+        ts = as_utc(r.fetched_at)
+        if r.game_id not in latest or ts > latest[r.game_id]:
+            latest[r.game_id] = ts
+    return [r for r in rows
+            if latest[r.game_id] - as_utc(r.fetched_at) <= PROP_FETCH_SLACK]
 
 
 def _one_per_player_market(analyses: list[PropAnalysis]) -> list[PropAnalysis]:

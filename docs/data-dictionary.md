@@ -269,7 +269,15 @@ number:**
   2026-10-03**, so a prop row with a blank `withdrawn_at` dated earlier
   that day or before was simply never checked. A prop is withdrawn only
   when a run analysed it (its game in that window's sport) and it no
-  longer qualified.
+  longer qualified, or when no book offers it any more.
+
+- **From 2026-10-04, props are analysed only from each game's latest
+  fetch, and only in their own sport's window.** `player_props` rows are
+  upserted and never deleted, so a prop a book pulled kept its last line
+  forever and was still analysed (40 of 5,971 rows on 2026-10-03). And
+  every window analysed every sport's props on the date under one sport's
+  thresholds. Before this, a prop pick's `odds_at_pick` could come from a
+  line no book still offered, or from another sport's window.
 
 - **Spreads and totals returned on 2026-10-03, as tracking picks
   (`tracking_only = True`).** None were generated from 2026-09-20 to

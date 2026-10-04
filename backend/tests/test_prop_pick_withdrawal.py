@@ -183,8 +183,8 @@ def _game_with_stored_prop(session, game_id, sport, player):
 
 
 def test_a_window_withdraws_only_its_own_sports_props():
-    """The props query spans every sport on the date; an mlb window analyses
-    an nfl prop under mlb's thresholds. That is no answer for the nfl prop."""
+    """An mlb window gives no answer for an nfl prop, so it cannot withdraw
+    it. (The props query once spanned every sport on the date.)"""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     s = get_session(engine)

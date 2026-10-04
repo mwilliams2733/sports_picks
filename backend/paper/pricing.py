@@ -30,7 +30,7 @@ from backend.analysis.prop_markets import MARKET_STAT_MAP, market_label
 from backend.analysis.strategy import consensus_line, consensus_moneyline
 from backend.models import Odds, PlayerProp
 from backend.pipeline.team_stats import COMBAT_SPORTS
-from backend.time_utils import ET, game_start_utc
+from backend.time_utils import ET, as_utc, game_start_utc
 
 #: A price older than this is refused. Judged per market, on the newest
 #: quote time behind the price.
@@ -103,9 +103,7 @@ class Quote:
         }
 
 
-def _utc(ts: datetime) -> datetime:
-    """SQLite returns naive datetimes; every one this project writes is UTC."""
-    return ts if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
+_utc = as_utc
 
 
 def _usable(price) -> bool:
