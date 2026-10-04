@@ -532,6 +532,16 @@ stated explicitly rather than left silent.
 - **Emailed picks have only been recorded since 2026-09-28.** Verified via
   git history: `697d6fc` ("feat(digest): record the picks each email sent,
   and grade them as sent") is dated 2026-09-28 (23:07 UTC).
+- **Football props are tracking picks from 2026-10-04 (`tracking_only`).**
+  `player_stats` "season_avg" rows for nfl and ncaaf hold season TOTALS,
+  which the prop analyzer read as per-game, so every football prop
+  projection before the fix is inflated (Josh Allen "average" 786 pass
+  yards after 3 games). 451 graded football props from 09-24..10-02
+  predicted 0.818 and hit 0.494, flat across confidence. **Treat every
+  football prop pick before the fix as having no model signal.** From
+  2026-10-04 they are generated and graded but unpublished, except those
+  already emailed, which stay published as sent.
+
 - **Prop `edge_pct` changed definition on 2026-10-04; never pool the two.**
   Before: `(model_prob - 0.5) * 200` -- price-blind, on double the scale of
   a probability difference, so a -300 prop scored the same as a -110 one at
