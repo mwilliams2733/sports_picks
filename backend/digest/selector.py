@@ -365,7 +365,8 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
             session.query(PickModel)
             .filter(PickModel.game_id.in_(list(games_by_id)),
                     PickModel.confidence >= 1,
-                    PickModel.pick_type == "prop")
+                    PickModel.pick_type == "prop",
+                    PickModel.published())
             .all()
         )
         props = _dedupe_latest(props)

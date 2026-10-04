@@ -176,6 +176,12 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
 
     props_analyzed = 0
     winning: list[PropAnalysis] = []
+    # (game, player, market) keys this run gave an answer for. Only these
+    # can be withdrawn: a stored prop this run never analysed is no answer,
+    # not the answer "no pick". `props` is not scoped to `games` (it spans
+    # every sport on the date), so a window for one sport must not withdraw
+    # another sport's props it analysed under the wrong sport's thresholds.
+    answered: set[tuple] = set()
 
     for prop in props:
         season_avg = session.query(PlayerStat).filter_by(
@@ -210,18 +216,22 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
                                     opponent_def_rating=opponent_def,
                                     game_script=game_script)
         props_analyzed += 1
+        if prop.game_id in game_teams:
+            answered.add((prop.game_id, prop.player_name, prop.market))
         if analysis and analysis.confidence >= 1:
             winning.append(analysis)
 
     # Picks are only stored when a prop strategy is active (strategy_id set).
-    picks_generated = picks_refreshed = 0
+    picks_generated = picks_refreshed = picks_withdrawn = 0
     if strategy_id:
-        picks_generated, picks_refreshed = _store_prop_picks(
-            session, winning, strategy_id)
+        picks_generated, picks_refreshed, picks_withdrawn = _store_prop_picks(
+            session, winning, strategy_id, answered=answered)
     session.commit()
+    if picks_withdrawn:
+        logger.info("Withdrew %d prop pick(s) that no longer qualify", picks_withdrawn)
     return {"games": len(games), "stats_fetched": stats_count,
             "props_analyzed": props_analyzed, "picks_generated": picks_generated,
-            "picks_refreshed": picks_refreshed}
+            "picks_refreshed": picks_refreshed, "picks_withdrawn": picks_withdrawn}
 
 
 def _one_per_player_market(analyses: list[PropAnalysis]) -> list[PropAnalysis]:
@@ -245,10 +255,21 @@ def _one_per_player_market(analyses: list[PropAnalysis]) -> list[PropAnalysis]:
 
 
 def _store_prop_picks(session: Session, analyses: list[PropAnalysis],
-                      strategy_id: int) -> tuple[int, int]:
+                      strategy_id: int, *,
+                      answered: set[tuple] | None = None) -> tuple[int, int, int]:
     """Persist prop picks, one per (game, player, market, strategy).
 
-    Returns ``(added, refreshed)``. Every window run re-analyses the whole
+    Returns ``(added, refreshed, withdrawn)``.
+
+    ``answered`` is the (game, player, market) keys the run analysed. A
+    stored pick whose key was answered but not produced has stopped
+    qualifying and is withdrawn, on the same terms as a game pick
+    (`pick_generator.withdraw_pick`: never graded, started or emailed); a
+    withdrawn pick produced again is reinstated by `_refresh_prop_pick`.
+    ``None`` withdraws nothing. Before this, a prop that stopped qualifying
+    stayed published at its last edge until kickoff.
+
+    Every window run re-analyses the whole
     day, and this used to ``session.add`` every result each time: 18 runs on
     2026-09-26 stored each prop 18 times, and grading counted every copy as
     a wager. Now an existing pick is refreshed in place, on exactly the
@@ -256,14 +277,15 @@ def _store_prop_picks(session: Session, analyses: list[PropAnalysis],
     never once its game has started), and a started game gets no new pick,
     matching ``skip_started``.
     """
-    from backend.pipeline.pick_generator import _refreshable
-    from backend.models import PickResult
+    from backend.pipeline.pick_generator import _refreshable, withdraw_pick
+    from backend.models import EmailedPick, PickResult
     from backend.time_utils import game_start_utc
 
+    answered = answered or set()
     chosen = _one_per_player_market(_dedup_prop_analyses(analyses))
-    if not chosen:
-        return 0, 0
-    game_ids = {a.game_id for a in chosen}
+    if not chosen and not answered:
+        return 0, 0, 0
+    game_ids = {a.game_id for a in chosen} | {k[0] for k in answered}
     games = {g.id: g for g in
              session.query(Game).filter(Game.id.in_(game_ids))}
     already: dict[tuple, PickModel] = {}
@@ -299,8 +321,19 @@ def _store_prop_picks(session: Session, analyses: list[PropAnalysis],
         session.add(new_pick)
         record_pick_version(session, new_pick, "insert")
         added += 1
+
+    withdrawn = 0
+    produced = {(a.game_id, a.player_name, a.market) for a in chosen}
+    stale = [row for key, row in already.items()
+             if key in answered and key not in produced]
+    if stale:
+        emailed = {pid for (pid,) in session.query(EmailedPick.pick_id).filter(
+            EmailedPick.pick_id.in_([r.id for r in stale]))}
+        for row in stale:
+            withdrawn += withdraw_pick(session, row, games[row.game_id],
+                                       graded, emailed, now)
     session.flush()
-    return added, refreshed
+    return added, refreshed, withdrawn
 
 
 def _refresh_prop_pick(existing: PickModel, analysis: PropAnalysis) -> None:
@@ -317,6 +350,8 @@ def _refresh_prop_pick(existing: PickModel, analysis: PropAnalysis) -> None:
     for field in ("pick_value", "confidence", "edge_pct", "odds_at_pick",
                   "created_at"):
         setattr(existing, field, getattr(fresh, field))
+    # Produced again, so no longer withdrawn.
+    existing.withdrawn_at = None
 
 def _recent_form(session: Session, player_name: str, *, before: date) -> list:
     """The player's last five game logs strictly BEFORE ``before``.
