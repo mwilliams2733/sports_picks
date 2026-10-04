@@ -243,6 +243,16 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
             "picks_refreshed": picks_refreshed, "picks_withdrawn": picks_withdrawn}
 
 
+#: Sports whose prop picks are stored as tracking picks (`tracking_only`):
+#: generated and graded, never published or emailed. Football since
+#: 2026-10-04 (owner): `player_stats` "season_avg" rows for nfl/ncaaf hold
+#: season TOTALS, which the analyzer reads as per-game, so every projection
+#: was inflated -- 451 graded props predicted 0.818 and hit 0.494, with no
+#: signal at any confidence. Remove a sport once its props are fixed and
+#: re-measured.
+PROP_TRACKED_SPORTS = frozenset({"nfl", "ncaaf"})
+
+
 #: Rows written by one prop fetch carry timestamps seconds apart; fetches
 #: for a game are a window (hours) apart. Anything this far behind the
 #: game's latest row was not in the latest fetch.
@@ -337,6 +347,9 @@ def _store_prop_picks(session: Session, analyses: list[PropAnalysis],
         already.setdefault((row.game_id, row.prop_player, row.prop_market), row)
     graded = {pid for (pid,) in session.query(PickResult.pick_id).filter(
         PickResult.pick_id.in_([p.id for p in already.values()] or [-1]))}
+    # Advice already sent: never withdrawn, and never moved to tracking.
+    emailed = {pid for (pid,) in session.query(EmailedPick.pick_id).filter(
+        EmailedPick.pick_id.in_([p.id for p in already.values()] or [-1]))}
 
     now = datetime.now(tz=timezone.utc)
     added = refreshed = 0
@@ -344,10 +357,13 @@ def _store_prop_picks(session: Session, analyses: list[PropAnalysis],
         game = games.get(a.game_id)
         if game is None:
             continue
+        tracked = game.sport in PROP_TRACKED_SPORTS
         existing = already.get((a.game_id, a.player_name, a.market))
         if existing is not None:
             if _refreshable(existing, game, graded):
                 _refresh_prop_pick(existing, a)
+                if existing.id not in emailed:
+                    existing.tracking_only = tracked
                 record_pick_version(session, existing, "refresh")
                 refreshed += 1
             continue
@@ -356,6 +372,7 @@ def _store_prop_picks(session: Session, analyses: list[PropAnalysis],
             continue
         # No in-run registration needed: `chosen` is already one per key.
         new_pick = _build_prop_pick(a, strategy_id)
+        new_pick.tracking_only = tracked
         session.add(new_pick)
         record_pick_version(session, new_pick, "insert")
         added += 1
@@ -365,8 +382,6 @@ def _store_prop_picks(session: Session, analyses: list[PropAnalysis],
     stale = [row for key, row in already.items()
              if key in answered and key not in produced]
     if stale:
-        emailed = {pid for (pid,) in session.query(EmailedPick.pick_id).filter(
-            EmailedPick.pick_id.in_([r.id for r in stale]))}
         for row in stale:
             withdrawn += withdraw_pick(session, row, games[row.game_id],
                                        graded, emailed, now)
