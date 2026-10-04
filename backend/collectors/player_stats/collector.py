@@ -77,6 +77,12 @@ class PlayerStatsCollector:
                     val = s.get(field)
                     if val is not None:
                         setattr(existing, field, float(val))
+                    elif stat_type == "season_avg":
+                        # A season average is one source's snapshot: a field
+                        # it no longer reports must not keep an old value.
+                        # Without this, the football totals stored before
+                        # 2026-10-04 survived any refetch that left them None.
+                        setattr(existing, field, None)
                 existing.source = source
                 existing.fetched_at = now
                 existing.is_stale = is_stale

@@ -106,6 +106,54 @@ def _latest_row(category: dict) -> list:
     return rows[-1].get("stats") or []
 
 
+def _row_season(row: dict) -> int | None:
+    """A v3 statistics row's season year: ``{"year": 2026, ...}`` or a bare int."""
+    season = row.get("season")
+    if isinstance(season, dict):
+        season = season.get("year")
+    try:
+        return int(season)
+    except (TypeError, ValueError):
+        return None
+
+
+def football_season_averages(data: dict, season_year: int) -> dict:
+    """Per-game football averages for ``season_year`` from a v3 payload.
+
+    The v3 football categories are season TOTALS. They were stored as
+    ``season_avg`` and read as per-game by the prop analyzer, which inflated
+    every football projection (Josh Allen "averaged" 786 pass yards after 3
+    games; 451 graded props predicted 0.818 and hit 0.494). Each total is
+    divided by that category's own ``GP``.
+
+    Only the row for ``season_year`` counts. Each category's rows end at the
+    last season the player recorded one, so the newest rushing row can be
+    years old for a player who has not rushed this season; taking it would
+    report an old season as current form.
+
+    College football's payload has no ``GP``, so no average can be formed and
+    its fields stay None; the analyzer then projects from recent games alone.
+    """
+    result = _empty_stat_row()
+    for category in data.get("categories") or []:
+        name = category.get("name")
+        labels = category.get("labels") or []
+        row = next((r for r in reversed(category.get("statistics") or [])
+                    if _row_season(r) == season_year), None)
+        if row is None:
+            continue
+        stats = row.get("stats") or []
+        gp = _to_number(dict(zip(labels, stats)).get("GP"))
+        if not gp or gp <= 0:
+            continue
+        for label, value in zip(labels, stats):
+            field = _FOOTBALL_LABELS.get((name, label))
+            number = _to_number(value) if field else None
+            if field and number is not None:
+                result[field] = number / gp
+    return result
+
+
 class EspnStatsSource(PlayerStatsSource):
     name = "espn"
 
@@ -126,6 +174,11 @@ class EspnStatsSource(PlayerStatsSource):
         if not team_id:
             logger.warning(f"ESPN: team '{team_abbr}' not found for sport '{sport}'")
             return []
+
+        from backend.config import season_label, seasons_config
+        from backend.time_utils import et_today
+        # The season the slate is in, by its start year ("2026-27" -> 2026).
+        season_year = int(season_label(sport, et_today(), seasons_config())[:4])
 
         base = urls["base"]
         roster_url = f"{base}/teams/{team_id}/roster"
@@ -161,7 +214,7 @@ class EspnStatsSource(PlayerStatsSource):
                 continue
 
             if sport in FOOTBALL_SPORTS:
-                parsed = self._parse_football_stats(stats_data)
+                parsed = football_season_averages(stats_data, season_year)
             else:
                 parsed = self._parse_basketball_stats(stats_data)
 
@@ -326,7 +379,10 @@ class EspnStatsSource(PlayerStatsSource):
         return result
 
     def _parse_football_stats(self, data: dict) -> dict:
-        """Season totals, keyed by (category, label) to disambiguate YDS."""
+        """A category's latest values, keyed by (category, label) to
+        disambiguate YDS. Right for one game's line (`_parse_gamelog`); a
+        season payload's values are TOTALS, so season averages go through
+        `football_season_averages` instead."""
         result = _empty_stat_row()
         for category in data.get("categories") or []:
             name = category.get("name")
