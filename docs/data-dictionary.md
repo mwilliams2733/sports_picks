@@ -271,6 +271,15 @@ number:**
   when a run analysed it (its game in that window's sport) and it no
   longer qualified, or when no book offers it any more.
 
+- **Before 2026-10-04, a Bovada prop row could be the top rung of a ladder,
+  not Bovada's main line.** Bovada quotes several lines per player inside the
+  standard markets; the props table kept the last one written, the highest
+  (Under 275.5 -230 where the main line was 245.5 -115). Prop edge ignores
+  price, so such a rung could become a pick. No stored prop pick is priced
+  -180 or worse, so none is known to have, but a prop pick's line from
+  before that date may not be a line any book's main market offered. From
+  2026-10-04 each book's main line is stored (`full_pipeline.main_lines`).
+
 - **From 2026-10-04, props are analysed only from each game's latest
   fetch, and only in their own sport's window.** `player_props` rows are
   upserted and never deleted, so a prop a book pulled kept its last line
