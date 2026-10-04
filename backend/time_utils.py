@@ -39,6 +39,12 @@ def et_date(date_str: str) -> date:
     return datetime.fromisoformat(date_str.replace("Z", "+00:00")).astimezone(ET).date()
 
 
+def as_utc(ts: datetime) -> datetime:
+    """A stored timestamp as aware UTC. SQLite returns naive datetimes, and
+    every one this project writes is UTC."""
+    return ts if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
+
+
 def et_today() -> date:
     """Today's Eastern calendar date.
 
