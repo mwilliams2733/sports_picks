@@ -11,6 +11,7 @@ from backend.collectors.odds_api import OddsAPICollector, redact_api_key
 from backend.collectors.budget import check_budget, record_api_call, BudgetStatus
 from backend.exceptions import BudgetExhaustedError
 from backend.analysis.line_snapshots import record_snapshot
+from backend.analysis.odds_utils import InvalidOddsError, american_to_implied_prob
 from backend.models import Team, Game, Odds, PlayerProp
 from backend.team_identity import ABBREVIATION_SPORTS, canonical_abbr
 
@@ -624,10 +625,47 @@ def _store_odds(session: Session, sport: str, odds_data: list[dict],
     return count
 
 
-def _store_props(session: Session, game_id: int, props: list[dict]) -> int:
-    """Store player props for a game."""
-    count = 0
+def main_lines(props: list[dict]) -> list[dict]:
+    """Keep one line per (book, market, player): the book's main line.
+
+    Most books quote one line per player in a standard market. Bovada
+    quotes a ladder inside it -- Josh Allen pass yards at 215.5 through
+    275.5 on 2026-10-04, Over and Under at each rung, ascending. The upsert
+    in `_store_props` has no ``line`` in its key, so every rung overwrote the
+    last and the TOP one was stored (Under 275.5 -230, against a main line
+    of 245.5 -115/-115). Prop edge ignores price, so that rung read as a
+    large Under edge.
+
+    The main line is the rung whose two sides are priced closest to even
+    (smallest gap between their implied probabilities); ties go to the
+    lower line. A rung missing a side or carrying an unusable price is
+    never chosen while a complete one exists. Rows with no line (anytime
+    TD) and single-line groups pass through untouched.
+    """
+    groups: dict[tuple, dict] = defaultdict(lambda: defaultdict(dict))
     for p in props:
+        if p.get("line") is not None:
+            groups[(p["bookmaker"], p["market"], p["player_name"])][p["line"]][p["outcome"]] = p
+
+    def imbalance(sides: dict) -> float:
+        try:
+            probs = [american_to_implied_prob(r["odds"]) for r in sides.values()]
+        except (InvalidOddsError, TypeError):
+            return float("inf")
+        return abs(probs[0] - probs[1]) if len(probs) == 2 else float("inf")
+
+    keep: set[tuple] = set()
+    for key, by_line in groups.items():
+        line = min(by_line, key=lambda ln: (imbalance(by_line[ln]), ln))
+        keep.add((*key, line))
+    return [p for p in props if p.get("line") is None
+            or (p["bookmaker"], p["market"], p["player_name"], p["line"]) in keep]
+
+
+def _store_props(session: Session, game_id: int, props: list[dict]) -> int:
+    """Store player props for a game, one line per book (`main_lines`)."""
+    count = 0
+    for p in main_lines(props):
         existing = session.query(PlayerProp).filter(
             PlayerProp.game_id == game_id,
             PlayerProp.bookmaker == p["bookmaker"],
