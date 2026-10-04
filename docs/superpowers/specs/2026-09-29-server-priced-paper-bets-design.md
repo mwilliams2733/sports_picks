@@ -51,6 +51,12 @@ What exists today:
 - **Lines:** consensus line only for spreads and totals; props only at lines a
   book is actually quoting, priced by the consensus of the books quoting that
   exact line.
+  **Reversed for spreads and totals by the owner, 2026-10-04:** the average
+  line (HOME -11.6, O/U 42.4) is one no book offers and can never push.
+  Spreads and totals now follow the prop rule: the line most books quote
+  (`strategy.quoted_line`; ties to the line nearest the average, then the
+  one worse for the bettor), priced by the books quoting exactly it. The
+  Model's own picks still use the averaged line (`average_odds`).
 - **Freshness:** refuse when the newest quote behind the price is more than
   **6 hours** old.
 - **Approach A:** one pricing module is the only source of prices, used by

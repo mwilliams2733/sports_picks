@@ -7,10 +7,14 @@ review). Since plan 027 every bet route and every quote endpoint calls
 :func:`price`, so the price a player is shown is produced by the same
 function that prices the bet.
 
-Consensus is :func:`backend.analysis.strategy.consensus_moneyline` for
-prices and :func:`backend.analysis.strategy.consensus_line` for spread/total
-lines -- the same two functions ``average_odds`` (the Model's own picks) is
-built from -- never a second averager.
+Prices are :func:`backend.analysis.strategy.consensus_moneyline`, the
+function ``average_odds`` (the Model's own picks) is built from -- never a
+second averager. Spread and total LINES are not averaged, unlike the
+Model's: :func:`backend.analysis.strategy.quoted_line` takes the line most
+books quote, and the price is the consensus of the books quoting exactly
+that line (owner, 2026-10-04, reversing the 2026-09-29 "consensus line
+only": an average line like HOME -11.6 is one no book offers and cannot
+push).
 
 Unlike ``average_odds``, a paper bet's consensus is taken over only the
 rows that are both usable and fresh for the exact market being priced:
@@ -27,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 
 from backend.analysis.odds_utils import InvalidOddsError, american_to_implied_prob
 from backend.analysis.prop_markets import MARKET_STAT_MAP, market_label
-from backend.analysis.strategy import consensus_line, consensus_moneyline
+from backend.analysis.strategy import consensus_moneyline, quoted_line
 from backend.models import Odds, PlayerProp
 from backend.pipeline.team_stats import COMBAT_SPORTS
 from backend.time_utils import ET, as_utc, game_start_utc
@@ -162,8 +166,15 @@ def _price_game(session, game, bet: GameBet, now: datetime) -> Quote:
     fresh = _fresh(usable, "timestamp", now)
     if not fresh:
         raise PricingError("stale")
+    line = None
+    if line_key:
+        # A line a book is quoting, priced by the books quoting exactly it --
+        # the rule props already followed. The average line was one no book
+        # offered and could never push.
+        line = quoted_line([getattr(r, line_key) for r in fresh],
+                           higher_is_worse=bet.side == "Over")
+        fresh = [r for r in fresh if abs(getattr(r, line_key) - line) < 1e-9]
     odds = consensus_moneyline([getattr(r, price_key) for r in fresh])
-    line = consensus_line([getattr(r, line_key) for r in fresh]) if line_key else None
     quoted_at = max(_utc(r.timestamp) for r in fresh)
     if bet.pick_type == "moneyline":
         label = f"{bet.side} ML"

@@ -302,8 +302,10 @@ def test_home_ml_and_home_spread_on_one_game_are_accepted():
 
 # --- round trip through settlement -------------------------------------------
 
-def test_a_consensus_spread_between_two_lines_grades_through_the_api():
-    """Review Focus 3: books at -3 and -4 -> HOME -3.5; a 27-24 home win loses."""
+def test_a_tied_spread_takes_the_worse_quoted_line_through_the_api():
+    """Books at -3 and -4 used to price HOME -3.5, a line neither offered
+    (owner reversed that 2026-10-04). A tie now goes to the line worse for
+    the bettor, HOME -4, and a 27-24 home win loses at it."""
     client = _client()
     gid = _game(client)
     seed_fresh_odds(client.app.state.engine, gid, bookmaker="dk",
@@ -313,9 +315,25 @@ def test_a_consensus_spread_between_two_lines_grades_through_the_api():
     uid = _user(client)
     placed = client.post(f"/users/{uid}/picks", json={
         "game_id": gid, "pick_type": "spread", "side": "HOME", "stake": 100}).json()
-    assert placed["pick_value"] == "HOME -3.5"
+    assert placed["pick_value"] == "HOME -4"
     _finish(client, gid, 27, 24)
     assert client.post("/users/grade", headers=OWNER_HEADERS).status_code == 200
     s = get_session(client.app.state.engine)
     assert s.query(PaperPick).one().result == "loss"
+    s.close()
+
+
+def test_a_quoted_whole_number_spread_pushes_through_the_api():
+    client = _client()
+    gid = _game(client)
+    seed_fresh_odds(client.app.state.engine, gid, bookmaker="dk",
+                    spread_home=-3.0, spread_away=3.0)
+    uid = _user(client)
+    placed = client.post(f"/users/{uid}/picks", json={
+        "game_id": gid, "pick_type": "spread", "side": "HOME", "stake": 100}).json()
+    assert placed["pick_value"] == "HOME -3"
+    _finish(client, gid, 27, 24)
+    assert client.post("/users/grade", headers=OWNER_HEADERS).status_code == 200
+    s = get_session(client.app.state.engine)
+    assert s.query(PaperPick).one().result == "push"
     s.close()
