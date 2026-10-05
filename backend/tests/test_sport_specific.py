@@ -1,4 +1,6 @@
 from datetime import date
+
+import pytest
 from backend.analysis.variants.sport_specific import SportSpecificStrategy, SPORT_WEIGHTS
 from backend.data_types import GameData, TeamStats, OddsSnapshot
 
@@ -25,18 +27,44 @@ def test_nba_rest_days_advantage():
     assert picks[0].pick_value == "HOME ML"
 
 
-def test_nfl_turnover_margin():
-    """NFL: team with strong turnover margin should be favored."""
-    game = GameData(game_id=1, sport="nfl", date=date(2026, 11, 15),
-        home_team_id=1, away_team_id=2,
-        home_stats=_stats(point_diff=5.0, elo_rating=1550, turnover_margin=1.5, red_zone_pct=65.0),
-        away_stats=_stats(point_diff=-3.0, elo_rating=1450, turnover_margin=-1.0, red_zone_pct=45.0),
+def _nfl_game(home, away):
+    return GameData(game_id=1, sport="nfl", date=date(2026, 11, 15),
+        home_team_id=1, away_team_id=2, home_stats=home, away_stats=away,
         odds=[OddsSnapshot(bookmaker="dk", moneyline_home=100, moneyline_away=-100,
             spread_home=-3.0, spread_away=3.0, over_under=45.0)])
+
+
+def test_nfl_probability_is_point_diff_and_elo_only():
+    """No NFL weight sits on an input that is constant for football.
+
+    Half the NFL weight was on "rating" (basketball-only) and turnover /
+    red-zone (never stored), each a constant 0.5, which pulled every
+    probability halfway to a coin flip. Here the full weight is live.
+    """
+    home = _stats(point_diff=5.0, elo_rating=1550)
+    away = _stats(point_diff=-3.0, elo_rating=1450,
+                  offensive_rating=130.0, defensive_rating=90.0)
     strategy = SportSpecificStrategy("sport_specific", {"min_edge": 3.0})
-    picks = strategy.predict(game)
-    assert len(picks) >= 1
-    assert picks[0].pick_value == "HOME ML"
+
+    prob = strategy._model_probability(_nfl_game(home, away))
+
+    pd_score = 1 / (1 + 10 ** (-8.0 / 10))
+    elo_score = 1 / (1 + 10 ** (-100.0 / 400))
+    assert prob == pytest.approx(0.40 * pd_score + 0.60 * elo_score)
+
+
+def test_nfl_even_teams_are_a_coin_flip():
+    strategy = SportSpecificStrategy("sport_specific", {"min_edge": 3.0})
+
+    assert strategy._model_probability(_nfl_game(_stats(), _stats())) == pytest.approx(0.5)
+
+
+def test_nfl_favourite_still_picked():
+    game = _nfl_game(_stats(point_diff=5.0, elo_rating=1550),
+                     _stats(point_diff=-3.0, elo_rating=1450))
+    picks = SportSpecificStrategy("sport_specific", {"min_edge": 3.0}).predict(game)
+
+    assert picks and picks[0].pick_value == "HOME ML"
 
 
 def test_ncaab_conference_strength():

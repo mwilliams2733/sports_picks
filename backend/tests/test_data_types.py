@@ -7,8 +7,6 @@ def test_team_stats_defaults():
         last_n_record=(7, 3), offensive_rating=112.0, defensive_rating=108.0,
         pace=100.0, strength_of_schedule=0.55, elo_rating=1520.0, rest_days=1
     )
-    assert stats.turnover_margin is None
-    assert stats.red_zone_pct is None
     assert stats.conference_strength is None
 
 def test_pick_edge_calculation():

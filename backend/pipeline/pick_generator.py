@@ -820,5 +820,4 @@ def _get_team_stats(session: Session, team_id: int, sport: str,
         points_for_adj=stats_dict.get("points_for_adj"),
         points_against_adj=stats_dict.get("points_against_adj"),
         elo_rating=elo_rating, rest_days=int(stats_dict.get("rest_days", 2)),
-        turnover_margin=stats_dict.get("turnover_margin"), red_zone_pct=stats_dict.get("red_zone_pct"),
         conference_strength=stats_dict.get("conference_strength"))
