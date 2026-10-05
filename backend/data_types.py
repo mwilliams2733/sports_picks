@@ -13,8 +13,6 @@ class TeamStats:
     strength_of_schedule: float
     elo_rating: float
     rest_days: int
-    turnover_margin: float | None = None
-    red_zone_pct: float | None = None
     conference_strength: float | None = None
     is_schedule_fatigued: bool = False  # 3rd game in 4 nights (NBA)
     is_lookahead_spot: bool = False     # weak opponent now, big game next

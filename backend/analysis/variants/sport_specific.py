@@ -7,7 +7,15 @@ from backend.data_types import GameData, Pick
 # Per-sport default weight profiles
 SPORT_WEIGHTS = {
     "nba": {"pd": 0.25, "elo": 0.25, "rating": 0.20, "rest": 0.15, "venue": 0.15},
-    "nfl": {"pd": 0.20, "elo": 0.30, "rating": 0.15, "turnover": 0.20, "redzone": 0.15},
+    # NFL is point differential and Elo only, in the 2:3 ratio it always had.
+    # It gave 50% of its weight to inputs that are a constant 0.5 for
+    # football: "rating" (offensive/defensive rating is basketball-only, built
+    # from possessions) and turnover margin / red-zone %, which nothing ever
+    # stored. Turnover margin was then measured and dropped rather than wired
+    # in: it adds nothing to the closing line (backend.scripts.turnover_experiment,
+    # 2026-10-04). "rating" must stay an explicit 0.0 -- an absent key falls
+    # back to 0.20 in _model_probability.
+    "nfl": {"pd": 0.40, "elo": 0.60, "rating": 0.0},
     "ncaab": {"pd": 0.20, "elo": 0.25, "rating": 0.25, "conference": 0.15, "venue": 0.15},
     "ncaaf": {"pd": 0.20, "elo": 0.30, "rating": 0.15, "conference": 0.20, "venue": 0.15},
     # MLB: pitcher dominates by design — the starter is the single biggest variable.
@@ -96,10 +104,6 @@ class SportSpecificStrategy(Strategy):
             rest_score = self._rest_advantage(hs.rest_days, aws.rest_days)
             venue_score = self._venue_score(hs, aws)
             prob += weights.get("rest", 0.15) * rest_score + weights.get("venue", 0.15) * venue_score
-        elif sport == "nfl":
-            to_score = self._turnover_score(hs, aws)
-            rz_score = self._redzone_score(hs, aws)
-            prob += weights.get("turnover", 0.20) * to_score + weights.get("redzone", 0.15) * rz_score
         elif sport in ("ncaab", "ncaaf"):
             conf_score = self._conference_score(hs, aws)
             venue_score = self._venue_score(hs, aws)
@@ -138,20 +142,6 @@ class SportSpecificStrategy(Strategy):
         h_pct = h_home_w / max(h_home_w + h_home_l, 1)
         a_pct = a_away_w / max(a_away_w + a_away_l, 1)
         return (h_pct - a_pct + 1) / 2
-
-    def _turnover_score(self, hs, aws) -> float:
-        """NFL: turnover margin advantage."""
-        h_to = hs.turnover_margin or 0.0
-        a_to = aws.turnover_margin or 0.0
-        diff = h_to - a_to
-        return 1 / (1 + 10 ** (-diff / 5))
-
-    def _redzone_score(self, hs, aws) -> float:
-        """NFL: red zone efficiency comparison."""
-        h_rz = hs.red_zone_pct or 50.0
-        a_rz = aws.red_zone_pct or 50.0
-        diff = h_rz - a_rz
-        return 1 / (1 + 10 ** (-diff / 20))
 
     def _conference_score(self, hs, aws) -> float:
         """NCAA: conference strength adjustment."""
