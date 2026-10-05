@@ -1,8 +1,14 @@
 database_path: "sports_picks.db"
 
 seasons:
+  # The scheduler collects, prices and picks a sport only inside this window,
+  # so start must be ON OR BEFORE opening night -- and not earlier: pick
+  # generation does not skip preseason games (only model training does).
+  # Opening night moves every year (2024-10-22, 2025-10-21, 2026-10-20 per
+  # ESPN); re-check it each October. It was 10-22 until 2026-10-04, which
+  # would have skipped the 14 games of 10-20 and 10-21.
   nba:
-    start: "10-22"
+    start: "10-20"
     end: "06-20"
   nfl:
     start: "09-05"
