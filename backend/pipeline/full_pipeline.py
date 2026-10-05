@@ -412,8 +412,8 @@ def _refresh_team_stats(session: Session, games: list[Game]) -> None:
         written = update_team_stats_for_games(session, games)
         # The backfill script is a one-off; without this, elo_history would
         # stop growing the day it finishes. backfill_elo_history replays the
-        # sport and skips games that already have rows, so this only appends
-        # the new games -- with the correct pre-game rating for each.
+        # sport, appends the new games with the correct pre-game rating, and
+        # corrects any stored row a backfill or restored game made stale.
         # Combat sports are excluded: grader._apply_combat_elo_update owns
         # their history and writes it post-game.
         for sport in {g.sport for g in games} - set(COMBAT_SPORTS):

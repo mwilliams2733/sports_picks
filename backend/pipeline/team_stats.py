@@ -52,7 +52,7 @@ from typing import Iterable, NamedTuple, Sequence
 
 from sqlalchemy.orm import Session
 
-from backend.analysis.elo import EloSystem, apply_result
+from backend.analysis.elo import EloSystem, apply_result, season_carry
 from backend.models import EloHistory, Game, Team, TeamStat
 
 logger = logging.getLogger(__name__)
@@ -127,6 +127,10 @@ CONDITIONAL_STAT_TYPES = tuple(
 #: than keeping its own copy, so the two paths cannot disagree on what a
 #: rating means.
 ELO_K_FACTOR = 20
+
+#: A stored pre-game rating further than this from the replay is stale and
+#: rewritten. Float noise only: the replay is deterministic.
+ELO_REPAIR_TOLERANCE = 1e-6
 
 #: Combat sports keep their own Elo history, written post-game by
 #: ``grader._apply_combat_elo_update``.  Replaying them here would double-count
@@ -670,14 +674,19 @@ def backfill_elo_history(session: Session, sport: str, *,
     ratings are *returned* as ``final_ratings`` so a caller whose job is that
     table can persist them deliberately.
 
-    ``rebuild`` discards ``sport``'s existing history first and replays the
-    whole chain. The default skip-what-exists behaviour is right for an
-    incremental catch-up and wrong once games are inserted *earlier* than
-    rows already written: those rows hold a rating computed from a history
-    that did not yet include the new games, and no amount of appending fixes
-    them. After the 2026-09-20 backfill, team DEL read 1500.0 on 09-03,
-    1529.2 on 09-12 and 1500.0 again on 09-19 -- the last still carrying the
-    seed. Scoped to one sport, so rebuilding ncaaf cannot disturb nba.
+    Existing rows are checked against the replay and corrected when they
+    disagree (since 2026-10-04). Games inserted *earlier* than rows already
+    written -- a backfill, a restored or merged game -- leave those rows
+    holding a rating computed from a history that did not yet include them,
+    and no amount of appending fixes that. After the 2026-09-20 backfill,
+    team DEL read 1500.0 on 09-03, 1529.2 on 09-12 and 1500.0 again on 09-19
+    -- the last still carrying the seed. The old answer was ``rebuild``, run
+    by hand, and it was not run; the default now repairs on every run.
+
+    ``rebuild`` still discards ``sport``'s existing history first and
+    replays the whole chain, for rows the replay no longer produces at all
+    (a game deleted or no longer final). Scoped to one sport, so rebuilding
+    ncaaf cannot disturb nba.
 
     Raises ``ValueError`` for combat sports, whose history is owned by the
     grader and uses post-game semantics.  The refusal is checked before
@@ -691,7 +700,8 @@ def backfill_elo_history(session: Session, sport: str, *,
             "replay it here with pre-game semantics."
         )
 
-    from backend.analysis.sport_constants import get_home_advantage_elo
+    from backend.analysis.sport_constants import (get_elo_season_carry,
+                                                  get_home_advantage_elo)
 
     if rebuild and not dry_run:
         session.query(EloHistory).filter(
@@ -699,43 +709,66 @@ def backfill_elo_history(session: Session, sport: str, *,
         session.flush()
 
     games = _final_games(session, sport)
-    already = {
-        gid for (gid,) in session.query(EloHistory.game_id)
-        .filter(EloHistory.sport == sport).distinct()
-    }
+    existing = {(r.team_id, r.game_id): r for r in
+                session.query(EloHistory).filter(EloHistory.sport == sport)}
     elo = EloSystem(k_factor=ELO_K_FACTOR,
                     home_advantage=get_home_advantage_elo(sport))
+    carry = get_elo_season_carry(sport)
+    last_season: dict[str, str] = {}
 
-    written = skipped = 0
+    written = skipped = repaired = 0
     for game in games:
         home_team = session.get(Team, game.home_team_id)
         away_team = session.get(Team, game.away_team_id)
         if not home_team or not away_team:
             continue
 
-        # PRE-game ratings: read before the update is applied.
-        home_rating_before = elo.get_rating(home_team.abbreviation)
-        away_rating_before = elo.get_rating(away_team.abbreviation)
+        # A team's first game of a new season: the off-season reset.
+        for team in (home_team, away_team):
+            seen = last_season.get(team.abbreviation)
+            if seen is not None and seen != game.season and team.abbreviation in elo.ratings:
+                elo.ratings[team.abbreviation] = season_carry(
+                    elo.ratings[team.abbreviation], carry)
+            last_season[team.abbreviation] = game.season
 
-        if game.id in already:
-            skipped += 1
-        elif not dry_run:
-            session.add_all([
-                EloHistory(team_id=game.home_team_id, game_id=game.id,
-                           sport=sport, rating=home_rating_before),
-                EloHistory(team_id=game.away_team_id, game_id=game.id,
-                           sport=sport, rating=away_rating_before),
-            ])
-            written += 2
-        else:
-            written += 2
+        # PRE-game ratings: read before the update is applied.
+        before = ((game.home_team_id, elo.get_rating(home_team.abbreviation)),
+                  (game.away_team_id, elo.get_rating(away_team.abbreviation)))
+
+        # Every run replays the whole chain, so it can CHECK every stored
+        # row, not just append. A row that disagrees with the replay was
+        # computed before games were inserted earlier in the history (a
+        # backfill, a restored or merged game) and is corrected in place.
+        # Skipping existing rows left 1,741 stale on 2026-10-04: nba up to
+        # 48 points on 29 of 30 teams' latest rows, nfl weeks 1-2 at the
+        # 1500 seed (up to 272 off), because `rebuild` was never run.
+        unchanged = True
+        for team_id, rating in before:
+            row = existing.get((team_id, game.id))
+            if row is None:
+                if not dry_run:
+                    session.add(EloHistory(team_id=team_id, game_id=game.id,
+                                           sport=sport, rating=rating))
+                written += 1
+                unchanged = False
+            elif abs(row.rating - rating) > ELO_REPAIR_TOLERANCE:
+                if not dry_run:
+                    row.rating = rating
+                repaired += 1
+                unchanged = False
+        skipped += unchanged
 
         # Now -- and only now -- fold in this game's result, for the NEXT game.
         apply_result(elo, home_team.abbreviation, away_team.abbreviation,
                      game.home_score, game.away_score)
 
+    if repaired:
+        logger.warning("%s: %s %d stale elo_history row(s) that disagreed "
+                       "with the replay", sport,
+                       "found (dry run, unchanged)" if dry_run else "corrected", repaired)
     return {"sport": sport, "games_total": len(games),
             "rows_written": written, "games_skipped": skipped,
+            "rows_repaired": repaired,
             # Post-replay rating per team abbreviation.  This is the only
             # legitimate source of a *current* rating, and it is deliberately
             # returned rather than written: callers that maintain ``EloRating``
