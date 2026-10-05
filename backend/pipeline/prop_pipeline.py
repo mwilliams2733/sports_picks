@@ -8,6 +8,7 @@ from backend.collectors.player_stats.nba_api_source import NbaApiSource
 from backend.collectors.player_stats.espn_stats_source import EspnStatsSource
 from backend.collectors.player_stats.balldontlie_source import BallDontLieSource
 from backend.collectors.player_stats.mysportsfeeds_source import MySportsFeedsSource
+from backend.analysis import football_defense
 from backend.analysis.prop_analyzer import PropAnalyzer
 from backend.analysis.prop_confidence import get_prop_thresholds
 from backend.analysis.prop_markets import market_label
@@ -130,6 +131,19 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
         if def_stat:
             team_def_ratings[tid] = def_stat.value
 
+    # NFL pass / run yards allowed this season before each game's date (the
+    # matchup factor; defensive_rating above is basketball-only). Measured
+    # for nfl only, so ncaaf is left out.
+    allowed_cache: dict[tuple[str, date], dict] = {}
+    nfl_allowed: dict[int, dict] = {}
+    for g in games:
+        if g.sport == "nfl":
+            key = (g.season, g.date)
+            if key not in allowed_cache:
+                allowed_cache[key] = football_defense.yards_allowed(
+                    session, "nfl", g.season, g.date)
+            nfl_allowed[g.id] = allowed_cache[key]
+
     # Build analyzer from strategy config if available
     analyzer_kwargs = {}
     if strategy_id:
@@ -207,10 +221,14 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
             player_team_id = season_avg.team_id
         elif recent:
             player_team_id = recent[0].team_id
+        matchup = None
         if player_team_id and prop.game_id in game_teams:
             home_id, away_id = game_teams[prop.game_id]
             opp_id = away_id if player_team_id == home_id else home_id
             opponent_def = team_def_ratings.get(opp_id)
+            if prop.game_id in nfl_allowed:
+                matchup = football_defense.matchup_factor(
+                    nfl_allowed[prop.game_id], opp_id, prop.market)
 
         # Determine game script for this prop
         game_script = None
@@ -225,7 +243,8 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
 
         analysis = analyzer_for(prop.game_id).analyze(prop, season_avg, recent,
                                     opponent_def_rating=opponent_def,
-                                    game_script=game_script)
+                                    game_script=game_script,
+                                    matchup_factor=matchup)
         props_analyzed += 1
         if analysis and analysis.confidence >= 1:
             winning.append(analysis)

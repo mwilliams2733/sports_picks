@@ -542,6 +542,21 @@ stated explicitly rather than left silent.
   2026-10-04 they are generated and graded but unpublished, except those
   already emailed, which stay published as sent.
 
+- **NFL yardage props get an opponent-defense adjustment from the evening
+  of 2026-10-04.** Before it, NFL props had **no** matchup input: the
+  analyzer scaled by the opponent's `defensive_rating`, a basketball stat
+  never computed for football. From then, pass and receiving yards
+  projections move by half the opponent's pass-defense factor and rush
+  yards by half its run-defense factor (`backend/analysis/football_defense.py`;
+  factor = season-to-date yards allowed per game over the league's, shrunk
+  with 3 league-average games; about 0.83-1.20 in week 5). Anytime-TD and
+  ncaaf props are unchanged. The half weight is measured, not chosen
+  (`backend/scripts/prop_matchup_experiment.py`, 2022-2026: c = +0.50 pass,
+  +0.52 rush, +0.43 receiving, all p < 1e-7). The same run found no sign the
+  books miss the matchup (line coefficients <= 0 on 27 games, wide
+  intervals), so **expect better projections, not proven edge**. Compare
+  football prop calibration before and after this date, not pooled.
+
 - **Prop `edge_pct` changed definition on 2026-10-04; never pool the two.**
   Before: `(model_prob - 0.5) * 200` -- price-blind, on double the scale of
   a probability difference, so a -300 prop scored the same as a -110 one at

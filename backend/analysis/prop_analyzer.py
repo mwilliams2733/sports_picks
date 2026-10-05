@@ -1,3 +1,4 @@
+from backend.analysis import football_defense
 from backend.models import PlayerProp, PlayerStat
 from backend.data_types import PropAnalysis
 from backend.analysis.prop_confidence import calculate_prop_confidence
@@ -79,6 +80,7 @@ class PropAnalyzer:
         recent_games: list[PlayerStat],
         opponent_def_rating: float | None = None,
         game_script: dict | None = None,
+        matchup_factor: float | None = None,
     ) -> PropAnalysis | None:
         # Validate line exists
         if prop.line is None:
@@ -135,6 +137,12 @@ class PropAnalyzer:
             league_avg_def = 110.0
             def_factor = opponent_def_rating / league_avg_def
             projection = projection * def_factor
+
+        # Football: the opponent's pass or run defense (football_defense).
+        # defensive_rating above is never computed for football, so before
+        # 2026-10-04 NFL props had no matchup adjustment at all.
+        if matchup_factor is not None:
+            projection = football_defense.adjust(projection, matchup_factor)
 
         # Adjust projection based on predicted game script
         if game_script is not None:
