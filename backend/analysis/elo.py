@@ -68,6 +68,19 @@ class EloSystem:
         self.ratings[home] = ra + k * (sa - ea)
         self.ratings[away] = rb + k * (sb - eb)
 
+def season_carry(rating: float, carry: float) -> float:
+    """The rating a team takes into a new season: ``carry`` of its distance
+    from the 1500 mean survives the off-season, the rest regresses.
+
+    The single place the off-season reset happens. The replay
+    (`team_stats.backfill_elo_history`) applies it at a team's first game of
+    a new season, and serving (`pick_generator._team_elo`) applies it when a
+    team's last rated game is in an earlier season than the one priced, so
+    training and serving cannot disagree about opening night.
+    """
+    return 1500.0 + carry * (rating - 1500.0)
+
+
 def apply_result(elo: EloSystem, home: str, away: str,
                  home_score: float, away_score: float) -> bool:
     """Fold one finished game into ``elo``. Returns whether it changed anything.

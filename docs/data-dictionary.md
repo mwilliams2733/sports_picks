@@ -557,6 +557,30 @@ stated explicitly rather than left silent.
   intervals), so **expect better projections, not proven edge**. Compare
   football prop calibration before and after this date, not pooled.
 
+- **Stored pre-game Elo was stale for some games until it was repaired
+  (merge after 2026-10-04).** `elo_history` rows written before a backfill or
+  a restored/merged game inserted games earlier in the history kept the
+  rating computed without them. Measured 2026-10-04 against a clean replay:
+  nfl 62 rows (2026 weeks 1-2, all at the 1500 seed, median 103 and up to
+  272 points off), nba 1,467 (Dec 2025-Jun 2026, median under 1, up to 48),
+  mlb 192 (May-Sep 2026, median 11, up to 55), ncaab 62, ncaaf none. The
+  daily replay now corrects such rows on every run. **Treat `model_prob` on
+  nfl picks from 2026-09-09..09-20 as computed from Elo at or near the 1500
+  seed** (inferred: those games' stored rows hold the seed, so the 2022-25
+  history was not yet in place when they were written). From 09-21 every
+  nfl and mlb team's latest row matches the replay; nba and ncaab latest
+  rows were stale until the repair.
+
+- **NBA Elo regresses halfway to 1500 between seasons from 2026-27.** Each
+  team's rating at its first game of a season keeps half its distance from
+  1500 (`sport_constants.ELO_SEASON_CARRY`). Measured on 2023-24..2025-26:
+  the first 15 games of a season are predicted better (rescaled Brier
+  0.2110 -> 0.2066, AUC 0.714 -> 0.726, best in each season on its own).
+  NFL and every other sport carry ratings over unchanged; for NFL a reset
+  was measured and made weeks 1-4 worse. NBA's stored history starts in
+  2025-26, so no stored row changes; it applies from opening night
+  2026-10-20.
+
 - **Prop `edge_pct` changed definition on 2026-10-04; never pool the two.**
   Before: `(model_prob - 0.5) * 200` -- price-blind, on double the scale of
   a probability difference, so a -300 prop scored the same as a -110 one at

@@ -261,6 +261,67 @@ def test_elo_backfill_is_idempotent(seeded):
     assert session.query(EloHistory).count() == n1
 
 
+def _two_games(session, a, b):
+    later = Game(sport="nba", season="2024-2025", date=date(2024, 1, 9),
+                 home_team_id=a.id, away_team_id=b.id,
+                 home_score=105, away_score=100, status="final")
+    session.add(later)
+    session.commit()
+    ts.backfill_elo_history(session, "nba")
+    session.commit()
+    return later
+
+
+def test_a_game_inserted_earlier_repairs_the_rows_after_it(seeded):
+    """The 2026-10-04 bug: rows written before a backfill kept the seed.
+
+    `later` is first rated with no history (1500). A game inserted BEFORE it
+    afterwards -- a backfill, a restored game -- changes what `later` should
+    carry in, and the next run must correct the stored row, not skip it.
+    """
+    session, a, b, _ = seeded
+    later = _two_games(session, a, b)
+    session.add(Game(sport="nba", season="2024-2025", date=date(2024, 1, 1),
+                     home_team_id=a.id, away_team_id=b.id,
+                     home_score=130, away_score=100, status="final"))
+    session.commit()
+
+    result = ts.backfill_elo_history(session, "nba")
+    session.commit()
+
+    row = session.query(EloHistory).filter_by(team_id=a.id, game_id=later.id).one()
+    assert row.rating > 1500.0, "the earlier win must now be carried into `later`"
+    assert result["rows_repaired"] == 2
+    assert result["rows_written"] == 2 and result["games_skipped"] == 0
+    assert session.query(EloHistory).count() == 4
+
+
+def test_an_unchanged_history_repairs_nothing(seeded):
+    session, a, b, _ = seeded
+    _two_games(session, a, b)
+
+    result = ts.backfill_elo_history(session, "nba")
+
+    assert result["rows_repaired"] == 0 and result["rows_written"] == 0
+    assert result["games_skipped"] == 1
+
+
+def test_a_dry_run_reports_stale_rows_without_changing_them(seeded):
+    session, a, b, _ = seeded
+    later = _two_games(session, a, b)
+    session.add(Game(sport="nba", season="2024-2025", date=date(2024, 1, 1),
+                     home_team_id=a.id, away_team_id=b.id,
+                     home_score=130, away_score=100, status="final"))
+    session.commit()
+
+    result = ts.backfill_elo_history(session, "nba", dry_run=True)
+    session.commit()
+
+    row = session.query(EloHistory).filter_by(team_id=a.id, game_id=later.id).one()
+    assert result["rows_repaired"] == 2
+    assert row.rating == pytest.approx(1500.0)
+
+
 def test_elo_backfill_skips_combat_sports(seeded):
     """mma/boxing Elo history is owned by grader._apply_combat_elo_update and
     uses post-game semantics; this backfill must not write into it."""

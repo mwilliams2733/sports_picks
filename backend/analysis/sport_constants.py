@@ -97,5 +97,29 @@ def get_home_advantage_elo(sport: str) -> int:
     return HOME_ADVANTAGE_ELO.get(sport, 100)
 
 
+#: Share of a team's Elo distance from 1500 that survives the off-season
+#: (`elo.season_carry`). 1.0, no reset, unless measured otherwise by
+#: `backend.scripts.elo_carryover_experiment`, scored on the model's own
+#: rescaled view (the model consumes Elo through a fitted regression, so raw
+#: Elo calibration is not the test).
+#:
+#: nfl stays 1.0, measured 2026-10-04 (2023-2026, 240 early games): any reset
+#: made the first four weeks WORSE once rescaled (Brier 0.2257 -> 0.2273 at
+#: 0.75), so last season's form is real information in football.
+#:
+#: nba 0.5, measured 2026-10-04 on 2023-24..2025-26 (2023-24 and 2024-25
+#: backfilled into a scratch copy only; 474 early games = each team's first
+#: 15, two scored seasons). Rescaled early Brier 0.2110 at 1.0 -> 0.2066 at
+#: 0.5, AUC 0.714 -> 0.726; 0.5 was the best value in EACH season on its own
+#: (2024-25 0.2244 -> 0.2146, 2025-26 0.2088 -> 0.1983 raw), and 0.33 is
+#: worse, so it is an interior optimum, not the edge of the grid. NBA
+#: rosters turn over far more than NFL ones between seasons.
+ELO_SEASON_CARRY: dict[str, float] = {"nba": 0.5}
+
+
+def get_elo_season_carry(sport: str) -> float:
+    return ELO_SEASON_CARRY.get(sport, 1.0)
+
+
 def get_home_win_rate(sport: str) -> float:
     return HOME_WIN_RATE.get(sport, 0.57)

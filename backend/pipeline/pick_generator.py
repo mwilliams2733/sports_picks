@@ -748,12 +748,39 @@ def _team_elo_or_none(session: Session, team_id: int, sport: str,
             # 32 teams tie, every signal ties, and every pick collapses to
             # tier 1. Advance one step instead, through the same
             # `apply_result` the replay uses so the two cannot disagree.
-            return _rating_after(session, sport, prior, team_id)
+            rating = _rating_after(session, sport, prior, team_id)
+            # Opening night: the last rated game is last season's, so apply
+            # the same off-season reset the replay applies at that point.
+            if _new_season(session, sport, session.get(Game, prior.game_id),
+                           game_id, game_date):
+                from backend.analysis.elo import season_carry
+                from backend.analysis.sport_constants import get_elo_season_carry
+                rating = season_carry(rating, get_elo_season_carry(sport))
+            return rating
 
     row = (session.query(EloRating)
            .filter(EloRating.team_id == team_id, EloRating.sport == sport)
            .first())
     return row.rating if row else None
+
+
+def _new_season(session: Session, sport: str, prior_game: Game,
+                game_id: int | None, game_date: date) -> bool:
+    """Whether the game being priced is in a later season than `prior_game`.
+
+    Compares like with like. With a stored row for the priced game, both
+    stored labels -- exactly what the replay compares. Without one (the
+    lookahead probe passes no id), both labels derived from their dates by
+    `season_label`, never a stored label against a derived one, which differ
+    in format wherever a row predates the canonical labels.
+    """
+    game = session.get(Game, game_id) if game_id is not None else None
+    if game is not None:
+        return game.season != prior_game.season
+    from backend.config import season_label, seasons_config
+    seasons = seasons_config()
+    return (season_label(sport, game_date, seasons)
+            != season_label(sport, prior_game.date, seasons))
 
 
 def _rating_after(session: Session, sport: str, prior: "EloHistory",

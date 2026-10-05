@@ -1,8 +1,8 @@
 """Guards for rebuilding Elo history after a backfill.
 
-`backfill_elo_history` skips games it has already written, which is right for
+`backfill_elo_history` used to skip games it had already written, which is right for
 an incremental catch-up and wrong after games are inserted *earlier* than
-existing ones. On 2026-09-20 the ncaaf backfill added 185 games predating the
+existing ones (since 2026-10-04 the default replay corrects such rows). On 2026-09-20 the ncaaf backfill added 185 games predating the
 rows already stored, and team DEL carried pre-game ratings of 1500.0 (09-03),
 1529.2 (09-12), then 1500.0 again (09-19) -- the last row still holding the
 seed it was given when the database had no DEL history at all.
@@ -67,8 +67,12 @@ def test_rebuild_corrects_a_row_left_at_the_seed(tmp_path):
     assert _rating(session, 2) > 1500.0           # AAA won on 09-03
 
 
-def test_without_rebuild_a_stale_row_is_left_alone(tmp_path):
-    """The default stays incremental; rebuilding must be asked for."""
+def test_without_rebuild_a_stale_row_is_still_corrected(tmp_path):
+    """REVERSED 2026-10-04. This used to assert the stale row was left alone:
+    the default was incremental and a rebuild had to be asked for. It was not
+    asked for after later backfills and restored games, and 1,741 rows across
+    nfl, nba, mlb and ncaab sat stale (nfl weeks 1-2 at the seed, up to 272
+    points off). The default replay now corrects any row it disagrees with."""
     session = _session(tmp_path)
     session.add_all([_game(1, EARLY), _game(2, LATE)])
     session.flush()
@@ -81,7 +85,7 @@ def test_without_rebuild_a_stale_row_is_left_alone(tmp_path):
     backfill_elo_history(session, "ncaaf")
     session.commit()
 
-    assert _rating(session, 2) == 1500.0
+    assert _rating(session, 2) > 1500.0           # AAA won on 09-03
 
 
 def test_rebuild_does_not_touch_another_sport(tmp_path):
