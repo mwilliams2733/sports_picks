@@ -598,6 +598,22 @@ stated explicitly rather than left silent.
   (`backend/scripts/weather_forecast_backtest.py`). That backtest used the
   games the idea came from, so this record is the out-of-sample test.
 
+- **NBA player game logs: 1,038 duplicated rows deleted on 2026-10-07**
+  (`backend/scripts/dedupe_game_logs.py`; backup
+  `sports_picks.backup-20261006-234715-pre-gamelog-dedupe.db`). The
+  2026-09-19 backfill had written some 2025-26 games twice: an identical
+  stat line dated the day after the real game, 96 team-games in all.
+  - The later copy was deleted when either `games` showed only the earlier
+    date was played, or the row came from the 2026-09-19 backfill. Every
+    one of the 896 cases `games` could decide had that pattern.
+  - In 141 back-to-back cases the copy sat on the date of the team's real
+    second game, and **that real second game is missing for those
+    players**. It was missing before the cleanup too; only the copy is gone.
+  - 32 similar college basketball pairs fit neither rule and were left.
+  - Before this date, NBA prop projections could count a duplicated game
+    twice in a player's last-five-game form. Prop picks made before the
+    cleanup used the duplicated data.
+
 - **`game_weather` (new table, 2026-10-06): append-only Open-Meteo forecasts
   for outdoor NFL games.** One row per capture (`captured_at`), about 2h
   before kickoff, never overwritten. Covers only open-air home stadiums;
