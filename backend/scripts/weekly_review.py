@@ -202,6 +202,29 @@ def report(session, end: date) -> str:
     return "\n".join(out) + "\n"
 
 
+#: Sports the weekly timing re-run covers. nba joins from its 10-20 opener;
+#: until it has final games since the split it reports "no final games".
+TIMING_SPORTS = ("nfl", "nba", "mlb")
+
+
+def timing_section(db: str) -> str:
+    """Section 7: the timing experiment re-run on this week's snapshot.
+
+    Separate from `report` because the experiment reads the snapshot file
+    directly, not through the session. A failure is reported in the section
+    rather than raised, so it can never cost the owner the rest of the review.
+    """
+    from backend.scripts.timing_experiment import timing_report
+    head = ["", "7. TIMING (re-run weekly): does the line move toward the model after a clean",
+            "   open? c > 0 and a positive EV at open would mean betting early pays.",
+            "   Not established as of 2026-10-07 (NFL c +0.025, p 0.57, 32 games)."]
+    try:
+        body = timing_report(db, TIMING_SPORTS)
+    except Exception as exc:          # never lose the whole review to this section
+        body = [f"  timing re-run failed: {type(exc).__name__}: {exc}"]
+    return "\n".join(head + body) + "\n"
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--db", required=True, help="A .backup snapshot. Read only.")
@@ -217,6 +240,7 @@ def main(argv=None) -> int:
         text = report(session, end)
     finally:
         session.close()
+    text += timing_section(args.db)
     print(text)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:

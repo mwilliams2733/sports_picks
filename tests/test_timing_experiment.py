@@ -55,3 +55,37 @@ def test_best_price_is_the_highest_payout():
     quotes = {"a": _row("a", KICK, home=120), "b": _row("b", KICK, home=135),
               "c": _row("c", KICK, home=-105)}
     assert te.best_price(quotes, "home") == 135
+
+
+def test_the_weekly_section_reports_a_failure_instead_of_raising(monkeypatch):
+    from backend.scripts import weekly_review
+
+    def boom(db, sports):
+        raise RuntimeError("snapshot unreadable")
+
+    monkeypatch.setattr(te, "timing_report", boom)
+    text = weekly_review.timing_section("nowhere.db")
+    assert "7. TIMING" in text
+    assert "timing re-run failed: RuntimeError: snapshot unreadable" in text
+
+
+def test_the_weekly_section_runs_the_experiment_for_every_sport(monkeypatch):
+    from backend.scripts import weekly_review
+    seen = {}
+    monkeypatch.setattr(te, "timing_report",
+                        lambda db, sports: seen.update(db=db, sports=sports) or ["  body"])
+    text = weekly_review.timing_section("snap.db")
+    assert seen == {"db": "snap.db", "sports": ("nfl", "nba", "mlb")}
+    assert text.rstrip().endswith("  body")
+
+
+def test_the_review_file_includes_the_timing_section(monkeypatch, tmp_path):
+    import sqlite3
+    from backend.scripts import weekly_review
+    db = tmp_path / "snap.db"
+    sqlite3.connect(db).close()
+    monkeypatch.setattr(weekly_review, "report", lambda session, end: "SECTIONS 1-6\n")
+    monkeypatch.setattr(weekly_review, "timing_section", lambda path: "7. TIMING body\n")
+    out = tmp_path / "review.txt"
+    weekly_review.main(["--db", str(db), "--end", "2026-10-05", "--out", str(out)])
+    assert out.read_text(encoding="utf-8") == "SECTIONS 1-6\n7. TIMING body\n"
