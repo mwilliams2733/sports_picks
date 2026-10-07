@@ -9,7 +9,7 @@ from backend.collectors.player_stats.nba_api_source import NbaApiSource
 from backend.collectors.player_stats.espn_stats_source import EspnStatsSource
 from backend.collectors.player_stats.balldontlie_source import BallDontLieSource
 from backend.collectors.player_stats.mysportsfeeds_source import MySportsFeedsSource
-from backend.analysis import football_defense, football_injuries, football_weather
+from backend.analysis import football_defense, football_injuries, football_weather, nba_injuries
 from backend.collectors.weather import latest_weather
 from backend.analysis.prop_analyzer import PropAnalyzer
 from backend.analysis.prop_confidence import get_prop_thresholds
@@ -169,6 +169,26 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
             if out:
                 logger.info("injuries: game %s team %s missing leaders %s", gid, tid, out)
 
+    # NBA: is each team's star out tonight (nba_injuries)? Same roster
+    # source; None -- no star yet, roster unreadable, star playing -- is no
+    # adjustment.
+    nba_missing: dict[tuple[int, int], str | None] = {}
+    nba_games = [g for g in games if g.sport == "nba"]
+    if nba_games:
+        nba_rosters: dict[int, dict | None] = {}
+        async with httpx.AsyncClient(timeout=20) as client:
+            for g in nba_games:
+                for tid in (g.home_team_id, g.away_team_id):
+                    if tid not in nba_rosters:
+                        team = session.get(Team, tid)
+                        nba_rosters[tid] = (await football_injuries.fetch_roster(
+                            client, team.abbreviation, sport="nba") if team else None)
+                    nba_missing[(g.id, tid)] = nba_injuries.star_out(
+                        session, tid, g.season, g.date, nba_rosters[tid])
+        for (gid, tid), star in nba_missing.items():
+            if star:
+                logger.info("injuries: game %s team %s star out: %s", gid, tid, star)
+
     # Build analyzer from strategy config if available
     analyzer_kwargs = {}
     if strategy_id:
@@ -260,6 +280,10 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
                 nfl_leaders[(prop.game_id, player_team_id)],
                 nfl_rosters.get(player_team_id))
             injury_adjusted += injury is not None
+        elif player_team_id and (prop.game_id, player_team_id) in nba_missing:
+            injury = nba_injuries.injury_factor(
+                prop.market, prop.player_name, nba_missing[(prop.game_id, player_team_id)])
+            injury_adjusted += injury is not None
         weather = None
         if prop.game_id in nfl_weather:
             w = nfl_weather[prop.game_id]
@@ -301,7 +325,7 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
             session, winning, strategy_id, answered=answered)
     session.commit()
     if injury_adjusted:
-        logger.info("injuries: adjusted %d NFL prop projection(s)", injury_adjusted)
+        logger.info("injuries: adjusted %d prop projection(s)", injury_adjusted)
     if weather_adjusted:
         logger.info("weather: adjusted %d NFL prop projection(s)", weather_adjusted)
     if picks_withdrawn:

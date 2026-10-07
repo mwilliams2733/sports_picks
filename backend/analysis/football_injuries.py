@@ -40,7 +40,11 @@ from backend.team_identity import espn_team_id
 
 logger = logging.getLogger(__name__)
 
-ROSTER_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{}/roster"
+#: ESPN team roster per sport. The NBA's is also used by nba_injuries.
+ROSTER_URLS = {
+    "nfl": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{}/roster",
+    "nba": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{}/roster",
+}
 
 #: Injury statuses under which a player may still play. Anything else (Out,
 #: Doubtful, Injured Reserve, Suspension, PUP...) is absent, as the
@@ -67,13 +71,16 @@ def parse_roster(payload: dict) -> dict[str, str | None]:
     scores, which use the display name.
     """
     out: dict[str, str | None] = {}
-    for group in payload.get("athletes", []):
-        for athlete in group.get("items", []):
-            injuries = athlete.get("injuries") or []
-            status = injuries[0].get("status") if injuries else None
-            for key in ("displayName", "fullName"):
-                if athlete.get(key):
-                    out[athlete[key]] = status
+    # NFL rosters group athletes by position ({"items": [...]}); NBA rosters
+    # are a flat list of athletes.
+    groups = payload.get("athletes", [])
+    athletes = [a for g in groups for a in (g.get("items", []) if "items" in g else [g])]
+    for athlete in athletes:
+        injuries = athlete.get("injuries") or []
+        status = injuries[0].get("status") if injuries else None
+        for key in ("displayName", "fullName"):
+            if athlete.get(key):
+                out[athlete[key]] = status
     return out
 
 
@@ -86,17 +93,18 @@ def is_absent(roster: dict[str, str | None], player: str | None) -> bool:
     return status is not None and status not in MAY_PLAY
 
 
-async def fetch_roster(client: httpx.AsyncClient, team_label: str) -> dict[str, str | None] | None:
+async def fetch_roster(client: httpx.AsyncClient, team_label: str,
+                       sport: str = "nfl") -> dict[str, str | None] | None:
     """The team's roster statuses, or None when it cannot be read.
 
     None means unknown -- no adjustment -- never "everyone is absent".
     """
-    espn_id = espn_team_id("nfl", team_label)
+    espn_id = espn_team_id(sport, team_label)
     if espn_id is None:
         logger.warning("injuries: no ESPN id for %r", team_label)
         return None
     try:
-        resp = await get_with_retry(client, ROSTER_URL.format(espn_id))
+        resp = await get_with_retry(client, ROSTER_URLS[sport].format(espn_id))
         resp.raise_for_status()
         roster = parse_roster(resp.json())
     except Exception as exc:

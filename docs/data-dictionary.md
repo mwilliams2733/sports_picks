@@ -598,6 +598,23 @@ stated explicitly rather than left silent.
   (`backend/scripts/weather_forecast_backtest.py`). That backtest used the
   games the idea came from, so this record is the out-of-sample test.
 
+- **NBA points, rebounds and assists props get a star-out adjustment from
+  the 2026-10-07 merge** (`backend/analysis/nba_injuries.py`). When the
+  team's star is out tonight, each teammate's projection is multiplied by:
+  - points x1.124
+  - rebounds x1.064
+  - assists x1.079
+
+  The star is the team's points-per-game leader this season with at least
+  10 games played. "Out" means ESPN's roster lists him unable to play, and
+  he played in one of the team's last 5 games. Measured on 2025-26
+  (`backend/scripts/nba_injury_experiment.py`).
+  - **Inactive for each team's first ~10 games of 2026-27**, because no one
+    qualifies as the star yet.
+  - Status is read at the window run about 2 h before tip, so scratches
+    announced later are missed.
+  - Not stored on the pick.
+
 - **NBA player game logs: 1,038 duplicated rows deleted on 2026-10-07**
   (`backend/scripts/dedupe_game_logs.py`; backup
   `sports_picks.backup-20261006-234715-pre-gamelog-dedupe.db`). The
