@@ -142,6 +142,26 @@ for the game at all. A row is written only when a price DIFFERS from the
 latest row for the same `(game_id, bookmaker)`; an unchanged re-observation
 extends `last_seen_at` on the existing row rather than adding a new one.
 
+## `prop_history.csv` columns
+
+One row per `prop_snapshots` row: the append-only prop price series, from
+2026-10-07 (nothing earlier exists).
+
+| Column | Meaning |
+|---|---|
+| `game_id`, `sport`, `home_team`, `away_team`, `game_date`, `start_time_utc` | The game, as in `line_history.csv`. |
+| `bookmaker`, `market`, `player_name`, `outcome` | The prop. A series is one combination of these per game. |
+| `line`, `odds` | The book's MAIN line and price at that moment, the same main line `player_props` keeps. `line` is blank for yes/no props such as anytime TD. |
+| `pulled` | `True` when the book stopped quoting this player in a market it still quoted in the same fetch. `line` and `odds` are blank. A late scratch usually shows up here first. A pull is recorded once; if the prop returns, a normal row follows. |
+| `captured_at` / `last_seen_at` | When this price was first seen, and when it was last confirmed still on the board. |
+
+A row is written only when the line or price changes, so for a staleness
+study the price in force at time t is the latest row with
+`captured_at <= t`. Rows exist only when we fetched. From 2026-10-20 NBA
+props are fetched about 2 h and about 45 min before tip (the late run). Other
+sports are fetched once per window, so a series of length 1 means "seen
+once", not "never moved".
+
 ## `pick_versions.csv` columns
 
 One row per `pick_versions` row -- the append-only pick-revision series (see
