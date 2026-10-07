@@ -571,6 +571,32 @@ def migrate_combat_sports_strategy(engine):
         ))
 
 
+def migrate_weather_strategy(engine):
+    """Ensure the ``weather_rain_under`` row exists in ``strategies``.
+
+    The rain-Under rule (`analysis/football_weather.py`) stores its picks
+    under this row, as tracking picks, so they never mix with the model's.
+    Same shape as :func:`migrate_combat_sports_strategy` and for the same
+    reasons: a fixed high id that cannot collide with test fixtures, and
+    ``is_active=0`` with ``strategy_type='tracking'`` so no "the active game
+    strategy" ``.first()`` query can ever select it. Idempotent by name.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    from backend.models import WEATHER_RAIN_UNDER_STRATEGY_ID
+    if "strategies" not in sa_inspect(engine).get_table_names():
+        return
+    with engine.begin() as conn:
+        if conn.execute(text("SELECT 1 FROM strategies WHERE name = 'weather_rain_under'")).first():
+            return
+        conn.execute(text(
+            "INSERT INTO strategies (id, name, description, config_json, "
+            "is_active, strategy_type) VALUES "
+            f"({WEATHER_RAIN_UNDER_STRATEGY_ID}, 'weather_rain_under', "
+            "'Tracking rule: NFL Under when >= 1.0 mm rain/snow is forecast "
+            "over the first three game hours at an outdoor stadium.', "
+            "'{\"wet_mm\": 1.0}', 0, 'tracking')"))
+
+
 MIGRATIONS = (
     migrate_api_usage,
     migrate_game_start_time,
@@ -635,3 +661,4 @@ def run_migrations(engine, *, allow_destructive: bool | None = None) -> None:
             migration(engine)
     Base.metadata.create_all(engine)
     migrate_combat_sports_strategy(engine)
+    migrate_weather_strategy(engine)

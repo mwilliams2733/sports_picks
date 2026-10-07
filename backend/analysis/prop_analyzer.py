@@ -82,6 +82,7 @@ class PropAnalyzer:
         game_script: dict | None = None,
         matchup_factor: float | None = None,
         injury_factor: float | None = None,
+        weather_factor: float | None = None,
     ) -> PropAnalysis | None:
         # Validate line exists
         if prop.line is None:
@@ -149,6 +150,11 @@ class PropAnalyzer:
         # (football_injuries). Already the measured effect, applied in full.
         if injury_factor is not None:
             projection = projection * injury_factor
+
+        # Football: forecast rain or wind at an outdoor stadium
+        # (football_weather). The measured effect, applied in full.
+        if weather_factor is not None:
+            projection = projection * weather_factor
 
         # Adjust projection based on predicted game script
         if game_script is not None:

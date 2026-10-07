@@ -576,6 +576,43 @@ stated explicitly rather than left silent.
   A missing QB was found fully priced in the closing spread and total, so
   game picks are unchanged.
 
+- **Rain-Under rule picks: `strategy = weather_rain_under`, from the first
+  NFL window after the 2026-10-06 weather merge.** These are NOT the
+  model's picks. A rule stores "Under <consensus total>" for any outdoor NFL
+  game (home stadium open-air, not a neutral site) whose forecast at the
+  window shows >= 1.0 mm of precipitation over the kickoff hour and the two
+  after. The line and price are the same consensus the model uses. Each is
+  `tracking_only`: never emailed or published, graded like any total. They
+  differ from model picks in three ways:
+  - `edge_pct` is 0.0. This breaks the "game-pick edge_pct is never below
+    3.0" pattern.
+  - `model_prob` is NULL.
+  - `rationale_json` holds `{"rule": "rain_under", "weather_id", "precip_mm",
+    "wind_mph", "temp_f"}`. `weather_id` points into `game_weather`.
+
+  **Always split or filter on strategy:** pooled with the model's tracking
+  totals, they would misstate both records. A pick whose forecast dries out
+  before kickoff is withdrawn (`withdrawn_at`), like any pick.
+  Backtest: archived forecasts 2022-2026, Under 26-8 on 34 games
+  (`backend/scripts/weather_forecast_backtest.py`). That backtest used the
+  games the idea came from, so this record is the out-of-sample test.
+
+- **`game_weather` (new table, 2026-10-06): append-only Open-Meteo forecasts
+  for outdoor NFL games.** One row per capture (`captured_at`), about 2h
+  before kickoff, never overwritten. Covers only open-air home stadiums;
+  domes, retractable roofs and neutral sites have no rows. `precip_mm` and
+  `wind_mph` cover kickoff hour + 2; `temp_f` is the kickoff hour.
+
+- **NFL passing and receiving props get a weather adjustment from the
+  same merge.** Multipliers, applied from the latest `game_weather` row:
+  - passing yards: x0.85 if the forecast is windy (>= 15 mph mean), x0.86
+    if wet; both apply when both hold (x0.71);
+  - receiving yards: x0.85 windy, x0.90 wet;
+  - rushing: unchanged (not significant).
+
+  Measured on archived forecasts, not observed weather, so they match what
+  production sees (`backend/analysis/football_weather.py`).
+
 - **Stored pre-game Elo was stale for some games until it was repaired
   (merge after 2026-10-04).** `elo_history` rows written before a backfill or
   a restored/merged game inserted games earlier in the history kept the

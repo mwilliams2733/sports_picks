@@ -21,7 +21,10 @@ def test_create_all_tables(db_engine):
         "calibration_history", "elo_history", "elo_ratings",
         # emailed_picks is what each digest sent, as sent. Kept apart from
         # picks, which is refreshed in place until kickoff.
-        "emailed_picks", "games",
+        "emailed_picks",
+        # game_weather is the append-only forecast series for outdoor NFL
+        # games, captured at each window (collectors/weather.py).
+        "game_weather", "games",
         # line_snapshots is the append-only price series. `odds` holds the
         # CURRENT price and is upserted in place; every quote before the
         # latest used to be destroyed by that upsert, which is what blocked

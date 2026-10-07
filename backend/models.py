@@ -146,6 +146,33 @@ class Odds(Base):
         Index("uq_odds_game_bookmaker", "game_id", "bookmaker", unique=True),
     )
 
+#: Fixed id of the seeded `weather_rain_under` strategy (database.py), the
+#: owner's rain-Under tracking rule. High and fixed like the combat row's.
+WEATHER_RAIN_UNDER_STRATEGY_ID = 999_998
+
+
+class GameWeather(Base):
+    """One forecast for one outdoor NFL game, as captured. Never overwritten.
+
+    Appended at each capture so a pick can be traced to the forecast that
+    existed when it was made, not to a later one. The window's capture is
+    about 2h before kickoff. `precip_mm` and `wind_mph` cover the kickoff
+    hour and the two after (`football_weather.FORECAST_HOURS`), `temp_f` the
+    kickoff hour.
+    """
+    __tablename__ = "game_weather"
+    id = Column(Integer, primary_key=True)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False, index=True)
+    captured_at = Column(DateTime, nullable=False,
+                         default=lambda: datetime.now(tz=timezone.utc))
+    kickoff = Column(DateTime, nullable=False)   # naive UTC, as Game.start_time
+    stadium = Column(String, nullable=False)
+    temp_f = Column(Float, nullable=True)
+    precip_mm = Column(Float, nullable=True)
+    wind_mph = Column(Float, nullable=True)
+    source = Column(String, nullable=False, default="open-meteo")
+
+
 class LineSnapshot(Base):
     """One observed price for one bookmaker on one game, never overwritten.
 
@@ -284,6 +311,13 @@ class PickModel(Base):
         """Filter clause for picks a person may see or that move money:
         neither a tracking pick nor one withdrawn."""
         return and_(cls.tracking_only.is_(False), cls.withdrawn_at.is_(None))
+
+    @classmethod
+    def by_model(cls):
+        """Filter clause for picks the model made. Excludes rule-based
+        tracking strategies (the rain-Under rule), whose record must never
+        be pooled into the model's own."""
+        return cls.strategy_id != WEATHER_RAIN_UNDER_STRATEGY_ID
 
 class PickResult(Base):
     __tablename__ = "pick_results"

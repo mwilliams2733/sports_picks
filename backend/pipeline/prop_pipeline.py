@@ -9,7 +9,8 @@ from backend.collectors.player_stats.nba_api_source import NbaApiSource
 from backend.collectors.player_stats.espn_stats_source import EspnStatsSource
 from backend.collectors.player_stats.balldontlie_source import BallDontLieSource
 from backend.collectors.player_stats.mysportsfeeds_source import MySportsFeedsSource
-from backend.analysis import football_defense, football_injuries
+from backend.analysis import football_defense, football_injuries, football_weather
+from backend.collectors.weather import latest_weather
 from backend.analysis.prop_analyzer import PropAnalyzer
 from backend.analysis.prop_confidence import get_prop_thresholds
 from backend.analysis.prop_markets import market_label
@@ -223,8 +224,13 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
                 except Exception:
                     pass
 
+    # The latest captured forecast per NFL game (the window captures it just
+    # before this runs). No forecast -- roofed, neutral, failed -- is no factor.
+    nfl_weather = latest_weather(session, [g.id for g in nfl_games]) if nfl_games else {}
+
     props_analyzed = 0
     injury_adjusted = 0
+    weather_adjusted = 0
     winning: list[PropAnalysis] = []
     # (game, player, market) keys this run gave an answer for. Only these
     # can be withdrawn: a stored prop this run never looked at is no answer,
@@ -254,6 +260,11 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
                 nfl_leaders[(prop.game_id, player_team_id)],
                 nfl_rosters.get(player_team_id))
             injury_adjusted += injury is not None
+        weather = None
+        if prop.game_id in nfl_weather:
+            w = nfl_weather[prop.game_id]
+            weather = football_weather.prop_factor(prop.market, w.precip_mm, w.wind_mph)
+            weather_adjusted += weather is not None
         if player_team_id and prop.game_id in game_teams:
             home_id, away_id = game_teams[prop.game_id]
             opp_id = away_id if player_team_id == home_id else home_id
@@ -277,7 +288,8 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
                                     opponent_def_rating=opponent_def,
                                     game_script=game_script,
                                     matchup_factor=matchup,
-                                    injury_factor=injury)
+                                    injury_factor=injury,
+                                    weather_factor=weather)
         props_analyzed += 1
         if analysis and analysis.confidence >= 1:
             winning.append(analysis)
@@ -290,6 +302,8 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
     session.commit()
     if injury_adjusted:
         logger.info("injuries: adjusted %d NFL prop projection(s)", injury_adjusted)
+    if weather_adjusted:
+        logger.info("weather: adjusted %d NFL prop projection(s)", weather_adjusted)
     if picks_withdrawn:
         logger.info("Withdrew %d prop pick(s) that no longer qualify", picks_withdrawn)
     return {"games": len(games), "stats_fetched": stats_count,
