@@ -32,7 +32,8 @@ from backend.analysis.paper_bets import player_bets
 from backend.analysis.scorecard import Bet, Summary, summarize
 from backend.database import get_engine, get_session
 from backend.digest.record import emailed_bets
-from backend.models import Game, PaperPick, PickModel, PickResult
+from backend.models import (WEATHER_RAIN_UNDER_STRATEGY_ID, Game, PaperPick, PickModel,
+                            PickResult)
 
 #: Paper player "Claude" (owner request 2026-10-04).
 CLAUDE_USER_ID = 3
@@ -61,14 +62,20 @@ def week_and_total(bets: list[Bet], label: str, start: date, end: date) -> list[
             "  " + fmt(summarize([b for b in bets if b.day <= end], f"{label} (to date)"))]
 
 
-def model_bets(session, *, tracking: bool, sport: str | None = None) -> list[Bet]:
-    """Graded non-prop model picks as 1u Bets (payout is units per 1u staked)."""
+def model_bets(session, *, tracking: bool, sport: str | None = None,
+               rain_rule: bool = False) -> list[Bet]:
+    """Graded non-prop model picks as 1u Bets (payout is units per 1u staked).
+
+    `rain_rule` selects the rain-Under rule's picks instead; otherwise they
+    are excluded (`PickModel.by_model`), so the model's record is its own."""
     q = (session.query(PickModel, PickResult, Game)
          .join(PickResult, PickResult.pick_id == PickModel.id)
          .join(Game, Game.id == PickModel.game_id)
          .filter(PickModel.pick_type != "prop",
                  PickModel.tracking_only.is_(tracking),
                  PickModel.withdrawn_at.is_(None)))
+    q = q.filter(PickModel.strategy_id == WEATHER_RAIN_UNDER_STRATEGY_ID if rain_rule
+                 else PickModel.by_model())
     if sport:
         q = q.filter(Game.sport == sport)
     return [Bet(result=pr.result, stake=1.0, profit=pr.payout or 0.0,
@@ -187,6 +194,11 @@ def report(session, end: date) -> str:
     out += clv_section(session, start, end)
     out += ["", "5. NFL PROPS (tracking-only) -- calibration, split at the matchup change"]
     out += prop_calibration(session, start, end)
+    out += ["", "6. RAIN-UNDER RULE (tracking-only; forecast >= 1.0 mm, outdoor NFL)",
+            "  Backtest 2022-2026: Under 26-8, but on the games the idea came from.",
+            "  This record is the out-of-sample test."]
+    out += week_and_total(model_bets(session, tracking=True, rain_rule=True),
+                          "rain-Under", start, end)
     return "\n".join(out) + "\n"
 
 

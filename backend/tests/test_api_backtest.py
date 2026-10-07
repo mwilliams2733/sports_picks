@@ -19,9 +19,10 @@ def test_list_strategies():
     _seed(client)
     resp = client.get("/backtest/strategies")
     assert resp.status_code == 200
-    # 2 seeded here + the `combat_sports` row run_migrations always ensures
-    # exists (create_app runs it against every engine, including this one).
-    assert len(resp.json()) == 3
+    # 2 seeded here + the `combat_sports` and `weather_rain_under` rows
+    # run_migrations always ensures exist (create_app runs it against every
+    # engine, including this one).
+    assert len(resp.json()) == 4
 
 def test_create_strategy():
     app = create_app(":memory:")

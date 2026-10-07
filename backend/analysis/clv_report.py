@@ -228,7 +228,10 @@ def load_samples(session, *, sport: str | None = None) -> list[ClvSample]:
 
     q = (session.query(PickResult, PickModel, Game)
          .join(PickModel, PickResult.pick_id == PickModel.id)
-         .join(Game, PickModel.game_id == Game.id))
+         .join(Game, PickModel.game_id == Game.id)
+         # The model's picks only: a rule's picks (rain-Under) would blend
+         # its CLV into the model's.
+         .filter(PickModel.by_model()))
     if sport:
         q = q.filter(Game.sport == sport)
 

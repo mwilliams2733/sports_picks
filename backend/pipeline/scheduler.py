@@ -22,6 +22,8 @@ from backend.collectors.espn_box_score import (POSSESSION_SPORTS,
                                                collect_box_scores_for_final_games,
                                                collect_team_box_scores)
 from backend.collectors.budget import get_credit_summary, DEFAULT_BUDGET
+from backend.collectors.weather import collect_game_weather, latest_weather
+from backend.analysis.football_weather import rain_under_picks
 from backend.models import (
     Base, Game, PickModel, PickResult, StrategyModel,
     PaperPick, PlayerStat,
@@ -734,6 +736,16 @@ def _run_window(config, engine, sport: str, window: dict):
             asyncio.run(fetch_and_store_props(
                 session, [sport], api_key, budget=budget, window_game_ids=window_game_ids,
             ))
+        if sport == "nfl":
+            # Forecasts for the window's outdoor games, then the rain-Under
+            # tracking rule. Never allowed to stop the window's picks.
+            try:
+                window_games = session.query(Game).filter(Game.id.in_(window_game_ids)).all()
+                asyncio.run(collect_game_weather(session, window_games))
+                rain_under_picks(session, window_games,
+                                 latest_weather(session, window_game_ids))
+            except Exception as e:
+                logger.error(f"Weather step error: {e}", exc_info=True)
         game_strategy = session.query(StrategyModel).filter(
             StrategyModel.is_active == True, StrategyModel.strategy_type == "game",
         ).first()
