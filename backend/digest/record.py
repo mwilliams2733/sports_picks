@@ -54,7 +54,8 @@ def record_emailed(session: Session, sections, digest_date: date) -> int:
             # As emailed, not as stored: see EmailedPick.
             pick_value=item.pick_value, odds=item.odds,
             prop_player=pick.prop_player, prop_market=pick.prop_market,
-            confidence=item.confidence))
+            confidence=item.confidence,
+            best_book=item.best_book, best_odds=item.best_odds))
         already.add(item.pick_id)
         added += 1
     session.commit()

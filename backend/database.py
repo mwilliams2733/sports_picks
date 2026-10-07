@@ -486,6 +486,21 @@ def migrate_emailed_pick_confidence(engine):
             "WHERE digest_date <= '2026-09-28'"))
 
 
+def migrate_emailed_pick_best_price(engine):
+    """Add emailed_picks.best_book / best_odds. No backfill: before
+    2026-10-07 the email showed no best price, so NULL is the true record."""
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "emailed_picks" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("emailed_picks")}
+    with engine.begin() as conn:
+        if "best_book" not in columns:
+            conn.execute(text("ALTER TABLE emailed_picks ADD COLUMN best_book VARCHAR"))
+        if "best_odds" not in columns:
+            conn.execute(text("ALTER TABLE emailed_picks ADD COLUMN best_odds INTEGER"))
+
+
 def migrate_user_pin(engine):
     """Add user_profiles.pin_hash and pin_salt. Nullable: existing players
     have no PIN until their next bet sets one."""
@@ -617,6 +632,7 @@ MIGRATIONS = (
     migrate_odds_one_row_per_book,
     migrate_team_box_scores,
     migrate_emailed_pick_confidence,
+    migrate_emailed_pick_best_price,
     migrate_user_pin,
     migrate_pick_tracking_only,
     migrate_pick_market_prob_novig,

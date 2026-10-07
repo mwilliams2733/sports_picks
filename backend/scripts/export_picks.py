@@ -80,7 +80,15 @@ PICKS_FIELDS = [
     "withdrawn_at",
     "emailed", "emailed_odds", "emailed_at",
     "emailed_pick_value", "emailed_digest_date", "emailed_confidence",
+    "emailed_best_book", "emailed_best_odds",
 ]
+
+def _optional(row, column: str):
+    """A nullable column that older snapshots predate: blank if absent or NULL."""
+    if row is None or column not in row.keys() or row[column] is None:
+        return ""
+    return row[column]
+
 
 LINE_HISTORY_FIELDS = [
     "game_id", "sport", "home_team", "away_team", "game_date", "start_time_utc",
@@ -468,6 +476,9 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
                     emailed_row["confidence"] if emailed_row and emailed_row["confidence"] is not None
                     else ""
                 ),
+                # Since 2026-10-07; absent from older snapshots, blank before then.
+                "emailed_best_book": _optional(emailed_row, "best_book"),
+                "emailed_best_odds": _optional(emailed_row, "best_odds"),
             })
 
     all_line_rows = conn.execute("""

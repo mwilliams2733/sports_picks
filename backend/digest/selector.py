@@ -13,7 +13,9 @@ from backend.data_types import PickFactor
 from backend.analysis.rationale import render_rationale
 from backend.analysis.odds_utils import InvalidOddsError, american_to_implied_prob
 from backend.analysis.prop_markets import MARKET_STAT_MAP
-from backend.models import Game, PickModel, PickResult, Team
+from backend.analysis.best_price import best_game_price, best_prop_price
+from backend.models import Game, Odds, PickModel, PickResult, PlayerProp, Team
+from backend.pipeline.prop_pipeline import current_props
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,9 @@ class DigestPick:
     #: The stored pick this was rendered from, so the send can be recorded
     #: (EmailedPick). None only for a DigestPick built outside the selector.
     pick_id: int | None = None
+    #: The best book offering this same bet at send time (best_price.py).
+    best_book: str | None = None
+    best_odds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -343,6 +348,8 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
         def _make_pick(p: PickModel) -> DigestPick:
             game = games_by_id[p.game_id]
             away_name, home_name = _team_names(session, game)
+            best = best_game_price(session.query(Odds).filter(Odds.game_id == p.game_id).all(),
+                                   p.pick_type, p.pick_value)
             return DigestPick(
                 sport=sport,
                 matchup=_matchup(session, game),
@@ -356,6 +363,8 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
                 home_team=home_name,
                 away_team=away_name,
                 pick_id=p.id,
+                best_book=best.bookmaker if best else None,
+                best_odds=best.odds if best else None,
             )
 
         digest_picks = [_make_pick(p) for p in priced[:max_game_picks]]
@@ -381,6 +390,8 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
         def _make_prop(p: PickModel) -> DigestPick:
             game = games_by_id[p.game_id]
             away_name, home_name = _team_names(session, game)
+            best = best_prop_price(prop_rows.get(p.game_id, []), p.prop_player,
+                                   p.prop_market, p.pick_value)
             return DigestPick(
                 sport=sport,
                 matchup=_matchup(session, game),
@@ -392,7 +403,16 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
                 home_team=home_name,
                 away_team=away_name,
                 pick_id=p.id,
+                best_book=best.bookmaker if best else None,
+                best_odds=best.odds if best else None,
             )
+
+        # Each game's current prop quotes (the latest fetch only: a row a
+        # book stopped offering keeps its old price), for the best book.
+        prop_rows: dict[int, list] = {}
+        for row in current_props(session.query(PlayerProp).filter(
+                PlayerProp.game_id.in_({p.game_id for p in gradeable_props[:max_props]})).all()):
+            prop_rows.setdefault(row.game_id, []).append(row)
 
         digest_props = [_make_prop(p) for p in gradeable_props[:max_props]]
 

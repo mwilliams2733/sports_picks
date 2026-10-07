@@ -120,7 +120,7 @@ def _build_fixture_db(path: str) -> None:
                       sent_at=datetime(2026, 9, 18, 16, 0)))
     s.add(EmailedPick(digest_date=date(2026, 9, 19), pick_id=10, game_id=1,
                       sport="mlb", pick_type="moneyline", pick_value="HOME ML",
-                      odds=-135, confidence=5,
+                      odds=-135, confidence=5, best_book="fanduel", best_odds=-128,
                       sent_at=datetime(2026, 9, 19, 16, 0)))
     s.commit()
 
@@ -339,6 +339,24 @@ def test_pick_emailed_on_two_dates_gives_one_row_with_latest_values(tmp_path, fi
     assert row["emailed_confidence"] == "5"
     assert row["emailed_digest_date"] == "2026-09-19"
     assert row["emailed_pick_value"] == "HOME ML"
+    assert (row["emailed_best_book"], row["emailed_best_odds"]) == ("fanduel", "-128")
+
+
+def test_a_snapshot_from_before_the_best_price_columns_still_exports(tmp_path, fixture_db):
+    import sqlite3
+    with sqlite3.connect(fixture_db) as c:     # rebuild emailed_picks without the columns
+        c.execute("CREATE TABLE ep_old AS SELECT id, digest_date, pick_id, game_id, sport, "
+                  "pick_type, pick_value, odds, prop_player, prop_market, confidence, sent_at "
+                  "FROM emailed_picks")
+        c.execute("DROP TABLE emailed_picks")
+        c.execute("ALTER TABLE ep_old RENAME TO emailed_picks")
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    row = [r for r in _read_csv(counts["picks_path"]) if r["pick_id"] == "10"][0]
+    assert (row["emailed_odds"], row["emailed_best_book"]) == ("-135", "")
 
 
 def test_line_history_has_one_row_per_snapshot(tmp_path, fixture_db):
