@@ -81,6 +81,7 @@ class PropAnalyzer:
         opponent_def_rating: float | None = None,
         game_script: dict | None = None,
         matchup_factor: float | None = None,
+        injury_factor: float | None = None,
     ) -> PropAnalysis | None:
         # Validate line exists
         if prop.line is None:
@@ -143,6 +144,11 @@ class PropAnalyzer:
         # 2026-10-04 NFL props had no matchup adjustment at all.
         if matchup_factor is not None:
             projection = football_defense.adjust(projection, matchup_factor)
+
+        # Football: a teammate (or the QB) is missing today
+        # (football_injuries). Already the measured effect, applied in full.
+        if injury_factor is not None:
+            projection = projection * injury_factor
 
         # Adjust projection based on predicted game script
         if game_script is not None:

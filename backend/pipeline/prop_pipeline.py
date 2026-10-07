@@ -1,5 +1,6 @@
 import logging
 from datetime import date, datetime, timedelta, timezone
+import httpx
 from sqlalchemy.orm import Session
 from backend.models import Game, Team, PlayerProp, PlayerStat, PickModel, StrategyModel, TeamStat
 from backend.pipeline.pick_versions import record_pick_version
@@ -8,7 +9,7 @@ from backend.collectors.player_stats.nba_api_source import NbaApiSource
 from backend.collectors.player_stats.espn_stats_source import EspnStatsSource
 from backend.collectors.player_stats.balldontlie_source import BallDontLieSource
 from backend.collectors.player_stats.mysportsfeeds_source import MySportsFeedsSource
-from backend.analysis import football_defense
+from backend.analysis import football_defense, football_injuries
 from backend.analysis.prop_analyzer import PropAnalyzer
 from backend.analysis.prop_confidence import get_prop_thresholds
 from backend.analysis.prop_markets import market_label
@@ -144,6 +145,29 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
                     session, "nfl", g.season, g.date)
             nfl_allowed[g.id] = allowed_cache[key]
 
+    # NFL: who is missing today (ESPN roster) and each team's season yards
+    # leaders, for the teammate-out factor. One roster request per team; an
+    # unreadable roster is None, which applies no adjustment.
+    nfl_leaders: dict[tuple[int, int], dict[str, str]] = {}
+    nfl_rosters: dict[int, dict | None] = {}
+    nfl_games = [g for g in games if g.sport == "nfl"]
+    if nfl_games:
+        async with httpx.AsyncClient(timeout=20) as client:
+            for g in nfl_games:
+                for tid in (g.home_team_id, g.away_team_id):
+                    nfl_leaders[(g.id, tid)] = football_injuries.season_leaders(
+                        session, tid, g.season, g.date)
+                    if tid not in nfl_rosters:
+                        team = session.get(Team, tid)
+                        nfl_rosters[tid] = (await football_injuries.fetch_roster(
+                            client, team.abbreviation) if team else None)
+        for (gid, tid), lead in nfl_leaders.items():
+            roster = nfl_rosters.get(tid)
+            out = {k: p for k, p in lead.items()
+                   if roster is not None and football_injuries.is_absent(roster, p)}
+            if out:
+                logger.info("injuries: game %s team %s missing leaders %s", gid, tid, out)
+
     # Build analyzer from strategy config if available
     analyzer_kwargs = {}
     if strategy_id:
@@ -200,6 +224,7 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
                     pass
 
     props_analyzed = 0
+    injury_adjusted = 0
     winning: list[PropAnalysis] = []
     # (game, player, market) keys this run gave an answer for. Only these
     # can be withdrawn: a stored prop this run never looked at is no answer,
@@ -222,6 +247,13 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
         elif recent:
             player_team_id = recent[0].team_id
         matchup = None
+        injury = None
+        if player_team_id and (prop.game_id, player_team_id) in nfl_leaders:
+            injury = football_injuries.injury_factor(
+                prop.market, prop.player_name,
+                nfl_leaders[(prop.game_id, player_team_id)],
+                nfl_rosters.get(player_team_id))
+            injury_adjusted += injury is not None
         if player_team_id and prop.game_id in game_teams:
             home_id, away_id = game_teams[prop.game_id]
             opp_id = away_id if player_team_id == home_id else home_id
@@ -244,7 +276,8 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
         analysis = analyzer_for(prop.game_id).analyze(prop, season_avg, recent,
                                     opponent_def_rating=opponent_def,
                                     game_script=game_script,
-                                    matchup_factor=matchup)
+                                    matchup_factor=matchup,
+                                    injury_factor=injury)
         props_analyzed += 1
         if analysis and analysis.confidence >= 1:
             winning.append(analysis)
@@ -255,6 +288,8 @@ async def _run_prop_pipeline_inner(session, collector, target_date, strategy_id,
         picks_generated, picks_refreshed, picks_withdrawn = _store_prop_picks(
             session, winning, strategy_id, answered=answered)
     session.commit()
+    if injury_adjusted:
+        logger.info("injuries: adjusted %d NFL prop projection(s)", injury_adjusted)
     if picks_withdrawn:
         logger.info("Withdrew %d prop pick(s) that no longer qualify", picks_withdrawn)
     return {"games": len(games), "stats_fetched": stats_count,
