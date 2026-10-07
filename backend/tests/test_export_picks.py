@@ -670,3 +670,64 @@ def test_a_db_predating_the_newer_pick_columns_still_exports(tmp_path, fixture_d
     assert rows
     assert {r["tracking_only"] for r in rows} == {"False"}
     assert {r["withdrawn_at"] for r in rows} == {""}
+
+
+def _add_prop_snapshots(fixture_db):
+    from backend.models import PropSnapshot
+    engine = get_engine(fixture_db)
+    s = get_session(engine)
+    s.add_all([
+        PropSnapshot(game_id=1, bookmaker="draftkings", market="batter_hits",
+                     player_name="Oneil Cruz", outcome="Over", line=0.5, odds=-150,
+                     captured_at=datetime(2026, 9, 18, 15, 0),
+                     last_seen_at=datetime(2026, 9, 18, 17, 0)),
+        PropSnapshot(game_id=1, bookmaker="draftkings", market="batter_hits",
+                     player_name="Oneil Cruz", outcome="Over", line=None, odds=None,
+                     captured_at=datetime(2026, 9, 18, 18, 0),
+                     last_seen_at=datetime(2026, 9, 18, 18, 0)),
+    ])
+    s.commit()
+    s.close()
+    with engine.connect() as conn:
+        conn.exec_driver_sql("PRAGMA wal_checkpoint(FULL)")
+    engine.dispose()
+
+
+def test_prop_history_has_one_row_per_snapshot_and_marks_pulls(tmp_path, fixture_db):
+    _add_prop_snapshots(fixture_db)
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    rows = _read_csv(counts["prop_history_path"])
+    assert [(r["line"], r["odds"], r["pulled"]) for r in rows] == [
+        ("0.5", "-150", "False"), ("", "", "True")]
+    assert rows[0]["home_team"] == "Pittsburgh Pirates"
+    assert rows[0]["captured_at"].endswith("Z")
+
+
+def test_prop_history_follows_the_sport_filter(tmp_path, fixture_db):
+    _add_prop_snapshots(fixture_db)
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path), sports=["nfl"])
+    finally:
+        conn.close()
+    assert counts["prop_history_rows"] == 0
+
+
+def test_a_db_without_prop_snapshots_exports_header_only_and_says_so(tmp_path, fixture_db):
+    import sqlite3
+    with sqlite3.connect(fixture_db) as c:
+        c.execute("DROP TABLE prop_snapshots")
+    conn = export_picks._connect_ro(fixture_db)
+    try:
+        counts = export_picks.export(conn, str(tmp_path))
+    finally:
+        conn.close()
+    assert _read_csv(counts["prop_history_path"]) == []
+    manifest = open(export_picks.write_manifest(
+        str(tmp_path), db_path=fixture_db, repo_root=os.getcwd(),
+        since=None, sports=None, counts=counts), encoding="utf-8").read()
+    assert "no prop_snapshots table" in manifest

@@ -13,6 +13,11 @@ Writes four files into ``--out``:
     from ``pick_versions.csv`` -- see that file below.
 ``line_history.csv``
     One row per ``line_snapshots`` row (the append-only price series).
+``prop_history.csv``
+    One row per ``prop_snapshots`` row (the append-only prop price series,
+    from 2026-10-07). ``pulled`` is True where a book stopped quoting the
+    player in a market it still quoted -- often a late scratch. A db that
+    predates the table gets a header-only file and a manifest note.
 ``pick_versions.csv``
     One row per ``pick_versions`` row (the append-only pick-revision
     series) -- every stored version of every pick, not just its current
@@ -99,6 +104,12 @@ LINE_HISTORY_FIELDS = [
     "spread_home_price", "spread_away_price",
     "over_price", "under_price",
     "captured_at", "last_seen_at", "series_depth",
+]
+
+PROP_HISTORY_FIELDS = [
+    "game_id", "sport", "home_team", "away_team", "game_date", "start_time_utc",
+    "bookmaker", "market", "player_name", "outcome", "line", "odds", "pulled",
+    "captured_at", "last_seen_at",
 ]
 
 PICK_VERSIONS_FIELDS = [
@@ -320,7 +331,8 @@ def _series_depth(conn: sqlite3.Connection) -> dict[int, int]:
 
 def export(conn: sqlite3.Connection, out_dir: str, *,
           since: str | None = None, sports: list[str] | None = None) -> dict:
-    """Write picks.csv and line_history.csv into `out_dir`. Returns a dict
+    """Write picks.csv, line_history.csv, prop_history.csv and pick_versions.csv
+    into `out_dir`. Returns a dict
     of counts used to build the manifest.
 
     Every query below is a fixed string with no interpolated SQL -- `since`
@@ -521,6 +533,41 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
                 "series_depth": depth_by_game.get(r["game_id"], 0),
             })
 
+    # The prop price series, under the same --since/--sport filter as lines.
+    prop_history_table_present = _table_exists(conn, "prop_snapshots")
+    prop_rows = []
+    if prop_history_table_present:
+        prop_rows = [r for r in conn.execute("""
+            SELECT ps.game_id, g.sport, g.date AS game_date, g.start_time,
+                   ht.name AS home_name, at.name AS away_name,
+                   ps.bookmaker, ps.market, ps.player_name, ps.outcome,
+                   ps.line, ps.odds, ps.captured_at, ps.last_seen_at
+            FROM prop_snapshots ps
+            JOIN games g ON g.id = ps.game_id
+            JOIN teams ht ON ht.id = g.home_team_id
+            JOIN teams at ON at.id = g.away_team_id
+            ORDER BY ps.game_id, ps.bookmaker, ps.market, ps.player_name,
+                     ps.outcome, ps.captured_at
+        """).fetchall() if _keep(r)]
+    prop_history_path = os.path.join(out_dir, "prop_history.csv")
+    with open(prop_history_path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=PROP_HISTORY_FIELDS)
+        w.writeheader()
+        for r in prop_rows:
+            w.writerow({
+                "game_id": r["game_id"], "sport": r["sport"],
+                "home_team": r["home_name"], "away_team": r["away_name"],
+                "game_date": r["game_date"],
+                "start_time_utc": _iso_z(r["start_time"]),
+                "bookmaker": r["bookmaker"], "market": r["market"],
+                "player_name": r["player_name"], "outcome": r["outcome"],
+                "line": "" if r["line"] is None else r["line"],
+                "odds": "" if r["odds"] is None else r["odds"],
+                "pulled": r["odds"] is None,
+                "captured_at": _iso_z(r["captured_at"]),
+                "last_seen_at": _iso_z(r["last_seen_at"]),
+            })
+
     # One row per pick_versions row, restricted to picks kept by the same
     # --since/--sport filter (via pick_id_set) rather than every version
     # ever recorded.
@@ -549,6 +596,9 @@ def export(conn: sqlite3.Connection, out_dir: str, *,
         "picks_path": picks_path,
         "line_history_rows": len(line_rows),
         "line_history_path": line_history_path,
+        "prop_history_rows": len(prop_rows),
+        "prop_history_path": prop_history_path,
+        "prop_history_table_present": prop_history_table_present,
         "pick_versions_rows": len(version_rows),
         "pick_versions_path": pick_versions_path,
         "pick_versions_table_present": pick_versions_table_present,
@@ -578,6 +628,14 @@ def write_manifest(out_dir: str, *, db_path: str, repo_root: str,
         lines.append(f"  {sport}: {n}")
     lines += [
         f"line_history.csv: {counts['line_history_rows']} rows",
+        f"prop_history.csv: {counts['prop_history_rows']} rows",
+    ]
+    if not counts["prop_history_table_present"]:
+        lines.append(
+            "  NOTE: this database has no prop_snapshots table (it predates "
+            "2026-10-07) -- prop_history.csv is header-only, not a real "
+            "absence of prop price movement.")
+    lines += [
         f"pick_versions.csv: {counts['pick_versions_rows']} rows",
     ]
     if not counts["pick_versions_table_present"]:
@@ -630,6 +688,7 @@ def main(argv=None) -> int:
 
     print(f"wrote {counts['picks_rows']} picks -> {counts['picks_path']}")
     print(f"wrote {counts['line_history_rows']} line snapshots -> {counts['line_history_path']}")
+    print(f"wrote {counts['prop_history_rows']} prop snapshots -> {counts['prop_history_path']}")
     print(f"wrote {counts['pick_versions_rows']} pick versions -> {counts['pick_versions_path']}")
     print(f"wrote manifest -> {manifest_path}")
     return 0
