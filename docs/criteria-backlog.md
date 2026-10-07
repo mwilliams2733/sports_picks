@@ -34,6 +34,7 @@ no proven edge** / **shipped**.
 
 | Idea | Status | Result | Evidence |
 |---|---|---|---|
+| NBA model vs the closing spread | no edge | 2025-26, last 30% out of sample (376 games, every score matched): model adds +0.16 beyond the line (95% CI -0.19..+0.52, p 0.37); Brier model 0.1696 vs market 0.1594; betting its disagreements 188-186. Late season is the model's best case. | `nba_market_experiment.py`, public Kaggle closing spreads, 2026-10-06 |
 | Team strength (EPA/play) | no edge | Adds nothing to the NFL close: coefficient -0.36, p 0.18, 1,171 games. Rules out team-level box-score ratings generally. | `epa_experiment.py`, 2026-09-22 |
 | Turnover margin | no edge | Adds nothing to the close: +0.09, p 0.78, 1,187 games. Best variant 51.6% ATS, below 52.4% break-even. | `turnover_experiment.py`, 2026-10-04 |
 | Opponent pass / run defense | better projections, no proven edge | Predicts player yards (c about 0.5, p < 1e-7) and is wired into NFL props at half weight. Prop lines show no sign of missing it (27 games). | `prop_matchup_experiment.py`, 2026-10-04 |

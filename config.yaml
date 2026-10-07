@@ -38,8 +38,10 @@ digest:
   enabled: true
   send_hour_et: 11
   # Owner's enabled sports (2026-09-28): NFL, MLB, UFC ("mma" is the UFC key).
-  # Around NBA opening night (2026-10-20) the plan is to swap mlb for nba.
-  sports: ["nfl", "mlb", "mma"]
+  # 2026-10-06, owner: nba in, mlb out. NBA was measured first and has no
+  # edge over the close (backend/scripts/nba_market_experiment.py); the owner
+  # chose to publish it anyway, as NFL is. See docs/review-remediation.md.
+  sports: ["nfl", "nba", "mma"]
   send_bar:            # price window + caps only; change only with a dated note in docs/review-remediation.md
     min_odds: -150
     max_odds: 150

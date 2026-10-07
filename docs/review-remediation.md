@@ -134,3 +134,18 @@ scientist working outside this repo. Paper bets and user data are excluded.
 See `docs/data-dictionary.md` for column definitions, grading and CLV
 conventions, and known traps in this data (repo has no root README; this
 file is the closest thing to a docs index, hence the pointer here).
+
+## 2026-10-06 — NBA in, MLB out of the digest
+
+The owner swapped the digest's sports from NFL/MLB/UFC to NFL/NBA/UFC, as
+planned for NBA opening night, effective from the next scheduler restart
+(MLB postseason picks stop being emailed now; NBA picks begin when the nba
+season window opens on 10-20, so the gap is NFL and UFC only).
+
+Measured first (`backend/scripts/nba_market_experiment.py`, 2025-26, last
+30% out of sample, 376 games): the NBA model adds nothing beyond the closing
+spread (+0.16, 95% CI -0.19..+0.52, p 0.37); Brier model 0.1696 vs market
+0.1594; betting its disagreements 188-186. The owner chose to publish NBA
+anyway, consistent with NFL, which also measured no edge
+(`epa_experiment`). MLB picks are still generated and graded; only the email
+changes.
