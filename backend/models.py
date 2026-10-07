@@ -354,6 +354,11 @@ class EmailedPick(Base):
     #: Stars as emailed, copied at send time like the price. Nullable: rows
     #: recorded before 2026-09-29 carry it only where it was verifiable.
     confidence = Column(Integer, nullable=True)
+    #: The best book and its price shown beside the pick (best_price.py),
+    #: from 2026-10-07. NULL before that -- no best price was shown -- and
+    #: when no book offered the same bet at send time.
+    best_book = Column(String, nullable=True)
+    best_odds = Column(Integer, nullable=True)
     sent_at = Column(DateTime, nullable=False,
                      default=lambda: datetime.now(tz=timezone.utc))
 

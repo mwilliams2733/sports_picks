@@ -7,6 +7,8 @@ fonts, no JavaScript. A plain-text alternative is always produced.
 from datetime import date
 from html import escape as _escape
 
+from backend.analysis.best_price import book_name
+from backend.analysis.odds_utils import calculate_payout
 from backend.analysis.prop_markets import market_label
 from backend.digest.selector import DigestPick, DigestSection
 
@@ -90,6 +92,28 @@ def _selection_label(p: DigestPick) -> str:
     return value
 
 
+def _price(p: DigestPick) -> str:
+    """The pick's price, and where to get the best one.
+
+    Game picks are priced at the consensus, so the best book is shown beside
+    it ("+141 avg · +150 at FanDuel"). Props are already priced at their
+    best book, so only the book is added. A pick with no matching book at
+    send time shows the price alone.
+    """
+    odds = _fmt_odds(p.odds)
+    if p.best_book is None or p.best_odds is None:
+        return f"({odds})"
+    book = book_name(p.best_book)
+    if p.best_odds == p.odds:
+        return f"({odds} at {book})"
+    # The pick's price is from when it was made; the books' are current. If
+    # the market has moved against the pick since, even the best book can be
+    # worse -- say so rather than call a lower price the "best".
+    if calculate_payout(p.best_odds) < calculate_payout(p.odds):
+        return f"({odds} when picked · best now {_fmt_odds(p.best_odds)} at {book})"
+    return f"({odds} avg · {_fmt_odds(p.best_odds)} at {book})"
+
+
 def _prop_label(pick_value: str) -> str:
     """A prop's stored value with a trailing raw market key made readable.
 
@@ -167,7 +191,7 @@ def render_digest(sections: list[DigestSection], target_date: date):
             rows.append(
                 f'<tr><td style="padding:10px 0;border-bottom:1px solid #e5e7eb;">'
                 f'<div style="{_FONT}font-size:15px;font-weight:600;color:#111827;">'
-                f'{_escape(_selection_label(p))} <span style="font-weight:400;color:#6b7280;">({_fmt_odds(p.odds)})</span></div>'
+                f'{_escape(_selection_label(p))} <span style="font-weight:400;color:#6b7280;">{_escape(_price(p))}</span></div>'
                 f'<div style="{_FONT}font-size:13px;color:#374151;padding-top:2px;">'
                 f'{_escape(p.matchup)} &nbsp;·&nbsp; '
                 f'Model {_pct(p.model_prob)} &nbsp;·&nbsp; Price {_pct(p.price_prob)} '
@@ -175,7 +199,7 @@ def render_digest(sections: list[DigestSection], target_date: date):
                 f'{rationale_html}</td></tr>'
             )
             text_lines.append(
-                f"  {_selection_label(p)} ({_fmt_odds(p.odds)}) — {p.matchup} — "
+                f"  {_selection_label(p)} {_price(p)} — {p.matchup} — "
                 f"Model {_pct(p.model_prob)} / Price {_pct(p.price_prob)} / "
                 f"Edge {_fmt_edge(p.edge_pct)} pts"
             )
@@ -198,12 +222,12 @@ def render_digest(sections: list[DigestSection], target_date: date):
                 rows.append(
                     f'<tr><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;">'
                     f'<div style="{_FONT}font-size:14px;color:#111827;">'
-                    f'{_escape(_prop_label(p.pick_value))} <span style="color:#6b7280;">({_fmt_odds(p.odds)})</span></div>'
+                    f'{_escape(_prop_label(p.pick_value))} <span style="color:#6b7280;">{_escape(_price(p))}</span></div>'
                     f'<div style="{_FONT}font-size:12px;color:#6b7280;padding-top:2px;">'
                     f'{_escape(p.matchup)}</div></td></tr>'
                 )
                 text_lines.append(
-                    f"    {_prop_label(p.pick_value)} ({_fmt_odds(p.odds)}) — {p.matchup}"
+                    f"    {_prop_label(p.pick_value)} {_price(p)} — {p.matchup}"
                 )
         text_lines.append("")
 
