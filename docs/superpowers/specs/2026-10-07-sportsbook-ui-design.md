@@ -127,7 +127,9 @@ friends."
 - **Desktop (≥ 900px):** the tabs move into the top bar, and the slip is a
   fixed right-hand column.
 - **The Research menu:**
-  - Model Picks `/picks` (the old Today's Picks page)
+  - Model Picks `/model-picks` (the old Today's Picks page). It is not
+    `/picks`: FastAPI mounts the API at `/picks` ahead of the SPA catch-all,
+    so a reload there would return JSON (found while planning, 2026-10-07).
   - Props `/props`
   - Track Record `/track-record`
   - Backtesting `/backtesting`
