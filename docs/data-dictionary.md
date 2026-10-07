@@ -615,6 +615,17 @@ stated explicitly rather than left silent.
     announced later are missed.
   - Not stored on the pick.
 
+- **`prop_snapshots` (new table, 2026-10-07): the append-only prop price
+  history.** `player_props` keeps only each prop's latest price. This table
+  keeps every price, one row per change, per (game, book, market, player,
+  outcome), the same rule as `line_snapshots`.
+  - An unchanged price extends `last_seen_at` instead of adding a row.
+  - A row with `odds` NULL is a **pull**: the book still quoted that market
+    in the fetch but no longer that player. Late scratches usually look
+    like this.
+  - Only main lines are recorded (`main_lines`), as in `player_props`.
+  - Nothing exists before 2026-10-07.
+
 - **NBA prop picks get a second, late run from the 2026-10-07 merge.**
   Each NBA window also re-fetches its prop lines 45 minutes before its first
   tip and re-runs the prop pipeline (`scheduler._run_late_props`), so the

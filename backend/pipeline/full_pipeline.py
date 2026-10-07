@@ -11,6 +11,7 @@ from backend.collectors.odds_api import OddsAPICollector, redact_api_key
 from backend.collectors.budget import check_budget, record_api_call, BudgetStatus
 from backend.exceptions import BudgetExhaustedError
 from backend.analysis.line_snapshots import record_snapshot
+from backend.analysis.prop_snapshots import record_prop_fetch
 from backend.analysis.odds_utils import InvalidOddsError, american_to_implied_prob
 from backend.models import Team, Game, Odds, PlayerProp
 from backend.team_identity import ABBREVIATION_SPORTS, canonical_abbr
@@ -663,9 +664,15 @@ def main_lines(props: list[dict]) -> list[dict]:
 
 
 def _store_props(session: Session, game_id: int, props: list[dict]) -> int:
-    """Store player props for a game, one line per book (`main_lines`)."""
+    """Store player props for a game, one line per book (`main_lines`).
+
+    Also appends the fetch to the prop price history (`prop_snapshots`),
+    which keeps the prices this upsert overwrites.
+    """
     count = 0
-    for p in main_lines(props):
+    stored = main_lines(props)
+    record_prop_fetch(session, game_id, stored)
+    for p in stored:
         existing = session.query(PlayerProp).filter(
             PlayerProp.game_id == game_id,
             PlayerProp.bookmaker == p["bookmaker"],

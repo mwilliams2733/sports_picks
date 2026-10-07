@@ -217,6 +217,35 @@ class LineSnapshot(Base):
     )
 
 
+class PropSnapshot(Base):
+    """One observed prop price, never overwritten (`analysis/prop_snapshots`).
+
+    `PlayerProp` is upserted in place, so a prop's earlier prices are lost.
+    This is the history beside it, with the same append-on-change rule as
+    `LineSnapshot`, per (game, book, market, player, outcome). A row with
+    `odds` NULL is a PULL: the book still quoted that market in the fetch
+    but no longer this player -- what a late scratch usually looks like.
+    """
+    __tablename__ = "prop_snapshots"
+    id = Column(Integer, primary_key=True)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
+    bookmaker = Column(String, nullable=False)
+    market = Column(String, nullable=False)
+    player_name = Column(String, nullable=False)
+    outcome = Column(String, nullable=False)
+    line = Column(Float, nullable=True)       # NULL for yes/no props, and on a pull
+    odds = Column(Integer, nullable=True)     # NULL only on a pull
+    captured_at = Column(DateTime, nullable=False,
+                         default=lambda: datetime.now(tz=timezone.utc))
+    last_seen_at = Column(DateTime, nullable=False,
+                          default=lambda: datetime.now(tz=timezone.utc))
+
+    __table_args__ = (
+        Index("ix_prop_snapshots_series", "game_id", "bookmaker", "market",
+              "player_name", "outcome", "captured_at"),
+    )
+
+
 class StrategyModel(Base):
     __tablename__ = "strategies"
     id = Column(Integer, primary_key=True)
