@@ -167,24 +167,40 @@ def report(sport: str, games) -> list[str]:
     return out
 
 
-def main(argv=None) -> int:
+def timing_report(db: str, sports=("nfl", "mlb")) -> list[str]:
+    """The full report for `db` (a snapshot path), one block per sport.
+
+    Called by the weekly review as well as by `main`, so the weekly re-run
+    is this exact experiment, not a second copy of it.
+    """
     from backend.analysis.calibration_report import _final_games, _fit_model, _predict_rows
     from backend.database import get_engine, get_session
+    session = get_session(get_engine(db))
+    out = []
+    try:
+        _fit_model(session, SPLIT)
+        for sport in sports:
+            games = [g for g in _final_games(session, sport) if g.date >= SPLIT]
+            if not games:
+                out += ["-" * 78, f"{sport.upper()}  (no final games since {SPLIT})"]
+                continue
+            probs = {g.id: p for g, (p, _, _) in zip(games, _predict_rows(session, games))}
+            out += report(sport, build(db, sport, probs))
+    finally:
+        session.close()
+    return out
+
+
+def main(argv=None) -> int:
     logging.disable(logging.WARNING)
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--db", required=True, help="A .backup snapshot (Windows path).")
     ap.add_argument("--sports", default="nfl,mlb")
     args = ap.parse_args(argv)
-    session = get_session(get_engine(args.db))
-    _fit_model(session, SPLIT)
     print("=" * 78)
     print("TIMING  (does the line move toward the model after a clean open?)")
     print("=" * 78)
-    for sport in args.sports.split(","):
-        games = [g for g in _final_games(session, sport) if g.date >= SPLIT]
-        probs = {g.id: p for g, (p, _, _) in zip(games, _predict_rows(session, games))}
-        print("\n".join(report(sport, build(args.db, sport, probs))))
-    session.close()
+    print("\n".join(timing_report(args.db, tuple(args.sports.split(",")))))
     return 0
 
 
