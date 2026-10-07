@@ -33,6 +33,14 @@ logger = logging.getLogger(__name__)
 from backend.time_utils import ET, et_today  # noqa: F401  (ET re-exported)
 LEAD_TIME = timedelta(hours=2)
 
+#: Sports that get a second, late prop run per window, and how long before
+#: the first tip it fires. NBA teams confirm who sits about 30 minutes
+#: before tip-off; the window's run (LEAD_TIME out) cannot see it, and the
+#: star-out adjustment (analysis/nba_injuries.py) is only as good as the
+#: injury status it reads. 45 minutes: after most late news, before tip.
+LATE_PROP_SPORTS = frozenset({"nba"})
+LATE_PROP_LEAD = timedelta(minutes=45)
+
 #: How often `refresh_prices` runs. A paper bet is priced only from a quote
 #: under `pricing.MAX_QUOTE_AGE` old, so this is half of that: one missed
 #: run (the laptop asleep, an API hiccup) still leaves a bettable price.
@@ -651,9 +659,12 @@ def _schedule_windows(config, engine, scheduler, session, sports, today, *,
         # this sport/day that the fresh clustering no longer produces —
         # otherwise it's orphaned (never fires, never gets cleaned up).
         window_prefix = f"window_{sport}_{today}_"
-        fresh_job_ids = {f"{window_prefix}{i}" for i in range(len(windows))}
+        late_prefix = f"late_{sport}_{today}_"
+        fresh_job_ids = ({f"{window_prefix}{i}" for i in range(len(windows))}
+                         | {f"{late_prefix}{i}" for i in range(len(windows))})
         stale_job_ids = {j for j in existing_jobs
-                          if j.startswith(window_prefix) and j not in fresh_job_ids}
+                          if j.startswith((window_prefix, late_prefix))
+                          and j not in fresh_job_ids}
         for stale_id in stale_job_ids:
             try:
                 scheduler.remove_job(stale_id)
@@ -662,6 +673,18 @@ def _schedule_windows(config, engine, scheduler, session, sports, today, *,
                 pass
 
         for i, window in enumerate(windows):
+            late_id = f"{late_prefix}{i}"
+            late_at = window["window_start"] - LATE_PROP_LEAD
+            if sport in LATE_PROP_SPORTS and late_id not in existing_jobs:
+                # Never run late when overdue: past this point tip-off is
+                # minutes away and a missed one is simply missed.
+                if late_at > now:
+                    scheduler.add_job(
+                        lambda c=config, e=engine, s=sport, w=window: _run_late_props(c, e, s, w),
+                        'date', run_date=late_at.astimezone(ET), id=late_id,
+                        replace_existing=True)
+                    logger.info(f"Scheduled late {sport} prop run {late_id} at "
+                                f"{late_at.astimezone(ET).strftime('%I:%M %p')} ET")
             job_id = f"window_{sport}_{today}_{i}"
             if job_id in existing_jobs:
                 continue
@@ -721,6 +744,35 @@ def restore_today_windows(config, engine, scheduler, *,
     except Exception:
         logger.exception("Could not restore today's windows at startup; "
                          "the 3-hourly price refresh still runs")
+
+
+def _run_late_props(config, engine, sport: str, window: dict):
+    """Re-price and re-analyse a window's props just before tip-off.
+
+    Fetches the window's prop lines again and re-runs the prop pipeline for
+    the sport, so the injury adjustments read the final injury report. Picks
+    on games already underway are never rewritten (`_refreshable`).
+    """
+    session = get_session(engine)
+    try:
+        budget = config.get("odds_budget", DEFAULT_BUDGET)
+        api_key = config.get("odds_api_key")
+        window_game_ids = {g["id"] for g in window["games"]}
+        logger.info(f"Running late {sport} prop run: {len(window_game_ids)} games")
+        if api_key:
+            asyncio.run(fetch_and_store_props(
+                session, [sport], api_key, budget=budget, window_game_ids=window_game_ids))
+        prop_strategy = session.query(StrategyModel).filter(
+            StrategyModel.is_active == True, StrategyModel.strategy_type == "prop",
+        ).first()
+        result = asyncio.run(run_prop_pipeline(
+            session, target_date=et_today(),
+            strategy_id=prop_strategy.id if prop_strategy else None, sports=(sport,)))
+        logger.info(f"Late prop run ({sport}): {result}")
+    except Exception as e:
+        logger.error(f"Late prop run error ({sport}): {e}", exc_info=True)
+    finally:
+        session.close()
 
 
 def _run_window(config, engine, sport: str, window: dict):

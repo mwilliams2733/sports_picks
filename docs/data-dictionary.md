@@ -615,6 +615,16 @@ stated explicitly rather than left silent.
     announced later are missed.
   - Not stored on the pick.
 
+- **NBA prop picks get a second, late run from the 2026-10-07 merge.**
+  Each NBA window also re-fetches its prop lines 45 minutes before its first
+  tip and re-runs the prop pipeline (`scheduler._run_late_props`), so the
+  star-out adjustment reads the final injury report. As a result:
+  - an NBA prop pick's `created_at`, price and value can come from about
+    45 minutes before tip rather than about 2 hours (`pick_versions` keeps
+    both);
+  - a pick that stops qualifying at the late run is withdrawn;
+  - picks on games already underway are never touched.
+
 - **NBA player game logs: 1,038 duplicated rows deleted on 2026-10-07**
   (`backend/scripts/dedupe_game_logs.py`; backup
   `sports_picks.backup-20261006-234715-pre-gamelog-dedupe.db`). The
