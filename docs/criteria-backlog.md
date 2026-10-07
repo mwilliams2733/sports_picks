@@ -23,7 +23,9 @@ no proven edge** / **shipped**.
 |---|---|---|---|---|---|
 | 1a | Injuries: starting QB out -> bet the side or total | NFL sides, totals | no edge | Close prices it fully: +0.87 pts left over (95% CI -0.85..+2.60), 302 absences. ATS 117-116 either way. First game of an absence no different (p 0.31). Even hindsight of who lost the job adds nothing (p 0.28). | `injury_experiment.py`, 2026-10-06 |
 | 1b | Injuries: teammate out -> player props | NFL rush / rec yards | **shipped** (projections; football props stay tracking-only) | With leaders by yards, as production must define them: rushing leader out, other backs +26% (p 0.0005, n 204); receiving leader out, other receivers +17% (p 6e-6, n 634); passing leader out, receivers -7% (p 0.03). By touches the effects are +44% / +12% / -8%. Not yet tested against prop lines; re-check once this season has enough injury cases. Live status comes from ESPN team rosters. | `injury_experiment.py --leader-basis yards`, `football_injuries.py`, 2026-10-06 |
-| 2 | Weather (wind, cold, rain) | NFL totals, passing props | untested | | no collector yet |
+| 2a | Weather -> totals | NFL totals | **promising, not established** | **Rain/snow: total lands 4.3 pts under the close** (95% CI -7.8..-0.8, p 0.02; -4.27 with wind and cold controlled). Under 41-18, +19.3u. But: 4 features tried (corrected p about 0.08), 2025 went 7-7, and these are observed kickoff conditions, not forecasts. Wind: -0.16 pts/mph (p 0.14); 15+ mph Under 37-29, n.s. Cold: nothing (Under 22-26). | `weather_experiment.py`, 2026-10-06 |
+| 2b | Weather -> player props | NFL pass / rec / rush yds | better projections, no proven edge | Rain/snow: passing -14% of baseline (p 0.001), receiving -15% (p 0.0003), rushing unchanged. Wind 15+: passing -10% (p 0.01). | `weather_experiment.py`, 2026-10-06 |
+| 2c | Dome team on the road in the cold | NFL sides | no edge | -0.82 pts (p 0.74), fading the dome team 10-12. Only 22 games. | `weather_experiment.py`, 2026-10-06 |
 | 3 | Travel distance / time zones | NFL sides | untested | | rest days already in (`schedule_fatigue`) |
 
 ## Already measured
