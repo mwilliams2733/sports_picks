@@ -624,8 +624,16 @@ stated explicitly rather than left silent.
     date was played, or the row came from the 2026-09-19 backfill. Every
     one of the 896 cases `games` could decide had that pattern.
   - In 141 back-to-back cases the copy sat on the date of the team's real
-    second game, and **that real second game is missing for those
-    players**. It was missing before the cleanup too; only the copy is gone.
+    second game. That second game is NOT missing: it is stored one day
+    late. For example, the Knicks' 2026-02-11 game is on 2026-02-12.
+    (Corrected the same day; this note first said it was missing.)
+  - **NBA game_log dates are not all the game's date.** About 5% of
+    team-games are filed one day late; the older backfill dated some games
+    by UTC. Match logs to games on (team, date) with care, especially
+    across back-to-backs.
+  - 10 team-sides of final 2025-26 games (Oct-Mar) have no lines on any
+    nearby date. They were left unfilled: refetching them recreated
+    duplicates, because of the date drift above.
   - 32 similar college basketball pairs fit neither rule and were left.
   - Before this date, NBA prop projections could count a duplicated game
     twice in a player's last-five-game form. Prop picks made before the
