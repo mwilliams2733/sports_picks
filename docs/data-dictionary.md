@@ -557,6 +557,25 @@ stated explicitly rather than left silent.
   intervals), so **expect better projections, not proven edge**. Compare
   football prop calibration before and after this date, not pooled.
 
+- **NFL rushing and receiving props get a teammate-injury adjustment from
+  the first prop run after the merge of 2026-10-06 (and the scheduler
+  restart that follows).** Before it, no prop knew who was missing. From
+  then, if a team's season-to-date rushing-yards leader is absent, its other
+  players' rush-yards projections are multiplied by 1.26. If its
+  receiving-yards leader is absent, other receivers get x1.17. If its
+  passing-yards leader is absent, receivers get a further -0.07
+  (`backend/analysis/football_injuries.py`). "Absent" means ESPN's team
+  roster at run time lists an injury status other than Questionable or
+  milder (Out, Doubtful, Injured Reserve...), or the player is no longer on
+  the roster. Passing-yards, anytime-TD and ncaaf props are unchanged. The
+  multipliers are measured (`backend/scripts/injury_experiment.py`, nflverse
+  2022-2026, yards-based leaders, clustered by game). Prop lines were not
+  tested, so **expect better projections, not proven edge**. The adjustment
+  is not stored on the pick. It is reproducible from the game date, the
+  player game logs and the roster, but the roster at run time is not kept.
+  A missing QB was found fully priced in the closing spread and total, so
+  game picks are unchanged.
+
 - **Stored pre-game Elo was stale for some games until it was repaired
   (merge after 2026-10-04).** `elo_history` rows written before a backfill or
   a restored/merged game inserted games earlier in the history kept the
