@@ -1,10 +1,9 @@
 import { useState } from 'react'
-import BetModal from '../components/BetModal'
 import BoardGameCard from '../components/BoardGameCard'
 import ModelPicksStrip from '../components/ModelPicksStrip'
 import { useBoard } from '../hooks/useBoard'
 import { etToday, groupByDay, sportTabs } from '../lib/board'
-import type { BetTarget } from '../types'
+import { useSlip } from '../stores/slipStore'
 
 export default function Lobby() {
   const board = useBoard()
@@ -16,7 +15,7 @@ export default function Lobby() {
   const [chosen, setChosen] = useState<string | null>(null)
   const sport = chosen && tabs.includes(chosen) ? chosen : tabs[0] ?? null
   const shown = games.filter(g => g.sport === sport)
-  const [target, setTarget] = useState<BetTarget | null>(null)
+  const toggle = useSlip(s => s.toggle)
 
   return (
     <div className="sb-lobby">
@@ -32,14 +31,13 @@ export default function Lobby() {
           ))}
         </div>
       )}
-      <ModelPicksStrip games={shown} offline={offline} onPick={setTarget} />
+      <ModelPicksStrip games={shown} offline={offline} onPick={toggle} />
       {groupByDay(shown, etToday(new Date())).map(day => (
         <section key={day.date} aria-label={day.label}>
           <h2 className="sb-day">{day.label}</h2>
-          {day.games.map(game => <BoardGameCard key={game.id} game={game} offline={offline} onPick={setTarget} />)}
+          {day.games.map(game => <BoardGameCard key={game.id} game={game} offline={offline} onPick={toggle} />)}
         </section>
       ))}
-      {target && <BetModal open onClose={() => setTarget(null)} {...target} />}
     </div>
   )
 }

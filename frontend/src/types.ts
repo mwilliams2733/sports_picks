@@ -25,8 +25,8 @@ export interface PickData {
   away_team?: string;
   matchup?: string;
   /** Only for pick_type === "prop" -- the market KEY ("player_pass_yds") and
-   *  player name a prop pick needs to become a bettable leg (BetModal's
-   *  propMarket/propPlayer). Absent for every other pick_type. */
+   *  player name a prop pick needs to become a bettable leg (the slip's
+   *  prop_market/prop_player). Absent for every other pick_type. */
   prop_market?: string;
   prop_player?: string;
 }
@@ -323,12 +323,6 @@ export interface BoardGame {
   prop_count: number | null; model_pick: ModelPick | null;
 }
 
-/** What BetModal needs to open on one side -- its props minus open/onClose. */
-export interface BetTarget {
-  pickType: string; pickValue: string; betValue: string; odds: number; gameId: number;
-  homeTeam: string; awayTeam: string; edgePct?: number; propMarket?: string; propPlayer?: string;
-  priceSource?: 'model' | 'board';
-}
 
 /** A bet as the slip sends it: the leg plus the price and line the player saw
  *  (both omitted under "Accept any odds changes"). Props send no line -- the

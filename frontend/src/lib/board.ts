@@ -1,6 +1,7 @@
-import type { AvailableGameQuote, AvailablePropQuote, BetTarget, BoardGame, GamePickType, GameQuote,
-  GameSide, PropQuote } from '../types'
-import { legFromPick, resolveLabel, resolveQuoteLabel } from './quotes'
+import type { AvailableGameQuote, AvailablePropQuote, BoardGame, GamePickType, GameQuote,
+  GameSide, PropQuote, SlipSelection } from '../types'
+import { legFromPick, legFromQuote, resolveLabel, resolveQuoteLabel } from './quotes'
+import { lineFromPick } from './slip'
 
 const ET = 'America/New_York'
 
@@ -67,33 +68,36 @@ export function priceMove(prev: Price | null, next: Price | null): PriceMove {
   return null
 }
 
-export function gameTarget(game: BoardGame, q: AvailableGameQuote, edgePct?: number): BetTarget {
-  const t: BetTarget = {
-    pickType: q.pick_type, pickValue: resolveQuoteLabel(q, game.home_team, game.away_team),
-    betValue: q.pick_value, odds: q.odds, gameId: game.id,
-    homeTeam: game.home_team, awayTeam: game.away_team, priceSource: 'board',
-  }
-  if (edgePct !== undefined) t.edgePct = edgePct
-  return t
+export function gameLabelOf(game: BoardGame): string {
+  return `${game.away_team} @ ${game.home_team}`
 }
 
-export function propTarget(gameId: number, q: AvailablePropQuote): BetTarget {
-  const label = `${q.prop_player} ${q.outcome} ${q.line}`
-  return { pickType: 'prop', pickValue: label, betValue: label, odds: q.odds, gameId,
-    homeTeam: '', awayTeam: '', propMarket: q.prop_market, propPlayer: q.prop_player }
-}
-
-/** A model pick bet at the label and price the model evaluated (its edge is
- *  only true there), so BetModal notes a moved price or line against the live
- *  quote `q` it fetches itself. */
-export function modelPickTarget(game: BoardGame, q: AvailableGameQuote): BetTarget {
-  const mp = game.model_pick
-  if (!mp) return gameTarget(game, q)
+export function gameSelection(game: BoardGame, q: AvailableGameQuote): SlipSelection {
+  const team = q.side === 'HOME' ? game.home_team : game.away_team
   return {
-    pickType: mp.pick_type, pickValue: resolveLabel(mp.pick_value, game.home_team, game.away_team),
-    betValue: mp.pick_value, odds: mp.odds ?? q.odds, gameId: game.id,
-    homeTeam: game.home_team, awayTeam: game.away_team, edgePct: mp.edge_pct, priceSource: 'model',
+    leg: legFromQuote(game.id, q),
+    label: q.pick_type === 'moneyline' ? `${team} ML` : resolveQuoteLabel(q, game.home_team, game.away_team),
+    gameLabel: gameLabelOf(game), startTime: game.start_time, odds: q.odds, line: q.line,
+    homeTeam: game.home_team, awayTeam: game.away_team,
   }
+}
+
+export function propSelection(game: BoardGame, q: AvailablePropQuote): SlipSelection {
+  return {
+    leg: legFromQuote(game.id, q), label: `${q.prop_player} ${q.outcome} ${q.line} ${q.market_label}`,
+    gameLabel: gameLabelOf(game), startTime: game.start_time, odds: q.odds, line: q.line,
+    homeTeam: game.home_team, awayTeam: game.away_team,
+  }
+}
+
+/** A model pick on the slip at the label and price the model evaluated (its
+ *  edge is only true there); the server's price_moved refusal tells the
+ *  player if the live price `q` has moved since. */
+export function modelPickSelection(game: BoardGame, q: AvailableGameQuote): SlipSelection {
+  const mp = game.model_pick
+  if (!mp) return gameSelection(game, q)
+  return { ...gameSelection(game, q), label: resolveLabel(mp.pick_value, game.home_team, game.away_team),
+    odds: mp.odds ?? q.odds, line: lineFromPick(mp.pick_type, mp.pick_value) }
 }
 
 /** The live quote for a game's model pick -- available or refused -- or null

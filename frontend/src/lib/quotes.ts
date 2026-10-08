@@ -54,9 +54,8 @@ export function resolveLabel(label: string, homeTeam: string, awayTeam: string):
 
 /** A quote's shown side, team-resolved: "BOS +2.5" (spread), "BOS" (moneyline
  *  -- no numeric line to show), "Over 7.5" (total), "Over 225.5" (prop). The
- *  team-name lookup for game markets; shared by QuotePicker (which needs it
- *  disabled or not) and BetModal (which needs it for display and for the
- *  price-move note). */
+ *  team-name lookup for game markets; shared by the board tiles and the slip.
+ */
 export function resolveQuoteLabel(quote: GameQuote | PropQuote, homeTeam: string, awayTeam: string): string {
   if ('side' in quote) {
     const team = quote.side === 'HOME' ? homeTeam : quote.side === 'AWAY' ? awayTeam : quote.side

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import PlayerProps from './PlayerProps'
 import type { PropData } from '../types'
+import { useSlip, SLIP_DEFAULTS } from '../stores/slipStore'
 
 const ok = <T,>(data: T) => ({ data, error: null, isLoading: false })
 
@@ -30,5 +31,14 @@ describe('PlayerProps', () => {
     expect(screen.getByText('Jayson Tatum')).toBeInTheDocument()
     expect(screen.queryByText(/\+ Stars/)).toBeNull()
     expect(document.body.textContent).not.toMatch(/[★☆]/)
+  })
+
+  it("adds a prop to the bet slip at the model's price", () => {
+    useSlip.setState({ ...SLIP_DEFAULTS })
+    renderAt('/player-props')
+    fireEvent.click(screen.getByRole('button', { name: 'Bet This' }))
+    expect(useSlip.getState().legs).toEqual([expect.objectContaining({
+      leg: { game_id: 1, pick_type: 'prop', prop_player: 'Jayson Tatum', prop_market: 'player_points', outcome: 'Over', line: 27.5 },
+      label: 'Jayson Tatum Over 27.5 Points', gameLabel: 'BOS @ NYY', odds: -110 })])
   })
 })
