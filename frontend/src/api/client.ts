@@ -1,4 +1,4 @@
-import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult, CalibrationData, LeaderboardRow, EmailedGroups, EmailedTrend, GameQuote, PropQuote, BetLeg, PlacedPick, BoardGame } from '../types';
+import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult, CalibrationData, LeaderboardRow, EmailedGroups, EmailedTrend, GameQuote, PropQuote, PlacedPick, BoardGame, BetRequest } from '../types';
 import { getOwnerKey } from '../lib/secrets';
 
 const BASE = '';
@@ -17,6 +17,9 @@ export class ApiError extends Error {
       ? (typeof rawDetail[0] === 'object' && rawDetail[0] !== null && 'msg' in rawDetail[0]
           ? String((rawDetail[0] as { msg: unknown }).msg)
           : undefined)
+      : typeof rawDetail === 'object' && rawDetail !== null && 'message' in rawDetail
+        // A structured refusal (409 price_moved) carries its own message.
+        ? String((rawDetail as { message: unknown }).message)
       : rawDetail != null ? String(rawDetail) : undefined;
     super(detail || `API error: ${status}`);
     this.name = 'ApiError';
@@ -131,7 +134,7 @@ export const api = {
     create: (name: string, pin: string) => post<{ id: number; name: string }>('/users/', { name, pin }),
     get: (id: number) => get<UserProfile>(`/users/${id}`),
     picks: (id: number) => get<PaperPickData[]>(`/users/${id}/picks`),
-    placePick: (userId: number, data: BetLeg & { stake: number }, pin: string) =>
+    placePick: (userId: number, data: BetRequest & { stake: number }, pin: string) =>
       post<PlacedPick>(`/users/${userId}/picks`, data, { 'X-Player-Pin': pin }),
     grade: () => post<{ graded: number }>('/users/grade', {}),
     stats: (id: number) => get<UserStats>(`/users/${id}/stats`),
@@ -139,7 +142,7 @@ export const api = {
     delete: (id: number) => del<{ deleted: boolean; id: number }>(`/users/${id}`),
     setPin: (id: number, pin: string) => put<{ id: number; pin_set: boolean }>(`/users/${id}/pin`, { pin }),
     leaderboard: () => get<LeaderboardRow[]>('/users/leaderboard'),
-    placeParlay: (userId: number, data: { legs: BetLeg[]; stake: number }, pin: string) => post<{
+    placeParlay: (userId: number, data: { legs: BetRequest[]; stake: number }, pin: string) => post<{
       id: number;
       legs: Array<{ pick_value: string; odds: number; line: number | null; quoted_at: string; result: string | null }>;
       combined_odds: number; potential_payout: number;

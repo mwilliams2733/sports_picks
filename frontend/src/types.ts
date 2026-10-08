@@ -329,3 +329,31 @@ export interface BetTarget {
   homeTeam: string; awayTeam: string; edgePct?: number; propMarket?: string; propPlayer?: string;
   priceSource?: 'model' | 'board';
 }
+
+/** A bet as the slip sends it: the leg plus the price and line the player saw
+ *  (both omitted under "Accept any odds changes"). Props send no line -- the
+ *  line is part of a prop bet. */
+export type BetRequest = BetLeg & { expected_odds?: number; expected_line?: number | null }
+
+/** A side a tile or a model pick puts on the slip. `odds`/`line` are the
+ *  price the player saw, sent as expected_odds/expected_line. */
+export interface SlipSelection {
+  leg: BetLeg; label: string; gameLabel: string; startTime: string | null;
+  odds: number; line: number | null; homeTeam: string; awayTeam: string;
+}
+
+export interface SlipLeg extends SlipSelection {
+  stake: number
+  /** The price the player saw before the server answered price_moved. */
+  movedFrom?: { odds: number; line: number | null } | null
+  /** The server's refusal for this leg on the last attempt. */
+  error?: string | null
+}
+
+export interface ReceiptBet {
+  id: number; kind: 'single' | 'parlay'; labels: string[]; stake: number;
+  /** What the server charged, and what the slip showed when that differed. */
+  odds: number; shownOdds: number | null; toWin: number;
+}
+
+export interface Receipt { bets: ReceiptBet[]; legs: SlipLeg[]; placedAt: string }

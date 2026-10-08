@@ -48,3 +48,11 @@ describe('ApiError', () => {
     expect(err.message).toContain('PIN must be 4-6 digits')
   })
 })
+
+describe('ApiError', () => {
+  it('reads the message of a structured detail (409 price_moved)', () => {
+    const e = new ApiError(409, { detail: { reason: 'price_moved', message: 'The price moved to HOME ML -110.',
+      odds: -110, line: null, pick_value: 'HOME ML' } })
+    expect(e.message).toBe('The price moved to HOME ML -110.')
+  })
+})
