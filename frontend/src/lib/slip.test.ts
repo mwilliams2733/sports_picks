@@ -62,6 +62,13 @@ describe('toWin / isClosed / hasSameGame', () => {
     expect(isClosed({ startTime: '2026-10-11T17:01:00Z' }, now)).toBe(false)
     expect(isClosed({ startTime: null }, now)).toBe(false)
   })
+  it('reads a start time without an offset as UTC, as /games/today sends it (final review)', () => {
+    const now = new Date('2026-10-11T17:30:00Z')
+    expect(isClosed({ startTime: '2026-10-11T17:00:00' }, now)).toBe(true)
+    expect(isClosed({ startTime: '2026-10-11T18:00:00' }, now)).toBe(false)
+    // The board's offset form must not be re-suffixed into an invalid date.
+    expect(isClosed({ startTime: '2026-10-11T17:00:00+00:00' }, now)).toBe(true)
+  })
   it('spots two legs on one game (an SGP)', () => {
     expect(hasSameGame([slipLeg(), slipLeg({ leg: { game_id: 1, pick_type: 'moneyline', side: 'HOME' } })])).toBe(true)
     expect(hasSameGame([slipLeg(), slipLeg({ leg: { game_id: 2, pick_type: 'moneyline', side: 'HOME' } })])).toBe(false)

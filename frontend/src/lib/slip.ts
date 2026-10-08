@@ -62,8 +62,14 @@ export function toWin(stake: number, odds: number): number {
   return odds > 0 ? (stake * odds) / 100 : (stake * 100) / Math.abs(odds)
 }
 
+/** A start time as an instant. /games/today sends naive UTC ("…T17:00:00"),
+ *  which Date would read as local time -- hours off for every viewer. */
+export function startInstant(s: string): number {
+  return new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(s) ? s : `${s}Z`).getTime()
+}
+
 export function isClosed(l: { startTime: string | null }, now: Date = new Date()): boolean {
-  return l.startTime !== null && new Date(l.startTime).getTime() <= now.getTime()
+  return l.startTime !== null && startInstant(l.startTime) <= now.getTime()
 }
 
 export function hasSameGame(legs: SlipLeg[]): boolean {
