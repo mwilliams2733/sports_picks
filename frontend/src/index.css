@@ -1,29 +1,30 @@
 /* ─── Design Tokens ─────────────────────────────────────── */
 :root {
-  --bg-base: #0b1121;
-  --bg-surface: #111827;
-  --bg-elevated: #1e293b;
-  --bg-hover: #263549;
-  --bg-active: #1e3a5f;
+  --bg-base: #0d0f12;
+  --bg-surface: #181b20;
+  --bg-elevated: #22262d;
+  --bg-hover: #2b3038;
+  --bg-active: #1d3a2a;
 
-  --border-subtle: rgba(148, 163, 184, 0.08);
-  --border-default: rgba(148, 163, 184, 0.12);
-  --border-strong: rgba(148, 163, 184, 0.2);
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
 
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --text-primary: #f3f5f8;
+  --text-secondary: #b6bdc9;
+  --text-muted: #8a93a3;
 
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --accent-glow: rgba(59, 130, 246, 0.15);
+  --accent: #2fe37a;
+  --accent-hover: #26c96a;
+  --accent-glow: rgba(47, 227, 122, 0.15);
+  --on-accent: #0d0f12;
 
-  --green: #22c55e;
-  --green-dim: rgba(34, 197, 94, 0.15);
-  --red: #ef4444;
-  --red-dim: rgba(239, 68, 68, 0.15);
-  --yellow: #eab308;
-  --yellow-dim: rgba(234, 179, 8, 0.15);
+  --green: #2fe37a;
+  --green-dim: rgba(47, 227, 122, 0.14);
+  --red: #ff4d5e;
+  --red-dim: rgba(255, 77, 94, 0.14);
+  --yellow: #ffb020;
+  --yellow-dim: rgba(255, 176, 32, 0.14);
   --purple: #8b5cf6;
   --purple-hover: #7c3aed;
 
@@ -228,7 +229,7 @@ body {
 
 .btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
@@ -237,7 +238,7 @@ body {
 
 .btn-success {
   background: var(--green);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn-success:hover:not(:disabled) {
   background: #16a34a;
@@ -255,7 +256,7 @@ body {
 
 .btn-accent {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn-accent:hover:not(:disabled) {
   background: var(--accent-hover);
@@ -308,7 +309,7 @@ body {
 
 .tab.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   box-shadow: var(--shadow-sm);
 }
 
@@ -749,7 +750,7 @@ body {
   height: 22px;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 0.7rem;
   font-weight: 700;
   flex-shrink: 0;
@@ -1079,7 +1080,7 @@ body {
 .sport-filter-btn.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: white;
+  color: var(--on-accent);
 }
 
 .bottom-nav {
@@ -1334,7 +1335,7 @@ body {
 
 .btn-bet {
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
   border: none;
   padding: 0.35rem 0.75rem;
   border-radius: var(--radius-sm);
@@ -1652,7 +1653,7 @@ body {
 .range-btn.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: white;
+  color: var(--on-accent);
 }
 
 .confidence-breakdown {

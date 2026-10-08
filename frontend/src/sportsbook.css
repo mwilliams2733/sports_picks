@@ -1,0 +1,162 @@
+/* ─── Sportsbook shell (spec 2026-10-07 §3-§5) ─────────────── */
+.sb-topbar {
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 1.5rem;
+  height: 56px; padding: 0 1rem;
+  background: var(--bg-base); border-bottom: 1px solid var(--border-default);
+}
+.sb-wordmark {
+  font-weight: 800; letter-spacing: 0.06em; font-size: 1rem;
+  color: var(--text-primary); text-decoration: none; white-space: nowrap;
+}
+.sb-wordmark span { color: var(--accent); }
+.sb-topnav { display: none; gap: 0.25rem; flex: 1; align-items: center; }
+.sb-topnav .sb-tab {
+  display: inline-flex; align-items: center; min-height: 36px;
+  padding: 0.4rem 0.8rem; border-radius: 999px; font-weight: 600;
+  color: var(--text-secondary); text-decoration: none; background: none; border: 0; cursor: pointer;
+  font: inherit; font-weight: 600;
+}
+.sb-topnav .sb-tab.active { color: var(--on-accent); background: var(--accent); }
+.sb-topnav .sb-tab span[aria-hidden] { display: none; }
+
+.sb-chip {
+  margin-left: auto; position: relative;
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.35rem 0.75rem; border-radius: 999px;
+  background: var(--bg-elevated); border: 1px solid var(--border-strong);
+  color: var(--text-primary); font: inherit; font-weight: 700; cursor: pointer;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.sb-chip-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); min-width: 200px; z-index: 210;
+  background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); padding: 0.35rem;
+}
+.sb-chip-menu button {
+  display: flex; justify-content: space-between; width: 100%; gap: 1rem;
+  padding: 0.55rem 0.7rem; border: 0; border-radius: var(--radius-md);
+  background: none; color: var(--text-primary); font: inherit; cursor: pointer; text-align: left;
+}
+.sb-chip-menu button:hover, .sb-chip-menu button[aria-current="true"] { background: var(--bg-hover); }
+
+.sb-tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 100;
+  display: flex; height: 60px; padding-bottom: env(safe-area-inset-bottom);
+  background: var(--bg-surface); border-top: 1px solid var(--border-default);
+}
+.sb-tabbar .sb-tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  color: var(--text-muted); text-decoration: none; font-size: 0.7rem; font-weight: 700;
+  background: none; border: 0; cursor: pointer; font-family: inherit;
+}
+.sb-tabbar .sb-tab.active { color: var(--accent); }
+.sb-tabbar .sb-tab span:first-child { font-size: 1.25rem; }
+
+.sb-research {
+  position: fixed; z-index: 220; left: 0; right: 0; bottom: 60px;
+  background: var(--bg-surface); border-top: 1px solid var(--border-strong);
+  border-radius: 16px 16px 0 0; padding: 0.75rem; box-shadow: var(--shadow-lg);
+}
+.sb-research a {
+  display: block; padding: 0.8rem 0.75rem; border-radius: var(--radius-md);
+  color: var(--text-primary); text-decoration: none; font-weight: 600;
+}
+.sb-research a.active, .sb-research a:hover { background: var(--bg-hover); }
+.sb-research-overlay { position: fixed; inset: 0; z-index: 215; background: rgba(0, 0, 0, 0.5); }
+
+.main-content { padding-bottom: 76px; }
+
+@media (min-width: 900px) {
+  .sb-topnav { display: flex; }
+  .sb-tabbar { display: none; }
+  .main-content { padding-bottom: 2rem; }
+  .sb-research {
+    left: auto; right: 1rem; bottom: auto; top: 60px; width: 260px;
+    border-radius: var(--radius-lg); border: 1px solid var(--border-strong);
+  }
+}
+
+/* ─── Lobby ─────────────────────────────────────────────────── */
+.sb-lobby { max-width: 760px; margin: 0 auto; padding: 0.75rem 0.75rem 1rem; }
+.sb-offline {
+  margin-bottom: 0.75rem; padding: 0.7rem 0.9rem; border-radius: var(--radius-md);
+  background: var(--yellow-dim); color: var(--yellow); font-weight: 700;
+}
+.sb-empty { padding: 2rem 0; text-align: center; color: var(--text-muted); }
+.sb-sport-tabs { display: flex; gap: 0.5rem; overflow-x: auto; padding-bottom: 0.5rem; scrollbar-width: none; }
+.sb-sport-tab {
+  flex: none; padding: 0.45rem 1rem; border-radius: 999px; cursor: pointer;
+  background: var(--bg-elevated); border: 1px solid var(--border-default);
+  color: var(--text-secondary); font: inherit; font-weight: 800; letter-spacing: 0.04em;
+}
+.sb-sport-tab[aria-selected="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.sb-day { margin: 1rem 0 0.5rem; font-size: 0.8rem; font-weight: 800; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-muted); }
+
+.sb-strip { display: flex; gap: 0.5rem; overflow-x: auto; margin: 0.5rem 0; scrollbar-width: none; }
+.sb-strip-card {
+  flex: none; min-width: 170px; padding: 0.6rem 0.7rem; border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--bg-active), var(--bg-surface));
+  border: 1px solid var(--border-strong);
+}
+.sb-strip-card small { display: block; color: var(--accent); font-weight: 800; font-size: 0.7rem; letter-spacing: 0.05em; }
+.sb-strip-card strong { display: block; margin: 0.15rem 0 0.4rem; }
+
+.sb-card {
+  margin-bottom: 0.6rem; border-radius: var(--radius-lg);
+  background: var(--bg-surface); border: 1px solid var(--border-default); overflow: hidden;
+}
+.sb-card-head { display: flex; justify-content: space-between; padding: 0.55rem 0.8rem 0;
+  font-size: 0.75rem; color: var(--text-muted); font-weight: 600; }
+.sb-card-head a { color: var(--text-muted); text-decoration: none; min-height: 0; }  /* the footer link is the touch target */
+.sb-card-grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, 76px);
+  gap: 0.35rem; align-items: center; padding: 0.4rem 0.8rem 0.7rem;
+}
+.sb-col-head { font-size: 0.65rem; font-weight: 800; color: var(--text-muted);
+  text-align: center; letter-spacing: 0.05em; text-transform: uppercase; }
+.sb-team { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-card-foot {
+  display: block; padding: 0.5rem 0.8rem; border-top: 1px solid var(--border-subtle);
+  color: var(--accent); font-size: 0.8rem; font-weight: 700; text-decoration: none;
+}
+
+/* ─── Odds tile ─────────────────────────────────────────────── */
+.sb-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 48px; padding: 0.3rem 0.2rem; border-radius: var(--radius-md); cursor: pointer;
+  background: var(--bg-elevated); border: 1px solid var(--border-strong);
+  color: var(--text-primary); font: inherit; font-variant-numeric: tabular-nums;
+  transition: background var(--transition), transform 120ms ease;
+}
+.sb-tile:hover:not(:disabled) { background: var(--bg-hover); }
+.sb-tile:active:not(:disabled) { transform: scale(0.96); }
+.sb-tile-top { font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; }
+.sb-tile-price { font-size: 0.9rem; font-weight: 800; color: var(--accent); }
+.sb-tile-locked { cursor: not-allowed; opacity: 0.55; }
+.sb-tile-locked .sb-tile-price { color: var(--text-muted); }
+.sb-flash-better { animation: sb-flash-g 1s ease; }
+.sb-flash-worse { animation: sb-flash-r 1s ease; }
+.sb-flash-moved { animation: sb-flash-y 1s ease; }
+@keyframes sb-flash-g { 0% { background: var(--green-dim); border-color: var(--green); } }
+@keyframes sb-flash-r { 0% { background: var(--red-dim); border-color: var(--red); } }
+@keyframes sb-flash-y { 0% { background: var(--yellow-dim); border-color: var(--yellow); } }
+
+/* ─── Game page ─────────────────────────────────────────────── */
+.sb-detail { max-width: 760px; margin: 0 auto; padding: 0.75rem; }
+.sb-detail > a { display: inline-flex; align-items: center; min-height: 32px;
+  color: var(--text-secondary); text-decoration: none; font-weight: 600; font-size: 0.85rem; }
+.sb-detail h1 { font-size: 1.15rem; font-weight: 800; margin: 0.25rem 0 0.75rem; }
+.sb-detail-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+.sb-detail .sb-card-grid { grid-template-columns: minmax(0, 1fr) repeat(3, 92px); }
+.sb-detail .sb-tile { min-height: 56px; }
+.sb-prop-market { margin-bottom: 0.75rem; }
+.sb-prop-market h2 { font-size: 0.8rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.4rem; }
+.sb-prop-row { display: grid; grid-template-columns: minmax(0, 1fr) 96px 96px; gap: 0.35rem;
+  align-items: center; padding: 0.3rem 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-tile, .sb-flash-better, .sb-flash-worse, .sb-flash-moved { animation: none; transition: none; }
+}

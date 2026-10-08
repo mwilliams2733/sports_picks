@@ -151,6 +151,15 @@ describe('BetModal', () => {
     expect(screen.getByText(/model priced this at -150/i)).toBeInTheDocument()
   })
 
+  it('does not credit the model with a price tapped on the board (final review: plain lobby tiles)', async () => {
+    useUserStore.setState({ currentUserName: 'Marcus' })
+    vi.mocked(api.users.list).mockResolvedValue([makeUser()])
+    renderModal({ priceSource: 'board' })   // tapped at -150, quote now -140
+    expect(await screen.findByText('-140')).toBeInTheDocument()
+    expect(screen.queryByText(/model priced/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/was -150 when you tapped it/i)).toBeInTheDocument()
+  })
+
   it('shows the current team-resolved line and notes when the line has moved (Review Focus: a line move used to be charged silently)', async () => {
     useUserStore.setState({ currentUserName: 'Marcus' })
     vi.mocked(api.users.list).mockResolvedValue([makeUser()])

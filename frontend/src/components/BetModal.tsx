@@ -28,11 +28,15 @@ interface BetModalProps {
    *  the "Price now" row and the moved-line note. Unused for prop bets. */
   homeTeam?: string
   awayTeam?: string
+  /** Whose price `odds` is: the model's (a model pick, the default) or one
+   *  tapped on the sportsbook board. Only words the moved-price note. */
+  priceSource?: 'model' | 'board'
 }
 
 export default function BetModal({
   open, onClose, pickValue, betValue, pickType, odds, gameId,
   suggestedStake = 100, edgePct, propMarket, propPlayer, homeTeam = '', awayTeam = '',
+  priceSource = 'model',
 }: BetModalProps) {
   const { currentUserName, setCurrentUserName } = useUserStore()
   const queryClient = useQueryClient()
@@ -196,7 +200,9 @@ export default function BetModal({
                 </span>
               </div>
               {quote?.available && quote.odds !== odds && (
-                <div className="quote-reason">The model priced this at {formatOdds(odds)}.</div>
+                <div className="quote-reason">{priceSource === 'board'
+                  ? `The price was ${formatOdds(odds)} when you tapped it.`
+                  : `The model priced this at ${formatOdds(odds)}.`}</div>
               )}
               {quote?.available && !isProp && (betValue ?? pickValue) !== quote.pick_value && (
                 <div className="quote-reason">
