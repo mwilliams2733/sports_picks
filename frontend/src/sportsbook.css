@@ -265,3 +265,5 @@
 @media (prefers-reduced-motion: reduce) {
   .sb-slip.open, .sb-receipt, .sb-tile-selected { animation: none; }
 }
+
+.sb-join { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.4rem; }
