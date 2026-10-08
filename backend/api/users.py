@@ -88,6 +88,12 @@ class GameLeg(_Strict):
     game_id: int
     pick_type: Literal["moneyline", "spread", "over_under"]
     side: Literal["HOME", "AWAY", "Over", "Under"]
+    # Price-move protection (sportsbook spec §6): the price and line the
+    # player saw. Present -> a different fresh quote is refused with 409
+    # price_moved and nothing is written; absent -> priced as before (the
+    # Claude-picks script sends neither).
+    expected_odds: int | None = None
+    expected_line: float | None = Field(default=None, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def _side_fits_market(self):
@@ -107,6 +113,9 @@ class PropLeg(_Strict):
     prop_market: str = Field(min_length=1, max_length=64)
     outcome: Literal["Over", "Under"]
     line: float = Field(allow_inf_nan=False)
+    # A prop's line is part of the bet itself, so only the price is checked;
+    # an expected_line is refused (extra="forbid") rather than ignored.
+    expected_odds: int | None = None
 
     def to_bet(self) -> pricing.PropBet:
         return pricing.PropBet(self.game_id, self.prop_player, self.prop_market,
@@ -140,6 +149,24 @@ def _priced(session, game, leg) -> pricing.Quote:
         return pricing.price(session, game, leg.to_bet())
     except PricingError as e:
         raise HTTPException(status_code=e.status, detail=e.message) from None
+
+
+def _check_expected(leg, quote: pricing.Quote, index: int | None = None) -> None:
+    """Refuse with 409 ``price_moved`` when the player saw a different price
+    or line than the fresh quote. Only the fields the request sent are
+    compared: an explicit ``expected_line: null`` (a moneyline) must find no
+    line, and a request with neither field is priced as before."""
+    moved = leg.expected_odds is not None and leg.expected_odds != quote.odds
+    if "expected_line" in leg.model_fields_set and leg.expected_line != quote.line:
+        moved = True
+    if not moved:
+        return
+    detail = {"reason": "price_moved",
+              "message": f"The price moved to {quote.pick_value} {quote.odds:+d}.",
+              "odds": quote.odds, "line": quote.line, "pick_value": quote.pick_value}
+    if index is not None:
+        detail["leg"] = index
+    raise HTTPException(status_code=409, detail=detail)
 
 
 def balance_of(session, user) -> float:
@@ -472,6 +499,7 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
                                  detail="Betting has closed: this game has already started")
 
         quote = _priced(session, game, bet)
+        _check_expected(bet, quote)
 
         pick = PaperPick(
             user_id=user_id,
@@ -598,7 +626,7 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
 
         # Price every leg before creating the Parlay, so a refusal writes nothing.
         quotes = []
-        for leg in body.legs:
+        for i, leg in enumerate(body.legs):
             game = session.get(Game, leg.game_id)
             if not game:
                 raise HTTPException(status_code=404, detail=f"Game {leg.game_id} not found")
@@ -606,7 +634,9 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
                 raise HTTPException(
                     status_code=400,
                     detail=f"Betting has closed: game {leg.game_id} has already started")
-            quotes.append((leg, _priced(session, game, leg)))
+            quote = _priced(session, game, leg)
+            _check_expected(leg, quote, i)
+            quotes.append((leg, quote))
 
         combined_american, combined_decimal = pricing.combine([q.odds for _, q in quotes])
 

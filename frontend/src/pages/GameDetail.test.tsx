@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import GameDetail from './GameDetail'
 import { ToastProvider } from '../components/Toast'
 import { api } from '../api/client'
+import { useSlip, SLIP_DEFAULTS } from '../stores/slipStore'
 import type { BoardGame, PropQuote } from '../types'
 
 vi.mock('../api/client', async (importOriginal) => {
@@ -27,6 +28,7 @@ function renderAt(path: string) {
 
 describe('GameDetail', () => {
   beforeEach(() => {
+    useSlip.setState({ ...SLIP_DEFAULTS })
     vi.mocked(api.paper.board).mockResolvedValue({ games: [game] })
     vi.mocked(api.paper.propQuotes).mockResolvedValue({ game_id: 5, quotes: [prop] })
     vi.mocked(api.users.list).mockResolvedValue([])
@@ -49,5 +51,13 @@ describe('GameDetail', () => {
   it('says the game is off the board when it is not on it', async () => {
     renderAt('/game/999')
     expect(await screen.findByText(/off the board/)).toBeInTheDocument()
+  })
+
+  it('adds a tapped prop to the bet slip', async () => {
+    renderAt('/game/5')
+    fireEvent.click(await screen.findByRole('tab', { name: 'Player Props' }))
+    fireEvent.click(await screen.findByRole('button', { name: /QB One Over 245.5 -115/ }))
+    expect(useSlip.getState().legs).toEqual([expect.objectContaining({ odds: -115, line: 245.5,
+      leg: { game_id: 5, pick_type: 'prop', prop_player: 'QB One', prop_market: 'player_pass_yds', outcome: 'Over', line: 245.5 } })])
   })
 })

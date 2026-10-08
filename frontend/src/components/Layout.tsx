@@ -4,6 +4,8 @@ import { useAppStore } from '../stores/appStore'
 import { useWebSocket } from '../hooks/useWebSocket'
 import MainTabs from './MainTabs'
 import PlayerChip from './PlayerChip'
+import BetSlip from './BetSlip'
+import { useSlip } from '../stores/slipStore'
 import ResearchMenu from './ResearchMenu'
 import { RESEARCH_LINKS } from '../lib/nav'
 
@@ -15,6 +17,7 @@ export default function Layout() {
   const { pathname } = useLocation()
   const onResearch = RESEARCH_LINKS.some(([path]) => pathname.startsWith(path))
   const toggle = () => setResearchOpen(o => !o)
+  const slipVisible = useSlip(s => s.legs.length > 0 || s.receipt !== null)
   useWebSocket()
 
   return (
@@ -34,7 +37,8 @@ export default function Layout() {
         </div>
       )}
       <ResearchMenu open={researchOpen} onClose={() => setResearchOpen(false)} />
-      <main className="main-content"><Outlet /></main>
+      <main className={`main-content${slipVisible ? ' with-slip' : ''}`}><Outlet /></main>
+      <BetSlip />
       <MainTabs className="sb-tabbar" researchActive={onResearch} onResearch={toggle} />
     </>
   )

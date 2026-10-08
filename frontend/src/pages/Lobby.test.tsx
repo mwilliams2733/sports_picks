@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import Lobby from './Lobby'
 import { ToastProvider } from '../components/Toast'
 import { api } from '../api/client'
+import { useSlip, SLIP_DEFAULTS } from '../stores/slipStore'
 import type { BoardGame, GameQuote } from '../types'
 
 vi.mock('../api/client', async (importOriginal) => {
@@ -28,6 +29,7 @@ function renderLobby(client = new QueryClient({ defaultOptions: { queries: { ret
 
 describe('Lobby', () => {
   beforeEach(() => {
+    useSlip.setState({ ...SLIP_DEFAULTS })
     vi.mocked(api.users.list).mockResolvedValue([])
     vi.mocked(api.paper.quotes).mockResolvedValue({ game_id: 1, quotes: [] })
   })
@@ -48,11 +50,14 @@ describe('Lobby', () => {
     expect(await screen.findByText(/No games on the board/)).toBeInTheDocument()
   })
 
-  it('opens the bet modal on a tapped price', async () => {
+  it('adds a tapped price to the bet slip and marks it selected', async () => {
     vi.mocked(api.paper.board).mockResolvedValue({ games: [g(1, 'nfl', '2026-10-20')] })
     renderLobby()
-    fireEvent.click(await screen.findByRole('button', { name: /A1 ML \+130/ }))
-    expect(await screen.findByText('Place Paper Bet')).toBeInTheDocument()
+    const tile = await screen.findByRole('button', { name: /A1 ML \+130/ })
+    fireEvent.click(tile)
+    expect(useSlip.getState().legs).toEqual([expect.objectContaining({
+      leg: { game_id: 1, pick_type: 'moneyline', side: 'AWAY' }, label: 'A1 ML', odds: 130 })])
+    expect(tile).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('locks every tile and shows the banner when a refetch fails over old data', async () => {

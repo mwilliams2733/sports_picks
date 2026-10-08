@@ -4,7 +4,10 @@ import { useAppStore } from '../stores/appStore';
 import { useProps } from '../hooks/useProps';
 import type { PropData } from '../types';
 import ConfidenceStars from '../components/ConfidenceStars';
-import BetModal from '../components/BetModal';
+import { useSlip } from '../stores/slipStore';
+import { useToast } from '../hooks/useToast';
+import { selectionFromPick } from '../lib/slip';
+import { useBoard } from '../hooks/useBoard';
 import { SPORTS } from '../constants/sports';
 import { EDGE_TOOLTIP, CONFIDENCE_TOOLTIP } from '../constants/tooltips';
 import { SHOW_STARS } from '../lib/display';
@@ -55,23 +58,19 @@ export default function PlayerProps() {
     if (minConfidence > 0) params.confidence = String(minConfidence);
     setSearchParams(params);
   };
-  const [betModalOpen, setBetModalOpen] = useState(false);
-  const [betModalData, setBetModalData] = useState<{
-    pickValue: string; pickType: string; odds: number; gameId: number;
-    edgePct?: number; propMarket?: string; propPlayer?: string;
-  } | null>(null);
-
+  const addToSlip = useSlip(s => s.add);
+  // Props carry no kickoff; the board does, so a prop leg can show
+  // "Betting closed" on time (the server refuses a started game regardless).
+  const board = useBoard();
+  const { toast } = useToast();
   const handleBetProp = (p: PropData) => {
-    setBetModalData({
-      pickValue: `${p.player_name} ${p.outcome} ${p.line}`,
-      pickType: 'prop',
-      odds: p.odds,
-      gameId: p.game_id,
-      edgePct: p.edge_pct ?? undefined,
-      propMarket: p.market,
-      propPlayer: p.player_name,
-    });
-    setBetModalOpen(true);
+    const sel = selectionFromPick({ pickType: 'prop', value: `${p.player_name} ${p.outcome} ${p.line}`,
+      label: `${p.player_name} ${p.outcome} ${p.line} ${p.market_label}`, gameId: p.game_id, odds: p.odds,
+      propMarket: p.market, propPlayer: p.player_name, gameLabel: p.matchup,
+      startTime: board.data?.games.find(g => g.id === p.game_id)?.start_time ?? null });
+    if (!sel) { toast("This prop can't be bet here.", 'error'); return; }
+    addToSlip(sel);
+    toast(`Added to bet slip: ${sel.label}`, 'success');
   };
 
   const { props } = useProps(sport);
@@ -213,19 +212,6 @@ export default function PlayerProps() {
         </div>
       )}
 
-      {betModalData && (
-        <BetModal
-          open={betModalOpen}
-          onClose={() => setBetModalOpen(false)}
-          pickValue={betModalData.pickValue}
-          pickType={betModalData.pickType}
-          odds={betModalData.odds}
-          gameId={betModalData.gameId}
-          edgePct={betModalData.edgePct}
-          propMarket={betModalData.propMarket}
-          propPlayer={betModalData.propPlayer}
-        />
-      )}
     </div>
   );
 }

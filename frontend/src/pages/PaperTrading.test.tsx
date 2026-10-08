@@ -59,4 +59,17 @@ describe('PaperTrading', () => {
     const roi = screen.getByText('ROI').closest('.stat-card') as HTMLElement
     expect(roi).toHaveTextContent('+4.5%')
   })
+
+  it('sends a player to the Lobby to bet instead of its own pick form', async () => {
+    useUserStore.setState({ selectedUser: user(10000) })
+    vi.mocked(api.users.list).mockResolvedValue([user(10000)])
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter><ToastProvider><PaperTrading /></ToastProvider></MemoryRouter>
+      </QueryClientProvider>)
+    expect(await screen.findByRole('link', { name: 'Lobby' })).toHaveAttribute('href', '/')
+    expect(screen.queryByText('Parlay Builder')).not.toBeInTheDocument()
+    expect(screen.queryByText('Place a Pick')).not.toBeInTheDocument()
+  })
 })

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { AvailableGameQuote, BoardGame, GameQuote, PropQuote } from '../types'
-import { etToday, formatDay, formatMoney, gameTarget, groupByDay, groupProps, modelPickQuote, modelPickTarget,
-  priceMove, propTarget, sportTabs, startLabel, tileTop, findGameQuote } from './board'
+import { etToday, formatDay, formatMoney, gameSelection, groupByDay, groupProps, modelPickQuote, modelPickSelection,
+  priceMove, propSelection, sportTabs, startLabel, tileTop, findGameQuote } from './board'
 
 const q = (pick_type: string, side: string, extra: Partial<AvailableGameQuote> = {}): GameQuote => ({
   pick_type, side, available: true, pick_value: `${side} x`, odds: -110, line: null,
@@ -88,22 +88,17 @@ describe('priceMove', () => {
   })
 })
 
-describe('gameTarget / modelPickQuote', () => {
-  it('builds BetModal props from a quote, team-resolved', () => {
+describe('gameSelection / modelPickQuote', () => {
+  it('builds a slip selection from a quote, team-resolved', () => {
     const g = game()
-    const t = gameTarget(g, findGameQuote(g.quotes, 'spread', 'AWAY') as AvailableGameQuote, 4.1)
-    expect(t).toEqual({ pickType: 'spread', pickValue: 'Cowboys +3', betValue: 'AWAY +3', odds: -110,
-      gameId: 1, homeTeam: 'Buccaneers', awayTeam: 'Cowboys', edgePct: 4.1, priceSource: 'board' })
+    expect(gameSelection(g, findGameQuote(g.quotes, 'spread', 'AWAY') as AvailableGameQuote)).toEqual({
+      leg: { game_id: 1, pick_type: 'spread', side: 'AWAY' }, label: 'Cowboys +3', gameLabel: 'Cowboys @ Buccaneers',
+      startTime: '2026-10-11T17:00:00+00:00', odds: -110, line: 3, homeTeam: 'Buccaneers', awayTeam: 'Cowboys' })
   })
-  it('marks a board tile target as a board price, not the model', () => {
-    const g = game()
-    expect(gameTarget(g, findGameQuote(g.quotes, 'moneyline', 'HOME') as AvailableGameQuote).priceSource).toBe('board')
-  })
-  it('bets a model pick at the price and line the model evaluated, so BetModal notes any move', () => {
+  it('puts a model pick on the slip at the price and line the model evaluated', () => {
     const g = game({ model_pick: { pick_type: 'spread', pick_value: 'AWAY +3.5', odds: 120, edge_pct: 4.1 } })
-    expect(modelPickTarget(g, findGameQuote(g.quotes, 'spread', 'AWAY') as AvailableGameQuote)).toEqual({
-      pickType: 'spread', pickValue: 'Cowboys +3.5', betValue: 'AWAY +3.5', odds: 120, gameId: 1,
-      homeTeam: 'Buccaneers', awayTeam: 'Cowboys', edgePct: 4.1, priceSource: 'model' })
+    expect(modelPickSelection(g, findGameQuote(g.quotes, 'spread', 'AWAY') as AvailableGameQuote)).toMatchObject({
+      leg: { game_id: 1, pick_type: 'spread', side: 'AWAY' }, label: 'Cowboys +3.5', odds: 120, line: 3.5 })
   })
   it("finds the model pick's live quote, refused or not", () => {
     expect(modelPickQuote(game({ model_pick: { pick_type: 'over_under', pick_value: 'Under 47.5', odds: -110, edge_pct: 3 } })))
@@ -116,7 +111,7 @@ describe('gameTarget / modelPickQuote', () => {
   })
 })
 
-describe('groupProps / propTarget', () => {
+describe('groupProps / propSelection', () => {
   const p = (player: string, market_label: string, outcome: 'Over' | 'Under', line: number, odds = -110): PropQuote => ({
     available: true, pick_type: 'prop', pick_value: `${player} ${outcome} ${line} ${market_label}`, odds,
     quoted_at: 'x', prop_player: player, prop_market: 'player_pass_yds', market_label, outcome, line,
@@ -130,10 +125,11 @@ describe('groupProps / propTarget', () => {
       ['Rec Yds', [{ player: 'WR Two', line: 60.5, over: rec, under: undefined }]],
     ])
   })
-  it('builds a prop BetModal target that legFromPick can parse', () => {
+  it('builds a prop slip selection', () => {
     const over = p('QB One', 'Pass Yds', 'Over', 245.5, -115)
-    expect(propTarget(9, over as never)).toEqual({ pickType: 'prop', pickValue: 'QB One Over 245.5',
-      betValue: 'QB One Over 245.5', odds: -115, gameId: 9, homeTeam: '', awayTeam: '',
-      propMarket: 'player_pass_yds', propPlayer: 'QB One' })
+    expect(propSelection(game({ id: 9 }), over as never)).toEqual({
+      leg: { game_id: 9, pick_type: 'prop', prop_player: 'QB One', prop_market: 'player_pass_yds', outcome: 'Over', line: 245.5 },
+      label: 'QB One Over 245.5 Pass Yds', gameLabel: 'Cowboys @ Buccaneers', startTime: '2026-10-11T17:00:00+00:00',
+      odds: -115, line: 245.5, homeTeam: 'Buccaneers', awayTeam: 'Cowboys' })
   })
 })

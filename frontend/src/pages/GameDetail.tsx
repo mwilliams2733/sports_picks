@@ -1,25 +1,28 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import BetModal from '../components/BetModal'
 import OddsTile from '../components/OddsTile'
 import { GameLines } from '../components/BoardGameCard'
 import { useBoard } from '../hooks/useBoard'
 import { usePropQuotes } from '../hooks/useQuotes'
-import { groupProps, propTarget, startLabel } from '../lib/board'
-import type { BetTarget, PropQuote } from '../types'
+import { groupProps, propSelection, startLabel } from '../lib/board'
+import { sameLeg } from '../lib/slip'
+import { useSlip } from '../stores/slipStore'
+import type { BoardGame, PropQuote, SlipSelection } from '../types'
 
-function PropTile({ gameId, player, line, outcome, q, offline, onPick }: {
-  gameId: number; player: string; line: number; outcome: 'Over' | 'Under'; q?: PropQuote;
-  offline: boolean; onPick: (t: BetTarget) => void
+function PropTile({ game, player, line, outcome, q, offline, onPick }: {
+  game: BoardGame; player: string; line: number; outcome: 'Over' | 'Under'; q?: PropQuote;
+  offline: boolean; onPick: (s: SlipSelection) => void
 }) {
   const label = `${player} ${outcome} ${line}`
   const top = `${outcome === 'Over' ? 'O' : 'U'} ${line}`
-  if (!q || !q.available) {
+  const sel = q && q.available ? propSelection(game, q) : null
+  const selected = useSlip(s => sel !== null && s.legs.some(l => sameLeg(l.leg, sel.leg)))
+  if (!q || !q.available || !sel) {
     return <OddsTile label={label} top={top} price={null} line={line} offline={offline}
       lockedReason={q && !q.available ? q.message : 'Not offered'} onSelect={() => {}} />
   }
-  return <OddsTile label={label} top={top} price={q.odds} line={q.line} offline={offline}
-    onSelect={() => onPick(propTarget(gameId, q))} />
+  return <OddsTile label={label} top={top} price={q.odds} line={q.line} offline={offline} selected={selected}
+    onSelect={() => onPick(sel)} />
 }
 
 export default function GameDetail() {
@@ -29,7 +32,7 @@ export default function GameDetail() {
   const [tab, setTab] = useState<'lines' | 'props'>('lines')
   const props = usePropQuotes(game && tab === 'props' ? id : null)
   const offline = board.isError || props.isError
-  const [target, setTarget] = useState<BetTarget | null>(null)
+  const toggle = useSlip(s => s.toggle)
 
   if (board.isLoading) return <div className="sb-detail"><p className="sb-empty">Loading…</p></div>
   if (!game) {
@@ -50,7 +53,7 @@ export default function GameDetail() {
         <button role="tab" className="sb-sport-tab" aria-selected={tab === 'lines'} onClick={() => setTab('lines')}>Game Lines</button>
         <button role="tab" className="sb-sport-tab" aria-selected={tab === 'props'} onClick={() => setTab('props')}>Player Props</button>
       </div>
-      {tab === 'lines' && <div className="sb-card"><GameLines game={game} offline={offline} onPick={setTarget} /></div>}
+      {tab === 'lines' && <div className="sb-card"><GameLines game={game} offline={offline} onPick={toggle} /></div>}
       {tab === 'props' && (
         props.isLoading ? <p className="sb-empty">Loading props…</p> :
         groupProps(props.data?.quotes ?? []).length === 0 ? <p className="sb-empty">No props priced for this game.</p> :
@@ -60,14 +63,13 @@ export default function GameDetail() {
             {rows.map(r => (
               <div className="sb-prop-row" key={`${r.player}|${r.line}`}>
                 <span className="sb-team">{r.player}</span>
-                <PropTile gameId={id} player={r.player} line={r.line} outcome="Over" q={r.over} offline={offline} onPick={setTarget} />
-                <PropTile gameId={id} player={r.player} line={r.line} outcome="Under" q={r.under} offline={offline} onPick={setTarget} />
+                <PropTile game={game} player={r.player} line={r.line} outcome="Over" q={r.over} offline={offline} onPick={toggle} />
+                <PropTile game={game} player={r.player} line={r.line} outcome="Under" q={r.under} offline={offline} onPick={toggle} />
               </div>
             ))}
           </section>
         ))
       )}
-      {target && <BetModal open onClose={() => setTarget(null)} {...target} />}
     </div>
   )
 }

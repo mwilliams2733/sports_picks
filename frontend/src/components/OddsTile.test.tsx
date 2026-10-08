@@ -30,4 +30,9 @@ describe('OddsTile', () => {
     rerender(<OddsTile label="X" top={null} price={-120} line={null} onSelect={() => {}} />)
     expect(screen.getByRole('button')).toHaveClass('sb-flash-worse')
   })
+  it('shows a tile on the slip as selected and pressed', () => {
+    render(<OddsTile label="X" top={null} price={-110} line={null} selected onSelect={() => {}} />)
+    expect(screen.getByRole('button')).toHaveClass('sb-tile-selected')
+    expect(screen.getByRole('button')).toHaveAttribute('aria-pressed', 'true')
+  })
 })

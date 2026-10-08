@@ -13,7 +13,9 @@ import SummaryBar from '../components/SummaryBar';
 import GameCard from '../components/GameCard';
 import PicksTable from '../components/PicksTable';
 import ConfidenceStars from '../components/ConfidenceStars';
-import BetModal from '../components/BetModal';
+import { useSlip } from '../stores/slipStore';
+import { useToast } from '../hooks/useToast';
+import { selectionFromPick, type PickInput } from '../lib/slip';
 import CreditUsage from '../components/CreditUsage';
 import SpendConfirmButton from '../components/SpendConfirmButton';
 import { getOwnerKey } from '../lib/secrets';
@@ -45,47 +47,37 @@ export default function TodaysPicks() {
   const { hidden: hiddenGames, hide: hideGame, showAll: showAllGames } = useHiddenGames();
   const refreshData = useRefreshData();
   const [teamFilter, setTeamFilter] = useState('');
-  const [betModalOpen, setBetModalOpen] = useState(false);
-  const [betModalData, setBetModalData] = useState<{
-    pickValue: string; betValue?: string; pickType: string; odds: number; gameId: number;
-    edgePct?: number; propMarket?: string; propPlayer?: string;
-    homeTeam?: string; awayTeam?: string;
-  } | null>(null);
-
-  const handleBetPick = (pick: PickData) => {
-    setBetModalData({
-      pickValue: pick.pick_value,
-      betValue: pick.stored_pick_value,
-      pickType: pick.pick_type,
-      odds: pick.odds_at_pick,
-      gameId: pick.game_id,
-      edgePct: pick.edge_pct,
-      propMarket: pick.prop_market,
-      propPlayer: pick.prop_player,
-      homeTeam: pick.home_team,
-      awayTeam: pick.away_team,
-    });
-    setBetModalOpen(true);
+  const addToSlip = useSlip(s => s.add);
+  const { toast } = useToast();
+  const startOf = (gameId: number) => gamesData.find(g => g.id === gameId)?.start_time ?? null;
+  // A model pick goes on the slip at the price the model saw; if the book has
+  // moved since, the server's price_moved answer shows the new price.
+  const addPick = (p: PickInput) => {
+    const sel = selectionFromPick({ ...p, startTime: startOf(p.gameId) });
+    if (!sel) { toast("This pick can't be bet here.", 'error'); return; }
+    addToSlip(sel);
+    toast(`Added to bet slip: ${sel.label}`, 'success');
   };
 
-  const handleBetProp = (p: PropData) => {
-    setBetModalData({
-      pickValue: `${p.player_name} ${p.outcome} ${p.line}`,
-      pickType: 'prop',
-      odds: p.odds,
-      gameId: p.game_id,
-      edgePct: p.edge_pct ?? undefined,
-      propMarket: p.market,
-      propPlayer: p.player_name,
-    });
-    setBetModalOpen(true);
-  };
+  const handleBetPick = (pick: PickData) => addPick({
+    pickType: pick.pick_type,
+    value: pick.stored_pick_value ?? (pick.pick_type === 'prop' ? pick.pick_value : undefined),
+    label: pick.pick_value, gameId: pick.game_id, odds: pick.odds_at_pick,
+    propMarket: pick.prop_market, propPlayer: pick.prop_player,
+    homeTeam: pick.home_team, awayTeam: pick.away_team, gameLabel: pick.matchup,
+  });
+
+  const handleBetProp = (p: PropData) => addPick({
+    pickType: 'prop', value: `${p.player_name} ${p.outcome} ${p.line}`,
+    label: `${p.player_name} ${p.outcome} ${p.line} ${p.market_label}`, gameId: p.game_id, odds: p.odds,
+    propMarket: p.market, propPlayer: p.player_name, gameLabel: p.matchup,
+  });
 
   const handleBetFromCard = (bet: { pickValue: string; betValue?: string; pickType: string; odds: number; gameId: number;
-    edgePct?: number; homeTeam?: string; awayTeam?: string }) => {
-    setBetModalData(bet);
-    setBetModalOpen(true);
-  };
+    edgePct?: number; homeTeam?: string; awayTeam?: string }) => addPick({
+    pickType: bet.pickType, value: bet.betValue, label: bet.pickValue, gameId: bet.gameId, odds: bet.odds,
+    homeTeam: bet.homeTeam, awayTeam: bet.awayTeam,
+  });
 
   // Reset team filter when sport changes. Adjust state during render (React's
   // documented pattern for "state that depends on a prop") instead of in an
@@ -266,23 +258,6 @@ export default function TodaysPicks() {
           <div className="empty-state-title">No games or picks today</div>
           <div className="empty-state-sub">Run the pipeline to fetch today's games and odds.</div>
         </div>
-      )}
-
-      {betModalData && (
-        <BetModal
-          open={betModalOpen}
-          onClose={() => setBetModalOpen(false)}
-          pickValue={betModalData.pickValue}
-          betValue={betModalData.betValue}
-          pickType={betModalData.pickType}
-          odds={betModalData.odds}
-          gameId={betModalData.gameId}
-          edgePct={betModalData.edgePct}
-          propMarket={betModalData.propMarket}
-          propPlayer={betModalData.propPlayer}
-          homeTeam={betModalData.homeTeam}
-          awayTeam={betModalData.awayTeam}
-        />
       )}
 
       <CreditUsage />

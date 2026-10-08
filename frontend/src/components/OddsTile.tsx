@@ -13,10 +13,12 @@ interface Props {
   line: number | null
   lockedReason?: string
   offline?: boolean
+  /** On the bet slip: shown green and pressed. */
+  selected?: boolean
   onSelect: () => void
 }
 
-export default function OddsTile({ label, top, price, line, lockedReason, offline = false, onSelect }: Props) {
+export default function OddsTile({ label, top, price, line, lockedReason, offline = false, selected = false, onSelect }: Props) {
   const locked = offline || price === null
   const prev = useRef<{ odds: number; line: number | null } | null>(null)
   const [flash, setFlash] = useState<PriceMove>(null)
@@ -31,12 +33,14 @@ export default function OddsTile({ label, top, price, line, lockedReason, offlin
     return () => clearTimeout(t)
   }, [price, line])
 
-  const cls = ['sb-tile', locked && 'sb-tile-locked', flash && `sb-flash-${flash}`].filter(Boolean).join(' ')
+  const cls = ['sb-tile', locked && 'sb-tile-locked', selected && !locked && 'sb-tile-selected',
+    flash && `sb-flash-${flash}`].filter(Boolean).join(' ')
   return (
     <button
       type="button"
       className={cls}
       disabled={locked}
+      aria-pressed={locked ? undefined : selected}
       title={offline ? OFFLINE : locked ? lockedReason : undefined}
       aria-label={locked ? `${label} locked` : `${label} ${formatOdds(price as number)}`}
       onClick={onSelect}

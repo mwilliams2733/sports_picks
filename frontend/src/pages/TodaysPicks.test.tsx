@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import TodaysPicks from './TodaysPicks'
 import { setOwnerKey } from '../lib/secrets'
-import { useUserStore } from '../stores/userStore'
-import { api } from '../api/client'
+import { useSlip, SLIP_DEFAULTS } from '../stores/slipStore'
+import { ToastProvider } from '../components/Toast'
 import type { PickData, GameOddsData } from '../types'
 
 const ok = <T,>(data: T) => ({ data, error: null, isLoading: false })
@@ -45,7 +45,7 @@ vi.mock('../api/client', async (importOriginal) => {
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={qc}><MemoryRouter initialEntries={['/']}><TodaysPicks /></MemoryRouter></QueryClientProvider>)
+  return render(<QueryClientProvider client={qc}><ToastProvider><MemoryRouter initialEntries={['/']}><TodaysPicks /></MemoryRouter></ToastProvider></QueryClientProvider>)
 }
 
 function makeGame(overrides: Partial<GameOddsData> = {}): GameOddsData {
@@ -90,110 +90,58 @@ describe('TodaysPicks refresh button', () => {
   })
 })
 
-describe('TodaysPicks -> GameCard -> BetModal wiring', () => {
+describe('TodaysPicks -> bet slip wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useUserStore.setState({ currentUserName: 'Marcus', selectedUser: null })
     window.localStorage.clear()
-    window.sessionStorage.clear()
-    vi.mocked(api.users.list).mockResolvedValue([
-      { id: 1, name: 'Marcus', starting_balance: 10000, current_balance: 10000, available_balance: 10000,
-        total_wagered: 0, profit: 0, roi: 0, wins: 0, losses: 0, pushes: 0,
-        pending: 0, win_rate: 0, current_streak: 0, best_streak: 0, streak_type: 'none' },
-    ])
-    vi.mocked(api.paper.propQuotes).mockResolvedValue({ game_id: 1, quotes: [] })
+    useSlip.setState({ ...SLIP_DEFAULTS })
   })
 
   // A moneyline pick's pick_value has already been rewritten to team names
-  // ("NYY ML") for display; only stored_pick_value ("HOME ML") is a side
-  // quotes.legFromPick can map. This renders the real GameCard -> BetModal
-  // wiring TodaysPicks uses, not legFromPick in isolation.
-  it('bets a moneyline pick displayed under a team name', async () => {
-    picksData = [makePick({ pick_value: 'NYY ML', stored_pick_value: 'HOME ML' })]
+  // ("NYY ML") for display; only stored_pick_value ("HOME ML") maps to a side.
+  it('adds a moneyline pick displayed under a team name, at the price the model saw', async () => {
+    picksData = [makePick({ pick_value: 'NYY ML', stored_pick_value: 'HOME ML', odds_at_pick: -131 })]
     gamesData = [makeGame()]
-    vi.mocked(api.paper.quotes).mockResolvedValue({ game_id: 1, quotes: [
-      { pick_type: 'moneyline', side: 'HOME', available: true, pick_value: 'HOME ML', odds: -131,
-        line: null, quoted_at: new Date().toISOString(), prop_player: null, prop_market: null },
-    ] })
-
     const user = userEvent.setup()
     renderPage()
-
-    const betButtons = await screen.findAllByRole('button', { name: 'Bet This' })
-    await user.click(betButtons[0])
-    expect(await screen.findByText('-131')).toBeInTheDocument()
-
-    await user.type(await screen.findByLabelText('PIN'), '1234')
-    expect(screen.getByRole('button', { name: /Confirm/ })).not.toBeDisabled()
+    await user.click((await screen.findAllByRole('button', { name: 'Bet This' }))[0])
+    expect(useSlip.getState().legs).toEqual([expect.objectContaining({
+      leg: { game_id: 1, pick_type: 'moneyline', side: 'HOME' }, label: 'NYY ML', odds: -131, line: null,
+      gameLabel: 'BOS @ NYY', startTime: '2099-01-01T00:00:00Z' })])
   })
 
-  // A fighter-name label (MMA) is likewise a rewrite of an AWAY ML pick.
-  it('bets a fighter-name moneyline pick', async () => {
-    picksData = [makePick({
-      id: 2, pick_value: 'Erick Visconde ML', stored_pick_value: 'AWAY ML',
-    })]
+  it('adds a fighter-name moneyline pick', async () => {
+    picksData = [makePick({ id: 2, pick_value: 'Erick Visconde ML', stored_pick_value: 'AWAY ML' })]
     gamesData = [makeGame({ sport: 'mma', home_team: 'Kleydson Rodrigues', away_team: 'Erick Visconde' })]
-    vi.mocked(api.paper.quotes).mockResolvedValue({ game_id: 1, quotes: [
-      { pick_type: 'moneyline', side: 'AWAY', available: true, pick_value: 'AWAY ML', odds: -131,
-        line: null, quoted_at: new Date().toISOString(), prop_player: null, prop_market: null },
-    ] })
-
     const user = userEvent.setup()
     renderPage()
-
-    const betButtons = await screen.findAllByRole('button', { name: 'Bet This' })
-    await user.click(betButtons[0])
-    expect(await screen.findByText('-131')).toBeInTheDocument()
-
-    await user.type(await screen.findByLabelText('PIN'), '1234')
-    await waitFor(() => expect(screen.getByRole('button', { name: /Confirm/ })).not.toBeDisabled())
+    await user.click((await screen.findAllByRole('button', { name: 'Bet This' }))[0])
+    expect(useSlip.getState().legs).toEqual([expect.objectContaining({
+      leg: { game_id: 1, pick_type: 'moneyline', side: 'AWAY' }, label: 'Erick Visconde ML' })])
   })
 
-  // The GameCard's own "Bet This" button is the FIRST one in the DOM (Today's
-  // Games renders above the AI Picks table); the picks-table row's button is
-  // the second. Earlier wiring tests only ever clicked betButtons[0] -- this
-  // exercises the other wiring path (PicksTable -> handleBetPick), which has
-  // its own team-name label -> betValue plumbing.
-  it('bets a spread pick from the picks-table row, not just the GameCard button', async () => {
-    picksData = [makePick({
-      pick_type: 'spread', pick_value: 'BOS +3.5', stored_pick_value: 'AWAY +3.5', odds_at_pick: -110,
-      home_team: 'NYY', away_team: 'BOS',
-    })]
+  // The GameCard's button is first in the DOM; the picks-table row's is
+  // second -- a separate wiring path with its own stored-label plumbing.
+  it('adds a spread pick from the picks-table row, with its line', async () => {
+    picksData = [makePick({ pick_type: 'spread', pick_value: 'BOS +3.5', stored_pick_value: 'AWAY +3.5',
+      odds_at_pick: -110, home_team: 'NYY', away_team: 'BOS' })]
     gamesData = [makeGame()]
-    vi.mocked(api.paper.quotes).mockResolvedValue({ game_id: 1, quotes: [
-      { pick_type: 'spread', side: 'AWAY', available: true, pick_value: 'AWAY +3.5', odds: -105,
-        line: 3.5, quoted_at: new Date().toISOString(), prop_player: null, prop_market: null },
-    ] })
-
     const user = userEvent.setup()
     renderPage()
-
     const betButtons = await screen.findAllByRole('button', { name: 'Bet This' })
     expect(betButtons.length).toBeGreaterThan(1)
     await user.click(betButtons[1])
-    expect(await screen.findByText('-105')).toBeInTheDocument()
-
-    await user.type(await screen.findByLabelText('PIN'), '1234')
-    expect(screen.getByRole('button', { name: /Confirm/ })).not.toBeDisabled()
+    expect(useSlip.getState().legs).toEqual([expect.objectContaining({
+      leg: { game_id: 1, pick_type: 'spread', side: 'AWAY' }, label: 'BOS +3.5', line: 3.5, odds: -110 })])
   })
 
-  it('cannot bet without the stored label (mutation check): dropping betValue disables Confirm', async () => {
-    // This mirrors what happens if the betValue pass-through were removed:
-    // BetModal falls back to the display pickValue, which legFromPick can't
-    // map, so the pick can't be bet.
+  it('cannot add a pick without its stored label (mutation check)', async () => {
     picksData = [makePick({ pick_value: 'NYY ML', stored_pick_value: undefined })]
     gamesData = [makeGame()]
-    vi.mocked(api.paper.quotes).mockResolvedValue({ game_id: 1, quotes: [
-      { pick_type: 'moneyline', side: 'HOME', available: true, pick_value: 'HOME ML', odds: -131,
-        line: null, quoted_at: new Date().toISOString(), prop_player: null, prop_market: null },
-    ] })
-
     const user = userEvent.setup()
     renderPage()
-
-    const betButtons = await screen.findAllByRole('button', { name: 'Bet This' })
-    await user.click(betButtons[0])
+    await user.click((await screen.findAllByRole('button', { name: 'Bet This' }))[0])
     expect(await screen.findByText("This pick can't be bet here.")).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Confirm/ })).toBeDisabled()
+    expect(useSlip.getState().legs).toEqual([])
   })
 })
