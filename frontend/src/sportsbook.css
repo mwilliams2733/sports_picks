@@ -17,6 +17,7 @@
   font: inherit; font-weight: 600;
 }
 .sb-topnav .sb-tab.active { color: var(--on-accent); background: var(--accent); }
+.sb-topnav .sb-tab span[aria-hidden] { display: none; }
 
 .sb-chip {
   margin-left: auto; position: relative;

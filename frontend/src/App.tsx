@@ -4,6 +4,8 @@ import { ToastProvider } from './components/Toast';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import TodaysPicks from './pages/TodaysPicks';
+import Lobby from './pages/Lobby';
+import GameDetail from './pages/GameDetail';
 import PlayerProps from './pages/PlayerProps';
 import Backtesting from './pages/Backtesting';
 import TrackRecord from './pages/TrackRecord';
@@ -28,7 +30,9 @@ export default function App() {
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<Layout />}>
-                <Route index element={<TodaysPicks />} />
+                <Route index element={<Lobby />} />
+                <Route path="game/:id" element={<GameDetail />} />
+                <Route path="model-picks" element={<TodaysPicks />} />
                 <Route path="props" element={<PlayerProps />} />
                 <Route path="backtesting" element={<Backtesting />} />
                 <Route path="track-record" element={<TrackRecord />} />

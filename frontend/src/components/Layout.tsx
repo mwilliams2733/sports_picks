@@ -1,71 +1,41 @@
 import { useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 import { useAppStore } from '../stores/appStore'
 import { useWebSocket } from '../hooks/useWebSocket'
-import BottomNav from './BottomNav'
-import MobileMenu from './MobileMenu'
-
-const NAV_ITEMS: [string, string][] = [
-  ['/', "Today's Picks"],
-  ['/props', 'Player Props'],
-  ['/backtesting', 'Backtesting'],
-  ['/track-record', 'Track Record'],
-  ['/paper-trading', 'Paper Trading'],
-  ['/faq', 'FAQ'],
-  ['/admin', 'Admin'],
-]
+import MainTabs from './MainTabs'
+import PlayerChip from './PlayerChip'
+import ResearchMenu from './ResearchMenu'
+import { RESEARCH_LINKS } from '../lib/nav'
 
 const SPORTS = ['all', 'nba', 'nfl', 'ncaab', 'ncaaf', 'mlb']
 
 export default function Layout() {
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [researchOpen, setResearchOpen] = useState(false)
   const { sport, setSport } = useAppStore()
+  const { pathname } = useLocation()
+  const onResearch = RESEARCH_LINKS.some(([path]) => pathname.startsWith(path))
+  const toggle = () => setResearchOpen(o => !o)
   useWebSocket()
 
   return (
     <>
-      <header className="header">
-        <div className="header-left">
-          <button
-            className="hamburger-btn"
-            onClick={() => setMenuOpen(!menuOpen)}
-            aria-label="Menu"
-          >
-            ☰
-          </button>
-          <div className="header-logo">
-            <span className="header-logo-accent">ME</span> Metric Edge
-          </div>
-        </div>
-        <nav className="header-nav" aria-label="Main navigation">
-          {NAV_ITEMS.map(([path, label]) => (
-            <NavLink
-              key={path}
-              to={path}
-              end={path === '/'}
-              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-            >
-              {label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="header-sport-filter" aria-label="Sport filter">
+      <header className="sb-topbar">
+        <Link to="/" className="sb-wordmark" aria-label="METRIC EDGE home">METRIC <span>EDGE</span></Link>
+        <MainTabs className="sb-topnav" researchActive={onResearch} onResearch={toggle} />
+        <PlayerChip />
+      </header>
+      {onResearch && (
+        <div className="header-sport-filter" aria-label="Sport filter" style={{ display: 'flex', padding: '0.5rem 1rem' }}>
           {SPORTS.map((s) => (
-            <button
-              key={s}
-              className={`sport-filter-btn ${sport === s ? 'active' : ''}`}
-              onClick={() => setSport(s)}
-            >
+            <button key={s} className={`sport-filter-btn ${sport === s ? 'active' : ''}`} onClick={() => setSport(s)}>
               {s.toUpperCase()}
             </button>
           ))}
         </div>
-      </header>
-      <MobileMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
-      <main className="main-content">
-        <Outlet />
-      </main>
-      <BottomNav />
+      )}
+      <ResearchMenu open={researchOpen} onClose={() => setResearchOpen(false)} />
+      <main className="main-content"><Outlet /></main>
+      <MainTabs className="sb-tabbar" researchActive={onResearch} onResearch={toggle} />
     </>
   )
 }
