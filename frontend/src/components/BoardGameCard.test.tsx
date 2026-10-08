@@ -56,6 +56,14 @@ describe('ModelPicksStrip', () => {
     fireEvent.click(screen.getByRole('button', { name: /Cowboys \+3 -110/ }))
     expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ betValue: 'AWAY +3', edgePct: 4.1 }))
   })
+  it('shows the price the edge was computed at and bets at it, not at the live price', () => {
+    const onPick = vi.fn()
+    const g = { ...game, model_pick: { pick_type: 'moneyline' as const, pick_value: 'AWAY ML', odds: 150, edge_pct: 4.1 } }
+    render(<ModelPicksStrip games={[g]} offline={false} onPick={onPick} />)   // live price +135
+    expect(screen.getByText(/Model edge 4.1% at \+150/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /\+135/ }))
+    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ betValue: 'AWAY ML', odds: 150, priceSource: 'model' }))
+  })
   it('renders nothing when no game has a usable model pick', () => {
     const { container } = render(<ModelPicksStrip games={[{ ...game, model_pick: null }]} offline={false} onPick={() => {}} />)
     expect(container).toBeEmptyDOMElement()

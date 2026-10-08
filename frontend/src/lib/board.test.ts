@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { AvailableGameQuote, BoardGame, GameQuote, PropQuote } from '../types'
-import { etToday, formatDay, formatMoney, gameTarget, groupByDay, groupProps, modelPickQuote,
+import { etToday, formatDay, formatMoney, gameTarget, groupByDay, groupProps, modelPickQuote, modelPickTarget,
   priceMove, propTarget, sportTabs, startLabel, tileTop, findGameQuote } from './board'
 
 const q = (pick_type: string, side: string, extra: Partial<AvailableGameQuote> = {}): GameQuote => ({
@@ -93,7 +93,17 @@ describe('gameTarget / modelPickQuote', () => {
     const g = game()
     const t = gameTarget(g, findGameQuote(g.quotes, 'spread', 'AWAY') as AvailableGameQuote, 4.1)
     expect(t).toEqual({ pickType: 'spread', pickValue: 'Cowboys +3', betValue: 'AWAY +3', odds: -110,
-      gameId: 1, homeTeam: 'Buccaneers', awayTeam: 'Cowboys', edgePct: 4.1 })
+      gameId: 1, homeTeam: 'Buccaneers', awayTeam: 'Cowboys', edgePct: 4.1, priceSource: 'board' })
+  })
+  it('marks a board tile target as a board price, not the model', () => {
+    const g = game()
+    expect(gameTarget(g, findGameQuote(g.quotes, 'moneyline', 'HOME') as AvailableGameQuote).priceSource).toBe('board')
+  })
+  it('bets a model pick at the price and line the model evaluated, so BetModal notes any move', () => {
+    const g = game({ model_pick: { pick_type: 'spread', pick_value: 'AWAY +3.5', odds: 120, edge_pct: 4.1 } })
+    expect(modelPickTarget(g, findGameQuote(g.quotes, 'spread', 'AWAY') as AvailableGameQuote)).toEqual({
+      pickType: 'spread', pickValue: 'Cowboys +3.5', betValue: 'AWAY +3.5', odds: 120, gameId: 1,
+      homeTeam: 'Buccaneers', awayTeam: 'Cowboys', edgePct: 4.1, priceSource: 'model' })
   })
   it("finds the model pick's live quote, refused or not", () => {
     expect(modelPickQuote(game({ model_pick: { pick_type: 'over_under', pick_value: 'Under 47.5', odds: -110, edge_pct: 3 } })))

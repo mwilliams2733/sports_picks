@@ -1,6 +1,6 @@
 import type { AvailableGameQuote, AvailablePropQuote, BetTarget, BoardGame, GamePickType, GameQuote,
   GameSide, PropQuote } from '../types'
-import { legFromPick, resolveQuoteLabel } from './quotes'
+import { legFromPick, resolveLabel, resolveQuoteLabel } from './quotes'
 
 const ET = 'America/New_York'
 
@@ -71,7 +71,7 @@ export function gameTarget(game: BoardGame, q: AvailableGameQuote, edgePct?: num
   const t: BetTarget = {
     pickType: q.pick_type, pickValue: resolveQuoteLabel(q, game.home_team, game.away_team),
     betValue: q.pick_value, odds: q.odds, gameId: game.id,
-    homeTeam: game.home_team, awayTeam: game.away_team,
+    homeTeam: game.home_team, awayTeam: game.away_team, priceSource: 'board',
   }
   if (edgePct !== undefined) t.edgePct = edgePct
   return t
@@ -81,6 +81,19 @@ export function propTarget(gameId: number, q: AvailablePropQuote): BetTarget {
   const label = `${q.prop_player} ${q.outcome} ${q.line}`
   return { pickType: 'prop', pickValue: label, betValue: label, odds: q.odds, gameId,
     homeTeam: '', awayTeam: '', propMarket: q.prop_market, propPlayer: q.prop_player }
+}
+
+/** A model pick bet at the label and price the model evaluated (its edge is
+ *  only true there), so BetModal notes a moved price or line against the live
+ *  quote `q` it fetches itself. */
+export function modelPickTarget(game: BoardGame, q: AvailableGameQuote): BetTarget {
+  const mp = game.model_pick
+  if (!mp) return gameTarget(game, q)
+  return {
+    pickType: mp.pick_type, pickValue: resolveLabel(mp.pick_value, game.home_team, game.away_team),
+    betValue: mp.pick_value, odds: mp.odds ?? q.odds, gameId: game.id,
+    homeTeam: game.home_team, awayTeam: game.away_team, edgePct: mp.edge_pct, priceSource: 'model',
+  }
 }
 
 /** The live quote for a game's model pick -- available or refused -- or null

@@ -327,4 +327,5 @@ export interface BoardGame {
 export interface BetTarget {
   pickType: string; pickValue: string; betValue: string; odds: number; gameId: number;
   homeTeam: string; awayTeam: string; edgePct?: number; propMarket?: string; propPlayer?: string;
+  priceSource?: 'model' | 'board';
 }
