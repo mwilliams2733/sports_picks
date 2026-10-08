@@ -255,6 +255,12 @@
 }
 .sb-receipt-actions .sb-place { flex: 1; }
 
+/* On a phone the slip bar sits above the tab bar: leave room for both. */
+@media (max-width: 899px) {
+  .main-content.with-slip { padding-bottom: 140px; }
+}
+.sb-link { color: var(--accent); font-weight: 600; text-decoration: none; }
+
 @media (min-width: 900px) {
   .sb-slip-bar { display: none; }
   .sb-slip { display: flex; inset: 56px 0 0 auto; width: 340px; border-left: 1px solid var(--border-default); }

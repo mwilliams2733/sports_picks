@@ -214,7 +214,7 @@ export default function PaperTrading() {
           <div className="card" style={{ marginBottom: '1rem' }}>
             <div className="input-label">Place bets from the Lobby</div>
             <p className="text-muted" style={{ margin: '0.35rem 0 0' }}>
-              Tap any price in the <Link to="/">Lobby</Link> to add it to your bet slip — singles and parlays
+              Tap any price in the <Link className="sb-link" to="/">Lobby</Link> to add it to your bet slip — singles and parlays
               are both placed from there.
             </p>
           </div>
