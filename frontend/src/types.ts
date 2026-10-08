@@ -314,3 +314,17 @@ export interface PlacedPick {
   id: number; result: string | null; payout: number | null; new_balance: number;
   pick_value: string; odds: number; line: number | null; quoted_at: string;
 }
+
+export interface ModelPick { pick_type: GamePickType; pick_value: string; odds: number | null; edge_pct: number }
+
+export interface BoardGame {
+  id: number; sport: string; date: string; start_time: string | null;
+  home_team: string; away_team: string; quotes: GameQuote[];
+  prop_count: number | null; model_pick: ModelPick | null;
+}
+
+/** What BetModal needs to open on one side -- its props minus open/onClose. */
+export interface BetTarget {
+  pickType: string; pickValue: string; betValue: string; odds: number; gameId: number;
+  homeTeam: string; awayTeam: string; edgePct?: number; propMarket?: string; propPlayer?: string;
+}

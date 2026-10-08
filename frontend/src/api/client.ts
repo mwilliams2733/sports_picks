@@ -1,4 +1,4 @@
-import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult, CalibrationData, LeaderboardRow, EmailedGroups, EmailedTrend, GameQuote, PropQuote, BetLeg, PlacedPick } from '../types';
+import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult, CalibrationData, LeaderboardRow, EmailedGroups, EmailedTrend, GameQuote, PropQuote, BetLeg, PlacedPick, BoardGame } from '../types';
 import { getOwnerKey } from '../lib/secrets';
 
 const BASE = '';
@@ -150,6 +150,7 @@ export const api = {
     quotes: (gameId: number) => get<{ game_id: number; quotes: GameQuote[] }>(`/paper/quotes?game_id=${gameId}`),
     propQuotes: (gameId: number) =>
       get<{ game_id: number; quotes: PropQuote[] }>(`/paper/prop-quotes?game_id=${gameId}`),
+    board: () => get<{ games: BoardGame[] }>('/paper/board?days=7'),
   },
   pipeline: {
     run: (sport?: string) => post<{
