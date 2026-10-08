@@ -73,4 +73,22 @@ describe('slip store', () => {
     await useSlip.persist.rehydrate()
     expect(useSlip.getState().legs).toEqual([])
   })
+
+  it('drops a saved slip in the wrong shape instead of crashing every page (final review)', async () => {
+    useSlip.getState().add(sel('AWAY'))
+    localStorage.setItem('sp-slip', JSON.stringify({ state: { legs: [{}, { leg: { game_id: 1 } }, null] }, version: 0 }))
+    await useSlip.persist.rehydrate()
+    expect(useSlip.getState().legs).toEqual([])
+    localStorage.setItem('sp-slip', JSON.stringify({ state: { legs: null, mode: 'x', parlayStake: 'NaN' }, version: 0 }))
+    await useSlip.persist.rehydrate()
+    expect(useSlip.getState()).toMatchObject({ legs: [], mode: 'singles', parlayStake: 25 })
+  })
+
+  it('keeps well-formed saved legs on rehydrate', async () => {
+    useSlip.getState().add(sel('AWAY'))
+    useSlip.setState({ legs: [] })
+    localStorage.setItem('sp-slip', JSON.stringify({ state: { legs: [{ ...sel('AWAY'), stake: 40 }] }, version: 1 }))
+    await useSlip.persist.rehydrate()
+    expect(useSlip.getState().legs.map(l => l.stake)).toEqual([40])
+  })
 })

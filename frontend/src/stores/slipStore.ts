@@ -46,6 +46,30 @@ export const SLIP_DEFAULTS: SlipData = {
   acceptAnyOdds: false, open: false, receipt: null,
 }
 
+// A saved slip is untrusted input: a hand edit or an older shape must not
+// crash every page (the slip renders on all of them), so only well-formed
+// legs and settings survive a reload (final review, Review Focus 5).
+function isSavedLeg(l: unknown): l is SlipLeg {
+  const x = l as Partial<SlipLeg> | null
+  return typeof x === 'object' && x !== null && typeof x.leg === 'object' && x.leg !== null
+    && typeof x.leg.game_id === 'number' && typeof x.leg.pick_type === 'string'
+    && typeof x.odds === 'number' && Number.isFinite(x.odds)
+    && typeof x.stake === 'number' && Number.isFinite(x.stake)
+    && typeof x.label === 'string'
+}
+
+function savedSlip(saved: unknown): Partial<SlipData> {
+  const s = (typeof saved === 'object' && saved !== null ? saved : {}) as Record<string, unknown>
+  const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
+  return {
+    legs: Array.isArray(s.legs) ? s.legs.filter(isSavedLeg) : [],
+    mode: s.mode === 'parlay' ? 'parlay' : 'singles',
+    parlayStake: num(s.parlayStake, DEFAULT_STAKE),
+    sameStake: s.sameStake === true,
+    acceptAnyOdds: s.acceptAnyOdds === true,
+  }
+}
+
 const onMarket = (leg: BetLeg) => (l: SlipLeg) => marketKey(l.leg) === marketKey(leg)
 
 function newLeg(st: SlipData, s: SlipSelection): SlipLeg {
@@ -87,6 +111,9 @@ export const useSlip = create<SlipData & SlipActions>()(persist((set) => ({
   clear: () => set({ legs: [] }),
 }), {
   name: 'sp-slip',
+  version: 1,
+  migrate: (saved) => saved as SlipData,
+  merge: (saved, current) => ({ ...current, ...savedSlip(saved) }),
   storage: createJSONStorage(() => safeStorage),
   partialize: (st) => ({ legs: st.legs, mode: st.mode, parlayStake: st.parlayStake,
     sameStake: st.sameStake, acceptAnyOdds: st.acceptAnyOdds }),
