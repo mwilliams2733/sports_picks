@@ -158,6 +158,8 @@ export default function BetSlip() {
         s.setReceipt({ bets, legs: placedLegs, placedAt: new Date().toISOString() })
       }
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      // Board and quote prices: a moved price must show on its tile too.
+      queryClient.invalidateQueries({ queryKey: ['paper'] })
     } finally {
       setPlacing(false)
     }
@@ -182,7 +184,7 @@ export default function BetSlip() {
           <button type="button" className="sb-slip-close" aria-label="Close bet slip"
             onClick={() => s.setOpen(false)}>✕</button>
         </header>
-        {s.receipt ? <BetReceipt receipt={s.receipt} remaining={s.legs.length} /> : (
+        {s.receipt ? <BetReceipt receipt={s.receipt} remaining={s.legs.filter(l => l.error || l.movedFrom).length} /> : (
           <>
             <div className="sb-slip-tabs" role="tablist" aria-label="Bet type">
               <button type="button" role="tab" aria-selected={!parlay} onClick={() => s.setMode('singles')}>Singles</button>
