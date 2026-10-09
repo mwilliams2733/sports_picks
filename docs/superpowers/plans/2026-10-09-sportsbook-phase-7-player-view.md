@@ -14,7 +14,7 @@
 
 - **Route:** `/players/:id`. Not a player (non-numeric id, unknown id, a deleted player) → "No such player." with a link back to Leaders. The player list failing to load → an alert, not "No such player".
 - **Header:** initial avatar + name (`h1`). A money strip (`dl.sb-money`, aria-label "`{name}`'s money"): **Balance** (`current_balance`, the settled balance), **Profit** (signed), **Streak** (`W4` / `L2` / `—`, straight bets only, as Leaders), **Best win streak** (`W6` / `—`).
-- **Note under the strip:** "Leaders ranks single bets only; these figures include parlays." — the page's profit and ROI include parlays (`/users/` and `/stats` use `player_bets(include_parlays=True)`), the board's do not, so the two pages legitimately differ.
+- **Note under the strip:** "Balance, profit and results include parlays; streaks count single bets only, as Leaders does." — the page's profit and ROI include parlays (`/users/` and `/stats` use `player_bets(include_parlays=True)`), the board's do not, so the two pages legitimately differ.
 - **Your own page:** the same read-only view, plus "This is you — cash out and track your open bets in My Bets." with a link to `/bets`.
 - **Results:** table Period | W-L | Win % | Profit | ROI for Today / This week / This month / All time, from `/users/{id}/stats`. A period with no settled bets shows `—` in every cell; Win % is `—` when nothing was decided (only pushes / cash outs). When `all_time.cashed_out > 0`: "Profit and ROI include N cashed-out bet(s); W-L does not."
 - **Bets:** the shared `TicketList` (Open / Settled tabs, Won/Lost filter) over `/users/{id}/bets` tickets, with no `userId` → no Cash out button. Empty Open tab: "`{name}` has no open bets."
@@ -513,7 +513,7 @@ describe('PlayerView', () => {
   })
   it('explains why its numbers differ from Leaders (Review Focus 5)', async () => {
     renderAt('/players/2')
-    expect(await screen.findByText('Leaders ranks single bets only; these figures include parlays.')).toBeInTheDocument()
+    expect(await screen.findByText('Balance, profit and results include parlays; streaks count single bets only, as Leaders does.')).toBeInTheDocument()
   })
 })
 ```
@@ -560,7 +560,7 @@ function PlayerBody({ player, isMe }: { player: UserProfile; isMe: boolean }) {
         <div><dt>Streak</dt><dd>{streakText(player)}</dd></div>
         <div><dt>Best win streak</dt><dd>{player.best_streak ? `W${player.best_streak}` : '—'}</dd></div>
       </dl>
-      <p className="sb-note">Leaders ranks single bets only; these figures include parlays.</p>
+      <p className="sb-note">Balance, profit and results include parlays; streaks count single bets only, as Leaders does.</p>
       {isMe && (
         <p className="sb-note">This is you — cash out and track your open bets in <Link className="sb-link" to="/bets">My Bets</Link>.</p>
       )}

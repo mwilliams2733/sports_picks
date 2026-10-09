@@ -103,6 +103,6 @@ describe('PlayerView', () => {
   })
   it('explains why its numbers differ from Leaders (Review Focus 5)', async () => {
     renderAt('/players/2')
-    expect(await screen.findByText('Leaders ranks single bets only; these figures include parlays.')).toBeInTheDocument()
+    expect(await screen.findByText('Balance, profit and results include parlays; streaks count single bets only, as Leaders does.')).toBeInTheDocument()
   })
 })

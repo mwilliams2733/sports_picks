@@ -288,7 +288,7 @@ const SECTIONS: FAQSection[] = [
       {
         question: 'How do I place a pick?',
         answer:
-          'Tap any price in the Lobby or on a game page to add it to your bet slip, set your stake, and place it; add more than one selection to make a parlay. The price comes from the sportsbooks and is checked again when you place the bet -- if it has moved, the slip shows the new price before anything is placed. The stake comes out of your Available balance straight away; your settled balance only changes when the bet settles. Bets close when the game starts. Your bets are in My Bets, and tapping anyone’s name on Leaders shows their results and bets.',
+          'Tap any price in the Lobby or on a game page to add it to your bet slip, set your stake, and place it; add more than one selection to make a parlay. The price comes from the sportsbooks and is checked again when you place the bet -- if it has moved, that bet is not placed and shows the new price for you to accept, unless you ticked "Accept any odds changes", which takes the new price. The stake comes out of your Available balance straight away; your settled balance only changes when the bet settles. Bets close when the game starts. Your bets are in My Bets, and tapping anyone’s name on Leaders shows their results and bets.',
       },
       {
         question: 'How does grading work?',

@@ -30,7 +30,7 @@ function PlayerBody({ player, isMe }: { player: UserProfile; isMe: boolean }) {
         <div><dt>Streak</dt><dd>{streakText(player)}</dd></div>
         <div><dt>Best win streak</dt><dd>{player.best_streak ? `W${player.best_streak}` : '—'}</dd></div>
       </dl>
-      <p className="sb-note">Leaders ranks single bets only; these figures include parlays.</p>
+      <p className="sb-note">Balance, profit and results include parlays; streaks count single bets only, as Leaders does.</p>
       {isMe && (
         <p className="sb-note">This is you — cash out and track your open bets in <Link className="sb-link" to="/bets">My Bets</Link>.</p>
       )}

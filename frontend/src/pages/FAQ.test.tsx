@@ -15,4 +15,11 @@ describe('FAQ', () => {
 
     expect(document.body.textContent).not.toMatch(/[★☆]/)
   })
+  it('says a moved price is only skipped past when "Accept any odds changes" is ticked', async () => {
+    const user = userEvent.setup()
+    render(<FAQ />)
+    await user.click(screen.getByText('How do I place a pick?'))
+    expect(document.body.textContent).toMatch(/that bet is not placed and shows the new price for you to accept, unless you ticked "Accept any odds changes"/)
+    expect(document.body.textContent).not.toMatch(/before anything is placed/)
+  })
 })
