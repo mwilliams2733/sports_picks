@@ -366,3 +366,19 @@ export interface Ticket {
 }
 export interface BetsSummary { available: number; balance: number; open_stakes: number; today_pl: number }
 export interface MyBetsData { summary: BetsSummary; tickets: Ticket[] }
+
+/** A placed bet's leg as the feed carries it: the bet request plus display. */
+export type FeedLeg = BetLeg & {
+  label: string; game_label: string; start_time: string | null;
+  home_team: string; away_team: string; odds: number;
+  /** The line the friend got (a prop request already has its own `line`). */
+  quoted_line: number | null;
+}
+/** Older events carry only user_name/message; every other field is optional. */
+export interface FeedPayload {
+  user_name?: string; message?: string; bet_id?: number; kind?: 'straight' | 'parlay';
+  legs?: FeedLeg[]; result?: string; payout?: number; stake?: number;
+}
+export interface FeedItem {
+  id: number; user_id: number | null; event_type: string; payload: FeedPayload; created_at: string;
+}

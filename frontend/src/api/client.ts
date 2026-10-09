@@ -1,4 +1,4 @@
-import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult, CalibrationData, LeaderboardRow, EmailedGroups, EmailedTrend, GameQuote, PropQuote, PlacedPick, BoardGame, BetRequest, MyBetsData } from '../types';
+import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult, CalibrationData, LeaderboardRow, EmailedGroups, EmailedTrend, GameQuote, PropQuote, PlacedPick, BoardGame, BetRequest, MyBetsData, FeedItem } from '../types';
 import { getOwnerKey } from '../lib/secrets';
 
 const BASE = '';
@@ -139,7 +139,7 @@ export const api = {
       post<PlacedPick>(`/users/${userId}/picks`, data, { 'X-Player-Pin': pin }),
     grade: () => post<{ graded: number }>('/users/grade', {}),
     stats: (id: number) => get<UserStats>(`/users/${id}/stats`),
-    feed: (limit?: number) => get<{ id: number; user_id: number; event_type: string; payload: Record<string, string>; created_at: string }[]>(`/users/feed${limit ? `?limit=${limit}` : ''}`),
+    feed: (limit?: number) => get<FeedItem[]>(`/users/feed${limit ? `?limit=${limit}` : ''}`),
     delete: (id: number) => del<{ deleted: boolean; id: number }>(`/users/${id}`),
     setPin: (id: number, pin: string) => put<{ id: number; pin_set: boolean }>(`/users/${id}/pin`, { pin }),
     leaderboard: () => get<LeaderboardRow[]>('/users/leaderboard'),
