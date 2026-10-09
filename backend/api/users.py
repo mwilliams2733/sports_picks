@@ -317,7 +317,7 @@ def _board_row(user_id, name, is_model, s, bets) -> dict:
     n_eff = effective_bets(bets)
     shrunk = shrunk_roi(s.roi, n_eff)
     return {"id": user_id, "name": name, "is_model": is_model,
-            "wins": s.wins, "losses": s.losses, "pushes": s.pushes,
+            "wins": s.wins, "losses": s.losses, "pushes": s.pushes, "cashed_out": s.cashed_out,
             "pending": s.pending, "n": s.n, "n_eff": round(n_eff, 2),
             "win_rate": None if s.win_rate is None else round(s.win_rate, 4),
             "roi": None if s.roi is None else round(s.roi, 4),
@@ -784,7 +784,8 @@ def _compute_period_stats(bets) -> dict:
     """Period stats for a player's Bets, through the shared scorecard."""
     s = summarize(bets)
     return {
-        "wins": s.wins, "losses": s.losses, "pushes": s.pushes, "total": s.n,
+        "wins": s.wins, "losses": s.losses, "pushes": s.pushes, "cashed_out": s.cashed_out,
+        "total": s.n,
         "win_rate": round(s.win_rate * 100, 1) if s.win_rate is not None else 0,
         "profit": round(s.profit, 2),
         "roi": round(s.roi * 100, 2) if s.roi is not None else 0,

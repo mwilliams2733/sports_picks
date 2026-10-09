@@ -12,6 +12,8 @@ Definitions (spec 2026-09-28 §1):
   break-even  mean implied probability (vig included) of the decided bets'
               prices -- the win rate those prices required
   ROI         profit / stake over settled bets; a push is staked and returned
+  cash out    a settled bet in ROI (profit = payout); not a win, loss or push,
+              and not in break-even (sportsbook spec 2026-10-07 §9)
 """
 from __future__ import annotations
 
@@ -35,7 +37,7 @@ B_REF = 100 / 110
 
 @dataclass(frozen=True)
 class Bet:
-    result: str | None      # "win" | "loss" | "push" | None while pending
+    result: str | None      # "win" | "loss" | "push" | "cashed_out" | None while pending
     stake: float
     profit: float           # net, in the bet's own currency; 0.0 while pending
     odds: int
@@ -73,11 +75,12 @@ class Summary:
     profit: float
     staked: float
     roi: float | None
+    cashed_out: int = 0
 
     @property
     def n(self) -> int:
-        """Settled bets."""
-        return self.wins + self.losses + self.pushes
+        """Settled bets, cash outs included."""
+        return self.wins + self.losses + self.pushes + self.cashed_out
 
     @property
     def verdict(self) -> str | None:
@@ -93,7 +96,7 @@ class Summary:
     def to_dict(self) -> dict:
         return {
             "label": self.label, "wins": self.wins, "losses": self.losses,
-            "pushes": self.pushes, "pending": self.pending, "n": self.n,
+            "pushes": self.pushes, "cashed_out": self.cashed_out, "pending": self.pending, "n": self.n,
             "win_rate": _r(self.win_rate), "range_low": _r(self.range_low),
             "range_high": _r(self.range_high), "break_even": _r(self.break_even),
             "profit": round(self.profit, 4), "staked": round(self.staked, 4),
@@ -107,6 +110,7 @@ def summarize(bets: Iterable[Bet], label: str = "all") -> Summary:
     wins = sum(1 for b in settled if b.result == "win")
     losses = sum(1 for b in settled if b.result == "loss")
     pushes = sum(1 for b in settled if b.result == "push")
+    cashed_out = sum(1 for b in settled if b.result == "cashed_out")
     decided = wins + losses
     interval = wilson(wins, decided)
     prices = []
@@ -130,6 +134,7 @@ def summarize(bets: Iterable[Bet], label: str = "all") -> Summary:
         break_even=sum(prices) / len(prices) if prices else None,
         profit=profit, staked=staked,
         roi=profit / staked if staked else None,
+        cashed_out=cashed_out,
     )
 
 

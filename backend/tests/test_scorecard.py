@@ -159,3 +159,15 @@ def test_bad_odds_excluded_with_warning(caplog):
     # With one valid bet at -110, break_even is its implied probability
     assert s.break_even == pytest.approx(110 / 210)  # only the -110 bet counts
     assert "1 decided bets excluded from break-even for invalid odds" in caplog.text
+
+
+def test_a_cash_out_counts_in_roi_but_not_in_the_record():
+    """Sportsbook spec §9: a settled bet in ROI (profit = payout), neither a
+    win nor a loss, and no part of break-even."""
+    s = summarize([_b("win"), _b("loss"), _b("cashed_out", stake=1.0, profit=-0.0932)])
+    assert (s.wins, s.losses, s.pushes, s.cashed_out, s.n, s.pending) == (1, 1, 0, 1, 3, 0)
+    assert s.win_rate == 0.5
+    assert s.staked == 3.0
+    assert s.profit == pytest.approx(100 / 110 - 1 - 0.0932)
+    assert s.break_even == pytest.approx(110 / 210)
+    assert s.to_dict()["cashed_out"] == 1

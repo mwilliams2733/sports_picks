@@ -183,3 +183,35 @@ def test_my_bets_carries_the_offer_on_open_tickets_only():
     assert by_id[p1]["cash_out"] is None and by_id[p1]["result"] == "cashed_out"
     assert by_id[p2]["cash_out"]["available"] is False
     assert by_id[p2]["cash_out"]["reason"] == "not_quoted"
+
+
+def test_the_board_and_stats_count_a_cash_out_in_roi_not_in_w_l():
+    c = h.client()
+    [g] = h.games(c)
+    uid = h.user(c)
+    pid = h.place(c, uid, g, **AWAY_SPREAD)
+    _cash(c, uid, pid, 90.68)
+    [row] = [r for r in c.get("/users/leaderboard").json() if r["id"] == uid]
+    assert (row["wins"], row["losses"], row["cashed_out"], row["n"]) == (0, 0, 1, 1)
+    assert (row["profit"], row["roi"]) == (-9.32, -0.0932)
+    stats = c.get(f"/users/{uid}/stats").json()["all_time"]
+    assert (stats["wins"], stats["losses"], stats["cashed_out"], stats["total"], stats["profit"]) == (0, 0, 1, 1, -9.32)
+
+
+def test_a_cash_out_neither_extends_nor_breaks_a_streak():
+    """Review Focus 4: streaks follow decided bets; a cash out is not one."""
+    from datetime import datetime, timedelta
+    from backend.models import UserProfile
+    c = h.client()
+    games = h.games(c, 4)
+    uid = h.user(c)
+    ids = [h.place(c, uid, g, **AWAY_SPREAD) for g in games]
+    t0 = datetime(2026, 10, 1)
+    for i, (pid, result) in enumerate(zip(ids, ["win", "win", "win", "cashed_out"])):
+        h.set_row(c, PaperPick, pid, result=result, payout=1.0, created_at=t0 + timedelta(hours=i))
+    s = get_session(c.app.state.engine)
+    feed.update_streaks(s, None, uid)
+    s.commit()
+    u = s.get(UserProfile, uid)
+    assert (u.current_streak, u.streak_type) == (3, "win")
+    s.close()
