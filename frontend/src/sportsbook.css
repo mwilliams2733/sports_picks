@@ -387,3 +387,10 @@
   color: var(--text-secondary); text-decoration: none; font-size: 0.8rem; min-height: 0; }
 .sb-ticker-tag { color: var(--accent); font-weight: 800; font-size: 0.65rem; letter-spacing: 0.06em; }
 .sb-ticker-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Phone: keep the board inside the screen (it overflowed at 390px). */
+@media (max-width: 899px) {
+  .sb-lead-table { font-size: 0.78rem; }
+  .sb-lead-table th, .sb-lead-table td { padding: 0.45rem 0.2rem; }
+  .sb-lead-table td:last-child { white-space: normal; font-size: 0.68rem; color: var(--text-muted); }
+  .sb-avatar { width: 1.3rem; height: 1.3rem; margin-right: 0.3rem; font-size: 0.65rem; }
+}
