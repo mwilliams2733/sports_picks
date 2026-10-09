@@ -9,6 +9,7 @@ from backend.database import get_session
 from backend.models import UserProfile, PaperPick, Game, ActivityFeed, Parlay
 from backend.pipeline import paper_settlement
 from backend.pipeline.paper_settlement import settle_parlays
+from backend.paper import bets as bets_mod
 from backend.paper import pricing
 from backend.paper.pricing import PricingError
 from backend.pipeline.team_stats import COMBAT_SPORTS
@@ -580,6 +581,34 @@ def get_user_picks(request: Request, user_id: int):
                 entry["prop_player"] = p.prop_player
             result.append(entry)
         return result
+    finally:
+        session.close()
+
+
+@router.get("/{user_id}/bets")
+def get_user_bets(request: Request, user_id: int):
+    """A player's bets as tickets for My Bets (spec §7), with the money strip.
+
+    Every figure is the one the rest of the app uses: available/balance/open
+    stakes from the bankroll functions, Today's P/L from the same scorecard as
+    /stats' "today". /{user_id}/picks keeps its flat shape for older callers.
+    """
+    session = get_session(request.app.state.engine)
+    try:
+        user = session.get(UserProfile, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        today = et_today()
+        todays = [b for b in player_bets(session, user_id) if b.day == today]
+        return {
+            "summary": {
+                "available": round(available_of(session, user), 2),
+                "balance": round(balance_of(session, user), 2),
+                "open_stakes": round(open_stakes(session, user), 2),
+                "today_pl": _compute_period_stats(todays)["profit"],
+            },
+            "tickets": bets_mod.tickets(session, user_id),
+        }
     finally:
         session.close()
 
