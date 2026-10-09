@@ -41,6 +41,9 @@ class Game(Base):
     away_team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
     home_score = Column(Integer, nullable=True)
     away_score = Column(Integer, nullable=True)
+    #: ESPN's one-line game clock while a game is under way ("Q3 4:12",
+    #: "Bot 7th", "Halftime", "Final"), written only by the live_scores job.
+    live_detail = Column(String, nullable=True)
     status = Column(String, nullable=False, default="scheduled")
     #: True when neither side is hosting -- a tournament bracket, a neutral
     #: showcase. `home_team_id` is then a seed or bracket designation, not a

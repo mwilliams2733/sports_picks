@@ -35,7 +35,10 @@ def get_today_games(request: Request, sport: str | None = None):
 
         AwayTeam = aliased(Team)
         bettable = or_(
-            Game.status == "in_progress",
+            # Live -- but not once ESPN has called it: the live job leaves a
+            # finished game in_progress ("Final") until the 08:00 results pass.
+            and_(Game.status == "in_progress",
+                 or_(Game.live_detail.is_(None), ~Game.live_detail.like("Final%"))),
             and_(
                 Game.status == "scheduled",
                 Game.id.in_(select(Odds.game_id).distinct()),

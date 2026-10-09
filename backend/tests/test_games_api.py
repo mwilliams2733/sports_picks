@@ -338,3 +338,21 @@ def test_today_shows_no_price_when_the_only_book_is_stale():
     assert game["moneyline_home"] is None
     assert game["moneyline_away"] is None
     assert game["bookmaker"] is None
+
+
+def test_today_excludes_a_game_espn_has_called_final_before_the_results_pass():
+    """Sportsbook Phase 4 final review: the live job leaves a finished game
+    in_progress with live_detail "Final" until the 08:00 results pass; like a
+    final game, it is not bettable and stays off Today's Picks."""
+    app = create_app(":memory:")
+    today = et_today()
+    _seed(app, [
+        Team(id=1, name="Knicks", abbreviation="NYK", sport="nba"),
+        Team(id=2, name="Heat", abbreviation="MIA", sport="nba"),
+        Game(id=301, sport="nba", season="2025-26", date=today, home_team_id=2, away_team_id=1,
+             status="in_progress", home_score=101, away_score=99, live_detail="Final"),
+        Game(id=302, sport="nba", season="2025-26", date=today, home_team_id=1, away_team_id=2,
+             status="in_progress", home_score=50, away_score=48, live_detail="Q3 4:12"),
+    ])
+    ids = [g["id"] for g in TestClient(app).get("/games/today").json()]
+    assert 301 not in ids and 302 in ids

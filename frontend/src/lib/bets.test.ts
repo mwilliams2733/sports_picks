@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Ticket, TicketGame, TicketLeg } from '../types'
-import { filterSettled, gameLine, legLabel, legStatus, loadSeen, newWins, saveSeen, signedMoney,
+import { filterSettled, gameLine, isLive, legLabel, legStatus, legTint, loadSeen, newWins, saveSeen, signedMoney,
   splitTickets, ticketCode, ticketKey, ticketType } from './bets'
 
 const game = (over: Partial<TicketGame> = {}): TicketGame => ({
@@ -101,5 +101,51 @@ describe('celebrations: newWins / seen storage (Review Focus 2)', () => {
   it('survives storage that throws', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked') })
     expect(() => saveSeen(1, ['x'])).not.toThrow()
+  })
+})
+
+describe('live games', () => {
+  const live = (over: Partial<TicketGame> = {}) =>
+    game({ status: 'in_progress', home_score: 17, away_score: 14, live_detail: 'Q3 4:12', ...over })
+
+  it('shows the running score and ESPN clock', () => {
+    expect(gameLine(live())).toBe('TB 14 – DAL 17 · Q3 4:12')
+    expect(gameLine(live({ home_score: null, away_score: null, live_detail: null }))).toBe('TB @ DAL · Live')
+  })
+  it('calls a scheduled game past its kickoff Live (combat has no live feed)', () => {
+    const now = new Date('2026-10-09T01:00:00Z')
+    expect(isLive(game(), now)).toBe(true)                                  // kicked off 00:15Z
+    expect(gameLine(game(), now)).toBe('TB @ DAL · Live')
+    expect(isLive(game({ start_time: '2026-10-09T00:15:00' }), now)).toBe(true)   // naive UTC
+    expect(isLive(game(), new Date('2026-10-08T22:00:00Z'))).toBe(false)
+    expect(isLive(game({ status: 'final' }), now)).toBe(false)
+  })
+  it('tints a moneyline by who leads', () => {
+    expect(legTint(leg({ pick_type: 'moneyline', pick_value: 'HOME ML', game: live() }))).toBe('winning')
+    expect(legTint(leg({ pick_type: 'moneyline', pick_value: 'AWAY ML', game: live() }))).toBe('losing')
+    expect(legTint(leg({ pick_type: 'moneyline', pick_value: 'AWAY ML', game: live({ home_score: 14 }) }))).toBe('even')
+  })
+  it('tints a spread with its line, Even exactly on it (Review Focus 5)', () => {
+    expect(legTint(leg({ game: live({ home_score: 21, away_score: 14 }) }))).toBe('winning')   // AWAY +9, down 7
+    expect(legTint(leg({ game: live({ home_score: 23, away_score: 14 }) }))).toBe('even')      // down 9
+    expect(legTint(leg({ game: live({ home_score: 27, away_score: 14 }) }))).toBe('losing')
+    expect(legTint(leg({ pick_value: 'HOME -3.5', game: live() }))).toBe('losing')             // up 3
+  })
+  it('tints a total against its line', () => {
+    expect(legTint(leg({ pick_type: 'over_under', pick_value: 'Over 49', game: live() }))).toBe('losing')   // 31
+    expect(legTint(leg({ pick_type: 'over_under', pick_value: 'Under 49', game: live() }))).toBe('winning')
+    expect(legTint(leg({ pick_type: 'over_under', pick_value: 'Over 49', game: live({ home_score: 28, away_score: 21 }) })))
+      .toBe('even')
+  })
+  it('treats a game ESPN has called Final as finished, not live (final review)', () => {
+    const done = game({ status: 'in_progress', home_score: 17, away_score: 21, live_detail: 'Final/OT' })
+    expect(isLive(done)).toBe(false)
+    expect(gameLine(done)).toBe('TB 21 – DAL 17 · Final/OT')
+    expect(legTint(leg({ game: done }))).toBeNull()
+  })
+  it('never tints a prop, a settled leg, or a game that is not live', () => {
+    expect(legTint(leg({ pick_type: 'prop', pick_value: 'Dak Prescott Over 255.5 Pass Yards', game: live() }))).toBeNull()
+    expect(legTint(leg({ result: 'win', game: live() }))).toBeNull()
+    expect(legTint(leg())).toBeNull()
   })
 })

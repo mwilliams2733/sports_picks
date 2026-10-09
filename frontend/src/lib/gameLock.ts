@@ -1,11 +1,14 @@
+import { startInstant } from './slip'
+
 export type GameLockState = 'open' | 'locked' | 'final';
 
-// Backend only tracks 'scheduled' and 'final' game status — there's no
-// live/in-progress state. A 'scheduled' game whose start_time has already
-// passed is treated as locked (started but not yet graded).
+// 'in_progress' comes from the live_scores job; a 'scheduled' game whose
+// start time has passed is locked too (started, not yet updated). Start times
+// from /games/today are naive UTC, so they go through startInstant.
 export function getGameLockState(status: string, startTime: string | null): GameLockState {
   if (status === 'final') return 'final';
-  if (startTime && new Date(startTime).getTime() <= Date.now()) return 'locked';
+  if (status === 'in_progress') return 'locked';
+  if (startTime && startInstant(startTime) <= Date.now()) return 'locked';
   return 'open';
 }
 

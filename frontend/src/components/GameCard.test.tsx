@@ -26,6 +26,12 @@ function makePick(overrides: Partial<PickData> = {}): PickData {
 }
 
 describe('GameCard', () => {
+  it('labels a live game Live, not the raw status (sportsbook Phase 4 final review)', () => {
+    render(<GameCard game={makeGame({ status: 'in_progress', home_score: 3, away_score: 2 })} picks={[]} onBet={vi.fn()} />)
+    expect(screen.getByText('Live')).toBeInTheDocument()
+    expect(screen.queryByText('in_progress')).not.toBeInTheDocument()
+  })
+
   // /games/today now derives its prices from pricing.game_quotes (plan 027
   // final fix, FIX B) -- a refused market comes back null, not a stale
   // average. GameCard must render that without crashing.

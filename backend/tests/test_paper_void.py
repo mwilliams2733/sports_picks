@@ -122,3 +122,17 @@ def test_a_parlay_with_a_canceled_leg_pushes_and_releases_its_stake(session):
 
     assert (parlay.result, parlay.payout) == ("push", 0.0)
     assert open_stakes(session, user) == 0
+
+
+def test_a_game_stuck_in_progress_for_a_week_is_pushed(session):
+    """Sportsbook Phase 4: a live row whose final never arrives (a game
+    postponed mid-way, an ESPN gap) would otherwise hold its stake forever."""
+    bet = _bet(session, status="in_progress", days_ago=7)
+    grade_paper_picks(session, today=TODAY)
+    assert (bet.result, bet.payout) == ("push", 0.0)
+
+
+def test_an_in_progress_game_a_few_days_past_waits(session):
+    bet = _bet(session, status="in_progress", days_ago=3)
+    grade_paper_picks(session, today=TODAY)
+    assert bet.result is None

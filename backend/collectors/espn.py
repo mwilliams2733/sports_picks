@@ -133,11 +133,18 @@ class ESPNCollector:
             competitors = competition["competitors"]
             home = next(c for c in competitors if c["homeAway"] == "home")
             away = next(c for c in competitors if c["homeAway"] == "away")
-            espn_status = event["status"]["type"]["name"]
+            status_type = event["status"]["type"]
+            espn_status = status_type["name"]
             games.append({
                 "espn_id": event["id"],
                 "date": event["date"],
                 "status": STATUS_MAP.get(espn_status, "scheduled"),
+                # "pre" / "in" / "post". Unlike the name, every in-game pause
+                # (halftime, end of a period, a rain delay) is "in" -- STATUS_MAP
+                # would call those "scheduled".
+                "state": status_type.get("state"),
+                # ESPN's own one-line clock: "Q3 4:12", "Bot 7th", "Halftime", "Final".
+                "live_detail": status_type.get("shortDetail"),
                 "home_team": home["team"]["abbreviation"],
                 "home_team_name": home["team"]["displayName"],
                 "away_team": away["team"]["abbreviation"],

@@ -1,17 +1,20 @@
-import { gameLine, legLabel, legStatus, signedMoney, ticketCode, ticketType } from '../lib/bets'
+import { gameLine, isLive, legLabel, legStatus, legTint, signedMoney, ticketCode, ticketType } from '../lib/bets'
 import { formatMoney } from '../lib/board'
 import { formatOdds } from '../lib/quotes'
 import type { Ticket } from '../types'
 
 const RESULT: Record<string, string> = { win: 'Won', loss: 'Lost', push: 'Push' }
+const TINT: Record<string, string> = { winning: 'Winning', losing: 'Losing', even: 'Even' }
 
 export default function TicketCard({ t }: { t: Ticket }) {
   const edge = t.result === 'win' ? ' sb-bet-won' : t.result === 'loss' ? ' sb-bet-lost' : ''
+  const live = t.result === null && t.legs.some(l => isLive(l.game))
   return (
     <article className={`sb-bet${edge}`} aria-label={`Bet ${ticketCode(t)}`}>
       <header className="sb-bet-head">
         <span className="sb-bet-type">{ticketType(t)}</span>
         <span>{ticketCode(t)}</span>
+        {live && <span className="sb-live">LIVE</span>}
         <span className="sb-bet-time">
           {new Date(t.created_at).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}
         </span>
@@ -24,6 +27,10 @@ export default function TicketCard({ t }: { t: Ticket }) {
               <strong>{legLabel(l)}</strong>
               <small>{gameLine(l.game)}</small>
             </div>
+            {(() => {
+              const tint = legTint(l)
+              return tint && <span className={`sb-tint sb-tint-${tint}`}>{TINT[tint]}</span>
+            })()}
             <span className="sb-bet-odds">{formatOdds(l.odds)}</span>
           </li>
         ))}

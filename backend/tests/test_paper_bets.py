@@ -179,3 +179,18 @@ def test_unknown_player_is_404_and_bets_are_an_open_read():
     uid = client.post("/users/", json={"name": "x", "pin": TEST_PIN}).json()["id"]
     assert _bets(client, uid) == {"summary": {"available": 10000.0, "balance": 10000.0,
                                               "open_stakes": 0.0, "today_pl": 0.0}, "tickets": []}
+
+
+def test_a_live_leg_carries_the_game_clock():
+    client = _client()
+    [gid] = _games(client)
+    uid = _user(client)
+    _bet(client, uid, gid)
+    s = get_session(client.app.state.engine)
+    g = s.get(Game, gid)
+    g.status, g.home_score, g.away_score, g.live_detail = "in_progress", 7, 3, "Q2 1:05"
+    s.commit()
+    s.close()
+    [leg] = _bets(client, uid)["tickets"][0]["legs"]
+    assert {k: leg["game"][k] for k in ("status", "home_score", "away_score", "live_detail")} == \
+        {"status": "in_progress", "home_score": 7, "away_score": 3, "live_detail": "Q2 1:05"}

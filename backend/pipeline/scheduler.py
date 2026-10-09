@@ -173,6 +173,15 @@ def configure_scheduler(config: dict, engine) -> BackgroundScheduler:
         lambda: run_recalibration(config["database_path"]),
         'cron', hour=3, minute=0, id='recalibration', replace_existing=True,
     )
+    from backend.pipeline.live_scores import run_live_scores
+    # Live scores for open bets (sportsbook spec §8). Every 2 minutes, but it
+    # makes no request unless a game is under way; never a backlog after a
+    # sleep, and never two at once.
+    scheduler.add_job(
+        lambda: run_live_scores(engine),
+        'interval', minutes=2, id='live_scores', replace_existing=True,
+        coalesce=True, max_instances=1, misfire_grace_time=60,
+    )
 
     digest_cfg = config.get("digest", {}) or {}
     if digest_cfg.get("enabled") or os.environ.get("DIGEST_DRY_RUN") == "1":

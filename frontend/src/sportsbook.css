@@ -347,3 +347,16 @@
 }
 .sb-tabbar .sb-badge { position: absolute; top: 6px; left: calc(50% + 6px); }
 .sb-topnav .sb-badge { margin-left: 0.35rem; }
+
+/* ─── Live tickets (spec §8) ────────────────────────────────── */
+.sb-live {
+  padding: 0.05rem 0.4rem; border-radius: var(--radius-sm); background: var(--yellow-dim);
+  color: var(--yellow); font-size: 0.65rem; font-weight: 800; letter-spacing: 0.06em;
+  animation: sb-pulse 1.6s ease-in-out infinite;
+}
+@keyframes sb-pulse { 50% { opacity: 0.55; } }
+.sb-tint { flex: none; padding: 0.05rem 0.4rem; border-radius: var(--radius-sm); font-size: 0.7rem; font-weight: 800; }
+.sb-tint-winning { background: var(--green-dim); color: var(--green); }
+.sb-tint-losing { background: var(--red-dim); color: var(--red); }
+.sb-tint-even { background: var(--yellow-dim); color: var(--yellow); }
+@media (prefers-reduced-motion: reduce) { .sb-live { animation: none; } }
