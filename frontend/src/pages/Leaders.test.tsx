@@ -68,6 +68,12 @@ describe('Leaders', () => {
     expect(await screen.findByRole('row', { name: /Me/ })).toBeInTheDocument()
     expect(screen.queryByLabelText('Your position')).toBeNull()
   })
+  it('links each player to their page and the Model to its track record (Review Focus 4)', async () => {
+    renderPage()
+    expect(await screen.findByRole('link', { name: 'Sam' })).toHaveAttribute('href', '/players/2')
+    expect(screen.getByRole('link', { name: 'Model' })).toHaveAttribute('href', '/track-record')
+    expect(screen.getAllByRole('link', { name: 'Me' })[0]).toHaveAttribute('href', '/players/1')
+  })
   it('shows the feed, with Tail only on placed bets that carry legs (Review Focus 2)', async () => {
     renderPage()
     expect(await screen.findByText('Sam bet HOME ML -110 — $50')).toBeInTheDocument()

@@ -3,6 +3,7 @@ import { useCurrentPlayer } from '../hooks/useCurrentPlayer'
 import { useFeed } from '../hooks/useFeed'
 import { useRankings } from '../hooks/useRankings'
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { signedMoney } from '../lib/bets'
 import type { LeaderboardRow } from '../types'
@@ -14,7 +15,11 @@ function Row({ r, rank, streak }: { r: LeaderboardRow; rank: number | null; stre
   return (
     <tr aria-label={r.name} className={r.is_model ? 'sb-lead-model' : undefined}>
       <td className="sb-lead-rank">{rank ?? '—'}</td>
-      <td><span className="sb-avatar" aria-hidden="true">{r.name.charAt(0).toUpperCase()}</span>{r.name}</td>
+      <td>
+        <span className="sb-avatar" aria-hidden="true">{r.name.charAt(0).toUpperCase()}</span>
+        {/* The Model has no player page (id null): its record is Track record. */}
+        <Link className="sb-lead-name" to={r.is_model || r.id === null ? '/track-record' : `/players/${r.id}`}>{r.name}</Link>
+      </td>
       <td className={r.profit > 0 ? 'sb-up' : r.profit < 0 ? 'sb-down' : undefined}>{signedMoney(r.profit)}</td>
       <td>{r.roi === null ? '—' : `${(r.roi * 100).toFixed(1)}%`}</td>
       <td>{r.wins}-{r.losses}{r.pushes ? `-${r.pushes}` : ''}</td>

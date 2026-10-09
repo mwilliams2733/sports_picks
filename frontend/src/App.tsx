@@ -11,6 +11,7 @@ import PlayerProps from './pages/PlayerProps';
 import Backtesting from './pages/Backtesting';
 import TrackRecord from './pages/TrackRecord';
 import Leaders from './pages/Leaders';
+import PlayerView from './pages/PlayerView';
 import FAQ from './pages/FAQ';
 import Admin from './pages/Admin';
 
@@ -39,6 +40,7 @@ export default function App() {
                 <Route path="backtesting" element={<Backtesting />} />
                 <Route path="track-record" element={<TrackRecord />} />
                 <Route path="leaders" element={<Leaders />} />
+                <Route path="players/:id" element={<PlayerView />} />
                 <Route path="paper-trading" element={<Navigate to="/bets" replace />} />
                 <Route path="faq" element={<FAQ />} />
                 <Route path="admin" element={<Admin />} />

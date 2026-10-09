@@ -420,3 +420,6 @@
 .sb-bet-head > span:not(.sb-bet-time) { white-space: nowrap; }
 
 .sb-note { color: var(--text-muted); font-size: 0.75rem; margin: 0.4rem 0 0.75rem; }
+.sb-lead-name { color: inherit; font-weight: 600; text-decoration: none; }
+.sb-lead-name:hover, .sb-lead-name:focus-visible { text-decoration: underline; }
+.sb-player h1 { display: flex; align-items: center; }

@@ -283,12 +283,12 @@ const SECTIONS: FAQSection[] = [
       {
         question: 'How do I join?',
         answer:
-          'Go to the Paper Trading page, type your name and choose a 4–6 digit PIN, and click "Join". Names are unique (ignoring capitals). Your PIN is needed for every bet; five wrong tries lock betting for 15 minutes. You start with $10,000.',
+          'Tap the player button in the top bar and choose "+ Join the league", then type your name and choose a 4–6 digit PIN and tap "Join". Names are unique (ignoring capitals). Your PIN is needed for every bet; five wrong tries lock betting for 15 minutes. You start with $10,000.',
       },
       {
         question: 'How do I place a pick?',
         answer:
-          'Click your name on the leaderboard to open your profile. In the "Place a Pick" form, select a game and bet type, pick one of the sides on offer, and set your stake. The price comes from the sportsbooks and is checked again when you place the bet, so it can move slightly -- you cannot edit it. The button shows the bet and its price (for example "Place HOME ML -110"); click it to submit. The stake comes out of your Available balance straight away; the leaderboard balance only changes when the bet settles. Bets close when the game starts.',
+          'Tap any price in the Lobby or on a game page to add it to your bet slip, set your stake, and place it; add more than one selection to make a parlay. The price comes from the sportsbooks and is checked again when you place the bet -- if it has moved, the slip shows the new price before anything is placed. The stake comes out of your Available balance straight away; your settled balance only changes when the bet settles. Bets close when the game starts. Your bets are in My Bets, and tapping anyone’s name on Leaders shows their results and bets.',
       },
       {
         question: 'How does grading work?',
