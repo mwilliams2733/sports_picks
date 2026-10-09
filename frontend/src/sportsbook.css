@@ -418,3 +418,5 @@
    the header wrap between items instead, never inside one. */
 .sb-bet-head { flex-wrap: wrap; row-gap: 0.2rem; }
 .sb-bet-head > span:not(.sb-bet-time) { white-space: nowrap; }
+
+.sb-note { color: var(--text-muted); font-size: 0.75rem; margin: 0.4rem 0 0.75rem; }

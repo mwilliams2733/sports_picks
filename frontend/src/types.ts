@@ -228,6 +228,8 @@ export interface PeriodStats {
   wins: number;
   losses: number;
   pushes: number;
+  /** Settled by cash out: in total, profit and ROI; not in W-L or win rate. */
+  cashed_out: number;
   total: number;
   win_rate: number;
   profit: number;
