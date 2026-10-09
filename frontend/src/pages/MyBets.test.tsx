@@ -86,4 +86,19 @@ describe('MyBets', () => {
     renderPage()
     expect(await screen.findByText(/No open bets/)).toBeInTheDocument()
   })
+
+  it('marks a live ticket and tints its legs', async () => {
+    const liveGame = { id: 9, sport: 'nfl', home_team: 'DAL', away_team: 'TB', start_time: '2026-10-09T00:15:00+00:00',
+      status: 'in_progress', home_score: 21, away_score: 14, live_detail: 'Q3 4:12' }
+    vi.mocked(api.users.bets).mockResolvedValue({
+      summary: { available: 9900, balance: 10000, open_stakes: 100, today_pl: 0 },
+      tickets: [t({ id: 8, legs: [leg({ game: liveGame }),
+        leg({ pick_type: 'prop', pick_value: 'Dak Prescott Over 255.5 Pass Yards', game: liveGame })] })] })
+    renderPage()
+    const card = await screen.findByRole('article', { name: 'Bet #P-8' })
+    expect(card).toHaveTextContent('LIVE')
+    expect(card).toHaveTextContent('TB 14 – DAL 21 · Q3 4:12')
+    expect(card).toHaveTextContent('Winning')                     // TB +9, down 7
+    expect(card.querySelectorAll('.sb-tint')).toHaveLength(1)     // the prop gets none
+  })
 })
