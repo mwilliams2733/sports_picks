@@ -273,3 +273,26 @@
 }
 
 .sb-join { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.4rem; }
+
+/* ─── Win celebration (spec §7) ─────────────────────────────── */
+.sb-win {
+  position: fixed; left: 50%; top: 72px; z-index: 300; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+  min-width: 260px; padding: 1rem 1.5rem; border-radius: var(--radius-lg); overflow: hidden;
+  background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow-lg); cursor: pointer;
+  animation: sb-drop 300ms ease;
+}
+.sb-win strong { position: relative; font-size: 1.25rem; font-weight: 800; letter-spacing: 0.02em; }
+.sb-win small { position: relative; font-weight: 700; }
+.sb-win-big { min-width: 320px; padding: 1.5rem 2rem; }
+.sb-win-big strong { font-size: 1.6rem; }
+.sb-confetti { position: absolute; inset: 0; pointer-events: none; }
+.sb-confetti span {
+  position: absolute; top: -10px; width: 7px; height: 12px; border-radius: 2px; opacity: 0.9;
+  animation: sb-confetti 1.6s ease-in forwards;
+}
+@keyframes sb-confetti { to { transform: translateY(140px) rotate(540deg); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .sb-win { animation: none; }
+  .sb-confetti { display: none; }
+}
