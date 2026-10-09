@@ -204,6 +204,18 @@ def migrate_game_espn_id(engine):
                 conn.execute(text("ALTER TABLE games ADD COLUMN espn_id VARCHAR"))
 
 
+def migrate_game_live_detail(engine):
+    """Add games.live_detail (sportsbook spec §8): ESPN's game clock, written
+    by the live_scores job while a game is under way."""
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "games" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("games")]
+        if "live_detail" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE games ADD COLUMN live_detail VARCHAR"))
+
+
 # The single source of truth for which schema migrations run, and in what
 # order. Every process that opens the database — the FastAPI app AND the
 # standalone pipeline scheduler — calls this instead of listing migrations
@@ -637,6 +649,7 @@ MIGRATIONS = (
     migrate_pick_tracking_only,
     migrate_pick_market_prob_novig,
     migrate_pick_withdrawal,
+    migrate_game_live_detail,
 )
 
 #: Migrations that can destroy data. run_migrations passes each of these an
