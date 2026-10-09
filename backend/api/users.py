@@ -19,7 +19,8 @@ from backend.digest.record import emailed_bets
 import json
 import asyncio
 import logging
-from backend.time_utils import et_today
+from backend.api.picks import _resolve_pick_value
+from backend.time_utils import et_today, game_start_utc
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,25 @@ def _check_expected(leg, quote: pricing.Quote, index: int | None = None) -> None
     if index is not None:
         detail["leg"] = index
     raise HTTPException(status_code=409, detail=detail)
+
+
+#: What a feed leg adds to the bet request for display; everything else in a
+#: feed leg is exactly the request a friend's Tail sends back.
+_FEED_DISPLAY_KEYS = ("label", "game_label", "start_time", "home_team", "away_team", "odds", "quoted_line")
+
+
+def _feed_leg(leg, quote: pricing.Quote, game) -> dict:
+    """A placed leg as the feed carries it (spec §10): the bet request itself,
+    so Tail re-places it at today's price, plus what the feed shows."""
+    home, away = game.home_team.abbreviation, game.away_team.abbreviation
+    start = game_start_utc(game)
+    request = leg.model_dump(exclude={"stake", "expected_odds", "expected_line"})
+    label = quote.pick_value if quote.pick_type == "prop" else _resolve_pick_value(quote.pick_value, home, away)
+    return {**request, "label": label, "game_label": f"{away} @ {home}",
+            "start_time": start.isoformat() if start else None,
+            "home_team": home, "away_team": away, "odds": quote.odds,
+            # Not "line": a prop request already has a line (part of the bet).
+            "quoted_line": quote.line}
 
 
 def balance_of(session, user) -> float:
@@ -528,6 +548,9 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
             "pick_value": quote.pick_value,
             "odds": quote.odds,
             "stake": bet.stake,
+            "bet_id": pick.id,
+            "kind": "straight",
+            "legs": [_feed_leg(bet, quote, game)],
         })
 
         return {
@@ -665,9 +688,9 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
                     detail=f"Betting has closed: game {leg.game_id} has already started")
             quote = _priced(session, game, leg)
             _check_expected(leg, quote, i)
-            quotes.append((leg, quote))
+            quotes.append((leg, quote, game))
 
-        combined_american, combined_decimal = pricing.combine([q.odds for _, q in quotes])
+        combined_american, combined_decimal = pricing.combine([q.odds for _, q, _ in quotes])
 
         # Create parlay record
         parlay = Parlay(
@@ -680,7 +703,7 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
 
         # Create individual legs as PaperPick entries linked to this parlay
         leg_results = []
-        for leg, quote in quotes:
+        for leg, quote, _ in quotes:
             session.add(PaperPick(
                 user_id=user_id,
                 game_id=leg.game_id,
@@ -706,12 +729,15 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
         loop = request.app.state.loop
         user = session.query(UserProfile).get(user_id)
         user_name = user.name if user else "Unknown"
-        legs_str = " + ".join(q.pick_value for _, q in quotes)
+        legs_str = " + ".join(q.pick_value for _, q, _ in quotes)
         _log_feed_event(session, loop, user_id, "pick_placed", {
             "user_name": user_name,
             "message": f"{user_name} placed {len(body.legs)}-leg parlay: {legs_str} — ${body.stake:,.0f} to win ${body.stake * (combined_decimal - 1):,.0f}",
             "parlay": True,
-            "legs": len(body.legs),
+            "leg_count": len(body.legs),
+            "bet_id": parlay.id,
+            "kind": "parlay",
+            "legs": [_feed_leg(leg, q, g) for leg, q, g in quotes],
         })
 
         return {
