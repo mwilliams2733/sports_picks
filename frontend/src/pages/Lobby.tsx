@@ -4,6 +4,7 @@ import ModelPicksStrip from '../components/ModelPicksStrip'
 import { useBoard } from '../hooks/useBoard'
 import { etToday, groupByDay, sportTabs } from '../lib/board'
 import { useSlip } from '../stores/slipStore'
+import FeedTicker from '../components/FeedTicker'
 
 export default function Lobby() {
   const board = useBoard()
@@ -19,6 +20,7 @@ export default function Lobby() {
 
   return (
     <div className="sb-lobby">
+      <FeedTicker />
       {offline && <div role="alert" className="sb-offline">Board offline — prices unavailable</div>}
       {board.isLoading && <p className="sb-empty">Loading the board…</p>}
       {board.isSuccess && games.length === 0 &&

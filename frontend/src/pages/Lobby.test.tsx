@@ -12,7 +12,7 @@ vi.mock('../api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client')>()
   return { ...actual, api: { ...actual.api,
     paper: { board: vi.fn(), quotes: vi.fn(), propQuotes: vi.fn() },
-    users: { ...actual.api.users, list: vi.fn() } } }
+    users: { ...actual.api.users, list: vi.fn(), feed: vi.fn() } } }
 })
 
 const ml = (side: string, odds: number): GameQuote => ({ pick_type: 'moneyline', side, available: true, odds,
@@ -31,6 +31,7 @@ describe('Lobby', () => {
   beforeEach(() => {
     useSlip.setState({ ...SLIP_DEFAULTS })
     vi.mocked(api.users.list).mockResolvedValue([])
+    vi.mocked(api.users.feed).mockResolvedValue([])
     vi.mocked(api.paper.quotes).mockResolvedValue({ game_id: 1, quotes: [] })
   })
 
@@ -71,5 +72,13 @@ describe('Lobby', () => {
       for (const b of screen.getAllByRole('button', { name: /locked/ })) expect(b).toBeDisabled()
     })
     expect(screen.queryByRole('button', { name: /\+130/ })).not.toBeInTheDocument()
+  })
+
+  it('runs a one-line ticker of the latest league activity', async () => {
+    vi.mocked(api.users.feed).mockResolvedValue([{ id: 1, user_id: 2, event_type: 'pick_won',
+      created_at: new Date().toISOString(), payload: { message: 'Sam won TB +9 — +$91.74' } }])
+    vi.mocked(api.paper.board).mockResolvedValue({ games: [] })
+    renderLobby()
+    expect(await screen.findByRole('link', { name: /Sam won TB \+9/ })).toHaveAttribute('href', '/leaders')
   })
 })

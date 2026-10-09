@@ -99,9 +99,19 @@ describe('Layout', () => {
     expect((await screen.findAllByLabelText('2 open'))[0]).toHaveTextContent('2')
   })
 
-  it('lists the Leaderboard under Research until Phase 5 builds /leaders', () => {
+  it('has a Leaders tab, and Research no longer lists the old leaderboard', () => {
     renderAt('/')
+    expect(screen.getAllByRole('link', { name: /Leaders/ })[0]).toHaveAttribute('href', '/leaders')
     fireEvent.click(screen.getAllByRole('button', { name: /Research/ })[0])
-    expect(screen.getByRole('link', { name: 'Leaderboard' })).toHaveAttribute('href', '/paper-trading')
+    expect(screen.queryByRole('link', { name: 'Leaderboard' })).not.toBeInTheDocument()
+  })
+
+  it('sends the old /paper-trading link to My Bets', async () => {
+    const { Navigate } = await import('react-router-dom')
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/paper-trading']}>
+      <Routes><Route path="/paper-trading" element={<Navigate to="/bets" replace />} />
+        <Route path="/bets" element={<p>bets page</p>} /></Routes></MemoryRouter></QueryClientProvider>)
+    expect(screen.getByText('bets page')).toBeInTheDocument()
   })
 })
