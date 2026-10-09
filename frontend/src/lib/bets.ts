@@ -1,6 +1,7 @@
 import type { Ticket, TicketGame, TicketLeg } from '../types'
-import { resolveLabel } from './quotes'
+import { legFromPick, resolveLabel } from './quotes'
 import { etToday, formatDay, formatMoney, startLabel } from './board'
+import { lineFromPick, startInstant } from './slip'
 
 export type SettledFilter = 'all' | 'won' | 'lost'
 export type LegStatus = 'pending' | 'won' | 'lost' | 'push'
@@ -27,6 +28,35 @@ export function legStatus(l: TicketLeg): LegStatus {
   return l.result === 'win' ? 'won' : l.result === 'loss' ? 'lost' : l.result === 'push' ? 'push' : 'pending'
 }
 
+export type LegTint = 'winning' | 'losing' | 'even'
+
+/** Under way: marked in_progress by the live job, or past its kickoff without
+ *  a result (combat sports get no live feed). */
+export function isLive(g: TicketGame, now: Date = new Date()): boolean {
+  if (g.status === 'in_progress') return true
+  return g.status === 'scheduled' && g.start_time !== null && startInstant(g.start_time) <= now.getTime()
+}
+
+/** Winning / Losing / Even for a live game leg from the running score and the
+ *  leg's line; null for props, settled legs and games without a live score. */
+export function legTint(l: TicketLeg): LegTint | null {
+  const g = l.game
+  if (l.result !== null || g.status !== 'in_progress' || g.home_score === null || g.away_score === null) return null
+  const leg = legFromPick(l.pick_type, l.pick_value, g.id)
+  if (!leg || leg.pick_type === 'prop') return null
+  let edge: number
+  if (leg.pick_type === 'over_under') {
+    const line = lineFromPick('over_under', l.pick_value)
+    if (line === null) return null
+    const total = g.home_score + g.away_score
+    edge = leg.side === 'Over' ? total - line : line - total
+  } else {
+    const margin = leg.side === 'HOME' ? g.home_score - g.away_score : g.away_score - g.home_score
+    edge = leg.pick_type === 'spread' ? margin + (lineFromPick('spread', l.pick_value) ?? 0) : margin
+  }
+  return edge > 0 ? 'winning' : edge < 0 ? 'losing' : 'even'
+}
+
 /** A kickoff as "8:15 PM" today (ET), or "Sun Oct 11, 1:00 PM" on another
  *  day -- a ticket can be for a game up to a week out. */
 function kickoffLabel(start: string | null, now: Date): string {
@@ -40,6 +70,12 @@ export function gameLine(g: TicketGame, now: Date = new Date()): string {
   if (g.status === 'final' && g.home_score !== null && g.away_score !== null) {
     return `${g.away_team} ${g.away_score} – ${g.home_team} ${g.home_score} · Final`
   }
+  if (g.status === 'in_progress') {
+    return g.home_score !== null && g.away_score !== null
+      ? `${g.away_team} ${g.away_score} – ${g.home_team} ${g.home_score} · ${g.live_detail ?? 'Live'}`
+      : `${g.away_team} @ ${g.home_team} · Live`
+  }
+  if (isLive(g, now)) return `${g.away_team} @ ${g.home_team} · Live`
   const when = g.status === 'scheduled' ? kickoffLabel(g.start_time, now)
     : g.status.charAt(0).toUpperCase() + g.status.slice(1).replace(/_/g, ' ')
   return `${g.away_team} @ ${g.home_team} · ${when}`
