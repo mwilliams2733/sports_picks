@@ -54,7 +54,7 @@ export default function MyBets() {
           {tab === 'open' ? 'No open bets — tap a price in the Lobby to start.' : 'No settled bets here yet.'}
         </p>
       )}
-      {shown.map(t => <TicketCard key={ticketKey(t)} t={t} />)}
+      {shown.map(t => <TicketCard key={ticketKey(t)} t={t} userId={me.id} />)}
     </div>
   )
 }

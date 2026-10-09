@@ -101,4 +101,25 @@ describe('MyBets', () => {
     expect(card).toHaveTextContent('Winning')                     // TB +9, down 7
     expect(card.querySelectorAll('.sb-tint')).toHaveLength(1)     // the prop gets none
   })
+  it('stamps a cashed-out bet and keeps it out of Won and Lost', async () => {
+    vi.mocked(api.users.bets).mockResolvedValue({
+      summary: { available: 9990.68, balance: 9990.68, open_stakes: 0, today_pl: -9.32 },
+      tickets: [t({ id: 8, result: 'cashed_out', payout: -9.32, cash_out: null })],
+    })
+    renderPage()
+    fireEvent.click(await screen.findByRole('tab', { name: 'Settled' }))
+    const card = await screen.findByRole('article', { name: 'Bet #P-8' })
+    expect(card).toHaveTextContent('CASHED OUT')
+    expect(card).toHaveTextContent('Cashed out −$9.32')
+    fireEvent.click(screen.getByRole('button', { name: 'Won' }))
+    expect(screen.queryByRole('article', { name: 'Bet #P-8' })).toBeNull()
+  })
+  it('offers a cash out on an open ticket', async () => {
+    vi.mocked(api.users.bets).mockResolvedValue({
+      summary: { available: 9900, balance: 10000, open_stakes: 100, today_pl: 0 },
+      tickets: [t({ id: 9, cash_out: { available: true, offer: 90.68 } })],
+    })
+    renderPage()
+    expect(await screen.findByRole('button', { name: 'Cash out $90.68' })).toBeInTheDocument()
+  })
 })

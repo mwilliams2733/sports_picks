@@ -56,6 +56,9 @@ describe('legs', () => {
     expect([null, 'win', 'loss', 'push'].map(r => legStatus(leg({ result: r }))))
       .toEqual(['pending', 'won', 'lost', 'push'])
   })
+  it('shows a cashed-out straight leg as neither won nor lost', () => {
+    expect(legStatus(leg({ result: 'cashed_out' }))).toBe('push')
+  })
   it('shows a final score, the kickoff, or an unusual status (Review Focus 5)', () => {
     expect(gameLine(game({ status: 'final', home_score: 27, away_score: 20 }))).toBe('TB 20 – DAL 27 · Final')
     expect(gameLine(game(), new Date('2026-10-08T22:00:00Z'))).toMatch(/^TB @ DAL · \d{1,2}:\d{2}\s?[AP]M$/)

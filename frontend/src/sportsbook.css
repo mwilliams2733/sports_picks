@@ -394,3 +394,23 @@
   .sb-lead-table td:last-child { white-space: normal; font-size: 0.68rem; color: var(--text-muted); }
   .sb-avatar { width: 1.3rem; height: 1.3rem; margin-right: 0.3rem; font-size: 0.65rem; }
 }
+
+/* Cash out (sportsbook spec §9) */
+.sb-cashout { padding: 0.5rem 0.8rem 0.7rem; display: grid; gap: 0.4rem; }
+.sb-cashout-btn {
+  width: 100%; padding: 0.55rem; border-radius: 0.5rem; border: 1px solid var(--green);
+  background: transparent; color: var(--green); font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.sb-cashout-btn:disabled { border-color: var(--border-subtle); color: var(--text-muted); }
+.sb-cashout-why { color: var(--text-muted); font-size: 0.75rem; }
+.sb-cashout-confirm p { margin: 0; font-size: 0.85rem; }
+.sb-cashout-actions { display: grid; grid-template-columns: 2fr 1fr; gap: 0.5rem; }
+.sb-cashout-keep {
+  padding: 0.55rem; border-radius: 0.5rem; border: 1px solid var(--border-subtle);
+  background: transparent; color: var(--text-primary);
+}
+.sb-cashout-pin { display: grid; gap: 0.2rem; font-size: 0.75rem; color: var(--text-muted); }
+.sb-cashed {
+  padding: 0.05rem 0.4rem; border-radius: 0.25rem; background: var(--yellow); color: #111;
+  font-size: 0.65rem; font-weight: 800; letter-spacing: 0.04em;
+}

@@ -362,9 +362,12 @@ export interface TicketLeg {
   pick_type: string; pick_value: string; odds: number; prop_player: string | null;
   prop_market: string | null; result: string | null; game: TicketGame;
 }
+/** A ticket's cash-out field: null once settled (sportsbook spec §9). */
+export interface CashOutView { available: boolean; offer?: number; reason?: string; message?: string }
 export interface Ticket {
   kind: 'straight' | 'parlay'; id: number; stake: number; odds: number; to_win: number;
   result: string | null; payout: number | null; created_at: string; sgp: boolean; legs: TicketLeg[];
+  cash_out?: CashOutView | null;
 }
 export interface BetsSummary { available: number; balance: number; open_stakes: number; today_pl: number }
 export interface MyBetsData { summary: BetsSummary; tickets: Ticket[] }
