@@ -49,7 +49,8 @@ export default function GameCard({ game, picks, onBet, onHide }: Props) {
       <div className="game-card-header">
         <span className="badge badge-blue">{game.sport.toUpperCase()}</span>
         <span className="game-card-status">
-          {game.status === 'final' ? `Final: ${game.home_score}-${game.away_score}` : game.status}
+          {game.status === 'final' ? `Final: ${game.home_score}-${game.away_score}`
+            : game.status === 'in_progress' ? 'Live' : game.status}
         </span>
         {lockState === 'locked' && (
           <span className="badge badge-yellow" title={lockStateTooltip(lockState)}>LIVE</span>

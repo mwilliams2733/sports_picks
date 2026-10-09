@@ -137,6 +137,12 @@ describe('live games', () => {
     expect(legTint(leg({ pick_type: 'over_under', pick_value: 'Over 49', game: live({ home_score: 28, away_score: 21 }) })))
       .toBe('even')
   })
+  it('treats a game ESPN has called Final as finished, not live (final review)', () => {
+    const done = game({ status: 'in_progress', home_score: 17, away_score: 21, live_detail: 'Final/OT' })
+    expect(isLive(done)).toBe(false)
+    expect(gameLine(done)).toBe('TB 21 – DAL 17 · Final/OT')
+    expect(legTint(leg({ game: done }))).toBeNull()
+  })
   it('never tints a prop, a settled leg, or a game that is not live', () => {
     expect(legTint(leg({ pick_type: 'prop', pick_value: 'Dak Prescott Over 255.5 Pass Yards', game: live() }))).toBeNull()
     expect(legTint(leg({ result: 'win', game: live() }))).toBeNull()

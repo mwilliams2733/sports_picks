@@ -33,7 +33,9 @@ export type LegTint = 'winning' | 'losing' | 'even'
 /** Under way: marked in_progress by the live job, or past its kickoff without
  *  a result (combat sports get no live feed). */
 export function isLive(g: TicketGame, now: Date = new Date()): boolean {
-  if (g.status === 'in_progress') return true
+  // ESPN has called it ("Final", "Final/OT"): finished, waiting on the 08:00
+  // results pass to be graded -- not live.
+  if (g.status === 'in_progress') return !(g.live_detail ?? '').startsWith('Final')
   return g.status === 'scheduled' && g.start_time !== null && startInstant(g.start_time) <= now.getTime()
 }
 
@@ -41,7 +43,8 @@ export function isLive(g: TicketGame, now: Date = new Date()): boolean {
  *  leg's line; null for props, settled legs and games without a live score. */
 export function legTint(l: TicketLeg): LegTint | null {
   const g = l.game
-  if (l.result !== null || g.status !== 'in_progress' || g.home_score === null || g.away_score === null) return null
+  if (l.result !== null || g.status !== 'in_progress' || !isLive(g)
+      || g.home_score === null || g.away_score === null) return null
   const leg = legFromPick(l.pick_type, l.pick_value, g.id)
   if (!leg || leg.pick_type === 'prop') return null
   let edge: number

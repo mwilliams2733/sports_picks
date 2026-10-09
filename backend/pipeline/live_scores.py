@@ -18,6 +18,8 @@ from datetime import datetime, timedelta, timezone
 
 from backend.collectors.espn import ESPNCollector
 from backend.database import get_session
+from sqlalchemy import or_
+
 from backend.models import Game
 from backend.time_utils import ET, game_start_utc
 
@@ -35,7 +37,11 @@ def live_candidates(session, now: datetime) -> list[Game]:
             .filter(Game.sport.in_(LIVE_SPORTS),
                     Game.status.in_(("scheduled", "in_progress")),
                     Game.espn_id.isnot(None), Game.start_time.isnot(None),
-                    Game.date >= first_day)
+                    Game.date >= first_day,
+                    # Once ESPN calls it ("Final", "Final/OT") the score is
+                    # settled; the 08:00 results pass makes it final. Polling
+                    # it all night would only cost requests.
+                    or_(Game.live_detail.is_(None), ~Game.live_detail.like("Final%")))
             .all())
     return [g for g in rows if game_start_utc(g) <= now]
 
@@ -48,20 +54,25 @@ def _is_live(event: dict) -> bool:
     return state == "in" or (state == "post" and event.get("status") == "final")
 
 
-def apply_scoreboard(games: list[Game], events: list[dict]) -> int:
+def apply_scoreboard(session, games: list[Game], events: list[dict]) -> int:
+    """Write each live event onto its game. The write is a conditional UPDATE
+    ("still scheduled or in_progress"), not an attribute set: the results pass
+    may make a row final in another thread while this job waits on ESPN, and
+    the in-memory copy can't know -- a plain write would un-final it."""
     by_id = {str(e.get("espn_id")): e for e in events}
     updated = 0
     for game in games:
         event = by_id.get(str(game.espn_id))
-        if event is None or game.status == "final" or not _is_live(event):
+        if event is None or not _is_live(event):
             continue
-        game.status = "in_progress"
+        values = {"status": "in_progress", "live_detail": event.get("live_detail")}
         if event.get("home_score") is not None:
-            game.home_score = event["home_score"]
+            values["home_score"] = event["home_score"]
         if event.get("away_score") is not None:
-            game.away_score = event["away_score"]
-        game.live_detail = event.get("live_detail")
-        updated += 1
+            values["away_score"] = event["away_score"]
+        updated += (session.query(Game)
+                    .filter(Game.id == game.id, Game.status.in_(("scheduled", "in_progress")))
+                    .update(values, synchronize_session=False))
     return updated
 
 
@@ -83,7 +94,7 @@ async def update_live_scores(session, *, now: datetime | None = None, fetch=None
             except Exception:
                 logger.warning("live_scores: %s scoreboard for %s failed", sport, day, exc_info=True)
                 continue
-            updated += apply_scoreboard(board_games, events)
+            updated += apply_scoreboard(session, board_games, events)
         session.commit()
     finally:
         if collector is not None:

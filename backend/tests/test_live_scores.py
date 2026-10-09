@@ -180,3 +180,35 @@ def test_an_in_progress_game_is_not_open_for_betting():
     """Spec §8 verify item 2."""
     from backend.paper.pricing import open_for_betting
     assert open_for_betting(Game(status="in_progress", start_time=None)) is False
+
+
+def test_a_game_finalised_while_the_job_waits_on_espn_stays_final(session):
+    """Final review: the 08:00 results pass can commit final between the job
+    loading a row and writing it. The write must be conditional, or the job
+    turns a final game back into in_progress (spec: never touch a final row)."""
+    g = _game(session)
+    gid = g.id
+
+    class FinalisedMidFetch(Fetch):
+        async def __call__(self, sport, date_str):
+            other = get_session(session.get_bind())
+            row = other.get(Game, gid)
+            row.status, row.home_score, row.away_score = "final", 24, 21
+            other.commit()
+            other.close()
+            return [_event(home=17, away=14)]
+
+    _run(session, FinalisedMidFetch())
+    session.expire_all()
+    g = session.get(Game, gid)
+    assert (g.status, g.home_score, g.away_score) == ("final", 24, 21)
+
+
+def test_a_game_espn_has_called_final_is_not_polled_all_night(session):
+    """Final review: finals land at the 08:00 scout, so a finished game sits
+    in_progress overnight. Once ESPN's clock says Final, stop polling it."""
+    _game(session, status="in_progress").live_detail = "Final/OT"
+    session.commit()
+    fetch = Fetch({"nfl": [_event()]})
+    assert _run(session, fetch) == 0
+    assert fetch.calls == []
