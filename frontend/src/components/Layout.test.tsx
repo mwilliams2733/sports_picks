@@ -11,7 +11,7 @@ import type { UserProfile } from '../types'
 vi.mock('../hooks/useWebSocket', () => ({ useWebSocket: () => {} }))
 vi.mock('../api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client')>()
-  return { ...actual, api: { ...actual.api, users: { ...actual.api.users, list: vi.fn(), create: vi.fn() } } }
+  return { ...actual, api: { ...actual.api, users: { ...actual.api.users, list: vi.fn(), create: vi.fn(), bets: vi.fn() } } }
 })
 
 const u = (id: number, name: string, available_balance: number) =>
@@ -30,6 +30,8 @@ describe('Layout', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(api.users.list).mockResolvedValue([u(1, 'Marcus', 10240.5), u(2, 'Sam', 9800)])
+    vi.mocked(api.users.bets).mockResolvedValue({
+      summary: { available: 10240.5, balance: 10240.5, open_stakes: 0, today_pl: 0 }, tickets: [] })
     useUserStore.getState().setCurrentUserName('Marcus')
   })
 
@@ -37,7 +39,7 @@ describe('Layout', () => {
     renderAt('/')
     expect(screen.getByText('lobby page')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: /Lobby/ })[0]).toHaveAttribute('href', '/')
-    expect(screen.getAllByRole('link', { name: /My Bets/ })[0]).toHaveAttribute('href', '/paper-trading')
+    expect(screen.getAllByRole('link', { name: /My Bets/ })[0]).toHaveAttribute('href', '/bets')
     expect(screen.getByRole('link', { name: /METRIC EDGE/ })).toBeInTheDocument()
   })
 
@@ -85,5 +87,21 @@ describe('Layout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
     expect(screen.getByRole('alert')).toHaveTextContent('PIN must be 4–6 digits.')
     expect(api.users.create).not.toHaveBeenCalled()
+  })
+
+  it("badges My Bets with the player's open count", async () => {
+    const open = { kind: 'straight' as const, id: 1, stake: 10, odds: -110, to_win: 9.09, result: null, payout: null,
+      created_at: '2026-10-08T22:00:00+00:00', sgp: false, legs: [] }
+    vi.mocked(api.users.bets).mockResolvedValue({
+      summary: { available: 1, balance: 1, open_stakes: 20, today_pl: 0 },
+      tickets: [open, { ...open, id: 2 }, { ...open, id: 3, result: 'win', payout: 9.09 }] })
+    renderAt('/')
+    expect((await screen.findAllByLabelText('2 open'))[0]).toHaveTextContent('2')
+  })
+
+  it('lists the Leaderboard under Research until Phase 5 builds /leaders', () => {
+    renderAt('/')
+    fireEvent.click(screen.getAllByRole('button', { name: /Research/ })[0])
+    expect(screen.getByRole('link', { name: 'Leaderboard' })).toHaveAttribute('href', '/paper-trading')
   })
 })

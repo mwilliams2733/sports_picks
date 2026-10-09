@@ -6,6 +6,7 @@ import Layout from './components/Layout';
 import TodaysPicks from './pages/TodaysPicks';
 import Lobby from './pages/Lobby';
 import GameDetail from './pages/GameDetail';
+import MyBets from './pages/MyBets';
 import PlayerProps from './pages/PlayerProps';
 import Backtesting from './pages/Backtesting';
 import TrackRecord from './pages/TrackRecord';
@@ -32,6 +33,7 @@ export default function App() {
               <Route path="/" element={<Layout />}>
                 <Route index element={<Lobby />} />
                 <Route path="game/:id" element={<GameDetail />} />
+                <Route path="bets" element={<MyBets />} />
                 <Route path="model-picks" element={<TodaysPicks />} />
                 <Route path="props" element={<PlayerProps />} />
                 <Route path="backtesting" element={<Backtesting />} />

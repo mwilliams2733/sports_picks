@@ -5,6 +5,10 @@ import { useWebSocket } from '../hooks/useWebSocket'
 import MainTabs from './MainTabs'
 import PlayerChip from './PlayerChip'
 import BetSlip from './BetSlip'
+import Celebrations from './Celebrations'
+import { useCurrentPlayer } from '../hooks/useCurrentPlayer'
+import { useMyBets } from '../hooks/useMyBets'
+import { splitTickets } from '../lib/bets'
 import { useSlip } from '../stores/slipStore'
 import ResearchMenu from './ResearchMenu'
 import { RESEARCH_LINKS } from '../lib/nav'
@@ -18,13 +22,16 @@ export default function Layout() {
   const onResearch = RESEARCH_LINKS.some(([path]) => pathname.startsWith(path))
   const toggle = () => setResearchOpen(o => !o)
   const slipVisible = useSlip(s => s.legs.length > 0 || s.receipt !== null)
+  const me = useCurrentPlayer()
+  const myBets = useMyBets(me?.id)
+  const openCount = splitTickets(myBets.data?.tickets ?? []).open.length
   useWebSocket()
 
   return (
     <>
       <header className="sb-topbar">
         <Link to="/" className="sb-wordmark" aria-label="METRIC EDGE home">METRIC <span>EDGE</span></Link>
-        <MainTabs className="sb-topnav" researchActive={onResearch} onResearch={toggle} />
+        <MainTabs className="sb-topnav" researchActive={onResearch} onResearch={toggle} openCount={openCount} />
         <PlayerChip />
       </header>
       {onResearch && (
@@ -39,7 +46,8 @@ export default function Layout() {
       <ResearchMenu open={researchOpen} onClose={() => setResearchOpen(false)} />
       <main className={`main-content${slipVisible ? ' with-slip' : ''}`}><Outlet /></main>
       <BetSlip />
-      <MainTabs className="sb-tabbar" researchActive={onResearch} onResearch={toggle} />
+      <Celebrations />
+      <MainTabs className="sb-tabbar" researchActive={onResearch} onResearch={toggle} openCount={openCount} />
     </>
   )
 }

@@ -351,3 +351,18 @@ export interface ReceiptBet {
 }
 
 export interface Receipt { bets: ReceiptBet[]; legs: SlipLeg[]; placedAt: string }
+
+export interface TicketGame {
+  id: number; sport: string; home_team: string; away_team: string; start_time: string | null;
+  status: string; home_score: number | null; away_score: number | null; live_detail: string | null;
+}
+export interface TicketLeg {
+  pick_type: string; pick_value: string; odds: number; prop_player: string | null;
+  prop_market: string | null; result: string | null; game: TicketGame;
+}
+export interface Ticket {
+  kind: 'straight' | 'parlay'; id: number; stake: number; odds: number; to_win: number;
+  result: string | null; payout: number | null; created_at: string; sgp: boolean; legs: TicketLeg[];
+}
+export interface BetsSummary { available: number; balance: number; open_stakes: number; today_pl: number }
+export interface MyBetsData { summary: BetsSummary; tickets: Ticket[] }

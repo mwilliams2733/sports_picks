@@ -1,4 +1,4 @@
-import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult, CalibrationData, LeaderboardRow, EmailedGroups, EmailedTrend, GameQuote, PropQuote, PlacedPick, BoardGame, BetRequest } from '../types';
+import type { PickData, RecordData, DailyData, StrategyData, CompareData, PropData, BacktestResult, GameOddsData, AutoTuneResult, UserProfile, PaperPickData, UserStats, RunAllResult, CalibrationData, LeaderboardRow, EmailedGroups, EmailedTrend, GameQuote, PropQuote, PlacedPick, BoardGame, BetRequest, MyBetsData } from '../types';
 import { getOwnerKey } from '../lib/secrets';
 
 const BASE = '';
@@ -134,6 +134,7 @@ export const api = {
     create: (name: string, pin: string) => post<{ id: number; name: string }>('/users/', { name, pin }),
     get: (id: number) => get<UserProfile>(`/users/${id}`),
     picks: (id: number) => get<PaperPickData[]>(`/users/${id}/picks`),
+    bets: (id: number) => get<MyBetsData>(`/users/${id}/bets`),
     placePick: (userId: number, data: BetRequest & { stake: number }, pin: string) =>
       post<PlacedPick>(`/users/${userId}/picks`, data, { 'X-Player-Pin': pin }),
     grade: () => post<{ graded: number }>('/users/grade', {}),

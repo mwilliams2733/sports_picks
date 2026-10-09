@@ -23,8 +23,7 @@ const ml = (game_id: number, label: string, over: Partial<SlipLeg> = {}): SlipLe
 const placed = (id: number, odds = -110) =>
   ({ id, result: null, payout: null, new_balance: 900, pick_value: 'HOME ML', odds, line: null, quoted_at: 'x' })
 
-function renderSlip() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+function renderSlip(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(<QueryClientProvider client={client}><BetSlip /></QueryClientProvider>)
 }
 
@@ -140,6 +139,7 @@ describe('BetSlip', () => {
     expect(screen.getByText('Betting closed')).toBeInTheDocument()
     fireEvent.click(await enabledButton('Place Bets'))
     await screen.findByText('#P-12')
+    expect(screen.queryByText(/couldn't be placed/)).not.toBeInTheDocument()   // never attempted
     expect(api.users.placePick).toHaveBeenCalledTimes(1)
     expect(vi.mocked(api.users.placePick).mock.calls[0][1]).toMatchObject({ game_id: 2 })
   })
@@ -152,5 +152,17 @@ describe('BetSlip', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Keep picks' }))
     expect(useSlip.getState().legs.map(l => l.label)).toEqual(['H1 ML'])
     expect(useSlip.getState().receipt).toBeNull()
+  })
+
+  it('refreshes board prices after a placement attempt, so a moved price shows on its tile', async () => {
+    useSlip.setState({ legs: [ml(1, 'H1 ML')] })
+    vi.mocked(api.users.placePick).mockRejectedValueOnce(new ApiError(409, { detail: { reason: 'price_moved',
+      message: 'm', odds: -125, line: null, pick_value: 'HOME ML' } }))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const spy = vi.spyOn(client, 'invalidateQueries')
+    renderSlip(client)
+    fireEvent.click(await enabledButton('Place Bet'))
+    await screen.findByText(/Odds changed/)
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['paper'] })
   })
 })

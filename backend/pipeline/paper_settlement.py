@@ -109,6 +109,15 @@ def _push_ungradeable(session, today: date) -> list[PaperPick]:
     return rows
 
 
+def parlay_win_payout(stake: float, leg_odds: list[int]) -> float:
+    """What a winning parlay pays: the product of its legs' win multipliers.
+    Settlement and My Bets' "to win" both call this, so they cannot differ."""
+    decimal = 1.0
+    for odds in leg_odds:
+        decimal *= 1 + payout_for("win", odds)
+    return stake * (decimal - 1)
+
+
 def settle_parlays(session) -> int:
     settled = 0
     for parlay in session.query(Parlay).filter(Parlay.result.is_(None)).all():
@@ -121,10 +130,7 @@ def settle_parlays(session) -> int:
         elif "push" in results:
             parlay.result, parlay.payout = "push", 0.0
         else:
-            decimal = 1.0
-            for leg in legs:
-                decimal *= 1 + payout_for("win", leg.odds)
-            parlay.result, parlay.payout = "win", parlay.stake * (decimal - 1)
+            parlay.result, parlay.payout = "win", parlay_win_payout(parlay.stake, [leg.odds for leg in legs])
         settled += 1
     session.commit()
     return settled
