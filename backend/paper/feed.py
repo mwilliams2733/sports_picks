@@ -95,7 +95,7 @@ def _announced(session, bet_key: str) -> bool:
             .first()) is not None
 
 
-def _straight_label(session, pick: PaperPick) -> str:
+def straight_label(session, pick: PaperPick) -> str:
     if pick.pick_type == "prop":
         return pick.pick_value
     from backend.api.picks import _resolve_pick_value
@@ -137,7 +137,7 @@ def announce_settlements(session, loop, graded: list[PaperPick], parlays: list[P
 
     for pick in graded:
         if pick.parlay_id is None:
-            announce(pick.user_id, "straight", pick.id, pick.result, pick.payout, _straight_label(session, pick))
+            announce(pick.user_id, "straight", pick.id, pick.result, pick.payout, straight_label(session, pick))
     for parlay in parlays:
         legs = session.query(PaperPick).filter(PaperPick.parlay_id == parlay.id).count()
         announce(parlay.user_id, "parlay", parlay.id, parlay.result, parlay.payout, f"a {legs}-leg parlay")

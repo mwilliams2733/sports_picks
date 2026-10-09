@@ -3,7 +3,8 @@
 One ticket per straight bet and one per parlay -- never a parlay's legs as
 separate bets -- each carrying its legs' games, newest first. Read-only: the
 "to win" figure is settlement's own formula, so a ticket promises exactly
-what grading will pay.
+what grading will pay. Each open ticket carries its cash-out offer from
+`cashout.offer_view`, the function the endpoint pays from.
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import aliased
 
 from backend.models import Game, PaperPick, Parlay, Team
+from backend.paper.cashout import offer_view
 from backend.pipeline.grader import payout_for
 from backend.pipeline.paper_settlement import parlay_win_payout
 from backend.time_utils import as_utc, game_start_utc
@@ -34,6 +36,7 @@ def _leg(pick, game, home, away) -> dict:
 
 
 def tickets(session, user_id: int) -> list[dict]:
+    now = datetime.now(timezone.utc)
     Home, Away = aliased(Team), aliased(Team)
     rows = (session.query(PaperPick, Game, Home, Away)
             .join(Game, Game.id == PaperPick.game_id)
@@ -54,7 +57,7 @@ def tickets(session, user_id: int) -> list[dict]:
             "kind": "straight", "id": pick.id, "stake": pick.stake, "odds": pick.odds,
             "to_win": round(pick.stake * payout_for("win", pick.odds), 2),
             "result": pick.result, "payout": pick.payout, "created_at": placed.isoformat(),
-            "sgp": False, "legs": [leg]}))
+            "sgp": False, "legs": [leg], "cash_out": offer_view(session, "straight", pick, now)}))
     for parlay in session.query(Parlay).filter(Parlay.user_id == user_id).all():
         legs = sorted(parlay_legs.get(parlay.id, []), key=lambda x: (x[0], x[1].id))
         placed = as_utc(parlay.created_at)
@@ -63,6 +66,6 @@ def tickets(session, user_id: int) -> list[dict]:
             "to_win": round(parlay_win_payout(parlay.stake, [p.odds for _, p, _ in legs]), 2),
             "result": parlay.result, "payout": parlay.payout, "created_at": placed.isoformat(),
             "sgp": len({p.game_id for _, p, _ in legs}) < len(legs),
-            "legs": [leg for _, _, leg in legs]}))
+            "legs": [leg for _, _, leg in legs], "cash_out": offer_view(session, "parlay", parlay, now)}))
     out.sort(key=lambda x: (x[0], x[1]), reverse=True)
     return [t for _, _, t in out]

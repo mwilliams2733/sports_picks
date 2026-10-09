@@ -147,3 +147,40 @@ def offer_view(session, kind: str, row, now: datetime | None = None) -> dict | N
     except CashOutUnavailable as e:
         return {"available": False, "reason": e.reason, "message": e.message}
     return {"available": True, "offer": o.amount}
+
+
+class OfferChanged(Exception):
+    """The offer now is below the one the player confirmed."""
+
+    def __init__(self, new_offer: float):
+        self.offer = new_offer
+        super().__init__(f"The offer changed to ${new_offer:,.2f}.")
+
+
+def cash_out(session, loop, user, kind: str, row, expected_offer: float) -> Offer:
+    """Settle ``row`` as cashed out at the current offer, and announce it.
+
+    The caller holds the bankroll lock (users.hold_bankroll) before loading
+    ``row``, so a second request for the same bet waits, then finds it
+    settled. An offer below ``expected_offer`` is refused; one above it is
+    paid -- the player never gets less than they saw without being asked.
+    """
+    from backend.paper.feed import log_feed_event, straight_label   # feed imports api helpers lazily too
+    o = offer(session, kind, row)
+    if o.amount < expected_offer:
+        raise OfferChanged(o.amount)
+    row.result = "cashed_out"
+    row.payout = round(o.amount - row.stake, 2)
+    if kind == "straight":
+        row.graded_at = datetime.now(timezone.utc)
+        what = straight_label(session, row)
+    else:
+        legs = session.query(PaperPick).filter(PaperPick.parlay_id == row.id).count()
+        what = f"a {legs}-leg parlay"
+    session.commit()
+    log_feed_event(session, loop, user.id, "cashed_out", {
+        "user_name": user.name, "message": f"{user.name} cashed out {what} for ${o.amount:,.2f}",
+        "bet_key": f"{kind}-{row.id}", "bet_id": row.id, "kind": kind,
+        "result": "cashed_out", "payout": row.payout, "offer": o.amount,
+    })
+    return o

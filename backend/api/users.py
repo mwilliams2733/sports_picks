@@ -8,6 +8,7 @@ from backend.api.pins import PIN_PATTERN, guard as pin_guard, hash_pin, require_
 from backend.database import get_session
 from backend.models import UserProfile, PaperPick, Game, ActivityFeed, Parlay
 from backend.paper import bets as bets_mod
+from backend.paper import cashout
 from backend.paper import pricing
 from backend.paper.feed import log_feed_event as _log_feed_event, settle_and_announce
 from backend.paper.pricing import PricingError
@@ -113,6 +114,14 @@ class PlacePickRequest(RootModel[Annotated[Union[GameBetRequest, PropBetRequest]
 class PlaceParlayRequest(_Strict):
     legs: list[Leg]
     stake: float = Field(allow_inf_nan=False)
+
+
+class CashOutRequest(_Strict):
+    bet_id: int
+    kind: Literal["straight", "parlay"]
+    # The offer the player confirmed: a lower offer now is refused (409
+    # offer_changed) rather than paid.
+    expected_offer: float = Field(gt=0, allow_inf_nan=False)
 
 
 def _priced(session, game, leg) -> pricing.Quote:
@@ -722,6 +731,38 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
             "payout": parlay_payout,
             "new_balance": round(available - body.stake, 2),
         }
+    finally:
+        session.close()
+
+
+@router.post("/{user_id}/cashout", dependencies=[Depends(require_player_pin)])
+def cash_out(request: Request, user_id: int, body: CashOutRequest):
+    """Cash out an open bet before kickoff (sportsbook spec §9)."""
+    session = get_session(request.app.state.engine)
+    try:
+        user = session.get(UserProfile, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        # The lock before the read: a double tap's second request waits,
+        # then finds the bet settled.
+        hold_bankroll(session, user_id)
+        if body.kind == "straight":
+            row = session.get(PaperPick, body.bet_id)
+            if row is not None and row.parlay_id is not None:
+                row = None                     # a parlay's leg is not a bet of its own
+        else:
+            row = session.get(Parlay, body.bet_id)
+        if row is None or row.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Bet not found")
+        try:
+            o = cashout.cash_out(session, request.app.state.loop, user, body.kind, row, body.expected_offer)
+        except cashout.CashOutUnavailable as e:
+            raise HTTPException(status_code=409, detail={"reason": e.reason, "message": e.message}) from None
+        except cashout.OfferChanged as e:
+            raise HTTPException(status_code=409, detail={
+                "reason": "offer_changed", "offer": e.offer, "message": str(e)}) from None
+        return {"bet_id": row.id, "kind": body.kind, "offer": o.amount, "payout": row.payout,
+                "available": round(available_of(session, user), 2)}
     finally:
         session.close()
 
