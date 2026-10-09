@@ -220,3 +220,68 @@ def test_feed_times_are_utc_and_placed_messages_name_the_side():
     messages = [e["payload"]["message"] for e in feed if e["event_type"] == "pick_placed"]
     assert "sam bet A0 +3.5 -110 — $50" in messages
     assert any(m.startswith("sam placed 2-leg parlay: H0 ML + Over 220.5") for m in messages)
+
+
+def test_a_winning_parlay_is_one_step_of_a_streak_not_one_per_leg():
+    """Final review: update_streaks counted parlay legs, so one 3-leg parlay
+    posted a 3-pick streak. Streaks follow straight bets, like Leaders."""
+    client = _client()
+    g1, g2, g3 = _games(client, 3)
+    uid = _user(client, "sam")
+    client.post(f"/users/{uid}/parlay", json={"legs": [
+        {"game_id": g, "pick_type": "moneyline", "side": "HOME"} for g in (g1, g2, g3)], "stake": 10})
+    for g in (g1, g2, g3):
+        _finish(client, g, 24, 17)
+    _settle(client)
+    from backend.models import UserProfile
+    s = get_session(client.app.state.engine)
+    assert s.get(UserProfile, uid).current_streak == 0
+    s.close()
+    assert _events(client, "streak") == []
+
+
+def test_a_streak_is_announced_when_it_grows_not_on_every_grading_run():
+    client = _client()
+    games = _games(client, 4)
+    uid = _user(client, "sam")
+    for g in games:
+        client.post(f"/users/{uid}/picks", json={"game_id": g, "pick_type": "moneyline", "side": "HOME", "stake": 10})
+    for g in games[:3]:
+        _finish(client, g, 24, 17)
+    _settle(client)
+    assert len(_events(client, "streak")) == 1           # 3 in a row
+    _finish(client, games[3], 20, 20)                    # a push: streak unchanged
+    _settle(client)
+    assert len(_events(client, "streak")) == 1
+
+
+def test_two_graders_racing_cannot_announce_a_bet_twice(monkeypatch):
+    """Final review: the dedupe was check-then-insert, so the scheduler and
+    the owner's Grade could both pass the check. The database now refuses
+    the second row; the loser skips it quietly."""
+    from backend.models import PaperPick
+    client = _client()
+    (g,) = _games(client, 1)
+    uid = _user(client, "sam")
+    client.post(f"/users/{uid}/picks", json={"game_id": g, "pick_type": "moneyline", "side": "HOME", "stake": 10})
+    _finish(client, g, 24, 17)
+    _settle(client)
+    monkeypatch.setattr(feed_mod, "_announced", lambda session, key: False)   # the other process's view
+    s = get_session(client.app.state.engine)
+    pick = s.query(PaperPick).one()
+    assert feed_mod.announce_settlements(s, None, [pick], []) == 0
+    s.close()
+    assert len(_events(client, "pick_won")) == 1
+
+
+def test_the_bet_key_index_reaches_an_existing_database(tmp_path):
+    from sqlalchemy import create_engine, text
+    from backend.database import run_migrations
+    eng = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    with eng.begin() as c:
+        c.execute(text("CREATE TABLE activity_feed (id INTEGER PRIMARY KEY, user_id INTEGER, "
+                       "event_type VARCHAR NOT NULL, payload TEXT NOT NULL, created_at DATETIME NOT NULL)"))
+    run_migrations(eng)
+    with eng.connect() as c:     # the inspector hides expression indexes
+        names = {n for (n,) in c.execute(text("SELECT name FROM sqlite_master WHERE type = 'index'"))}
+    assert "uq_activity_feed_bet_key" in names

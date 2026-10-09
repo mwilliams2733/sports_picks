@@ -598,6 +598,28 @@ def migrate_combat_sports_strategy(engine):
         ))
 
 
+#: One settlement announcement per bet, enforced by the database: the
+#: scheduler and the owner's Grade run in different processes, and a
+#: check-then-insert alone lets both through.
+FEED_BET_KEY_INDEX = "uq_activity_feed_bet_key"
+
+
+def migrate_activity_feed_bet_key(engine):
+    """Unique index on activity_feed's $.bet_key (sportsbook phase 5).
+
+    Runs after ``create_all`` so a brand-new database has the table first.
+    Only settlement events carry a bet_key; the partial index ignores the rest.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+    if "activity_feed" not in sa_inspect(engine).get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(text(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS {FEED_BET_KEY_INDEX} "
+            "ON activity_feed (json_extract(payload, '$.bet_key')) "
+            "WHERE json_extract(payload, '$.bet_key') IS NOT NULL"))
+
+
 def migrate_weather_strategy(engine):
     """Ensure the ``weather_rain_under`` row exists in ``strategies``.
 
@@ -691,3 +713,4 @@ def run_migrations(engine, *, allow_destructive: bool | None = None) -> None:
     Base.metadata.create_all(engine)
     migrate_combat_sports_strategy(engine)
     migrate_weather_strategy(engine)
+    migrate_activity_feed_bet_key(engine)

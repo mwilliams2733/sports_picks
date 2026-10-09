@@ -12,6 +12,7 @@ import json
 import logging
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from backend.models import ActivityFeed, Game, PaperPick, Parlay, Team, UserProfile
 from backend.pipeline import paper_settlement
@@ -38,9 +39,13 @@ def log_feed_event(session, loop, user_id: int | None, event_type: str, payload:
 
 
 def update_streaks(session, loop, user_id: int) -> None:
-    """Recompute a player's streak from their graded picks, newest first."""
+    """Recompute a player's streak from their graded straight bets, newest first.
+
+    Parlay legs are left out: one 3-leg parlay is not a 3-pick streak, and
+    Leaders ranks straight bets only."""
     picks = (session.query(PaperPick)
-             .filter(PaperPick.user_id == user_id, PaperPick.result.isnot(None))
+             .filter(PaperPick.user_id == user_id, PaperPick.result.isnot(None),
+                     PaperPick.parlay_id.is_(None))
              .order_by(PaperPick.created_at.desc())
              .all())
     if not picks:
@@ -59,11 +64,14 @@ def update_streaks(session, loop, user_id: int) -> None:
     user = session.get(UserProfile, user_id)
     if not user:
         return
+    new_type = "win" if current == "win" else "loss" if current == "loss" else "none"
+    # Announce only when the streak grows, not on every grading run.
+    grew = streak > ((user.current_streak or 0) if user.streak_type == new_type else 0)
     user.current_streak = streak
-    user.streak_type = "win" if current == "win" else "loss" if current == "loss" else "none"
+    user.streak_type = new_type
     if current == "win" and streak > (user.best_streak or 0):
         user.best_streak = streak
-    if streak >= 3:
+    if streak >= 3 and grew:
         log_feed_event(session, loop, user_id, "streak", {
             "user_name": user.name,
             "message": f"{user.name} is on a {streak}-pick {'win' if current == 'win' else 'loss'} streak!",
@@ -116,10 +124,15 @@ def announce_settlements(session, loop, graded: list[PaperPick], parlays: list[P
         if _announced(session, key):
             return
         event_type, verb = SETTLED[result]
-        log_feed_event(session, loop, uid, event_type, {
-            "user_name": name(uid), "message": f"{name(uid)} {verb} {what} — {_money(payout or 0.0)}",
-            "bet_key": key, "bet_id": bet_id, "kind": kind, "result": result, "payout": payout,
-        })
+        try:
+            log_feed_event(session, loop, uid, event_type, {
+                "user_name": name(uid), "message": f"{name(uid)} {verb} {what} — {_money(payout or 0.0)}",
+                "bet_key": key, "bet_id": bet_id, "kind": kind, "result": result, "payout": payout,
+            })
+        except IntegrityError:
+            # Another grader announced it between our check and our insert.
+            session.rollback()
+            return
         written += 1
 
     for pick in graded:
