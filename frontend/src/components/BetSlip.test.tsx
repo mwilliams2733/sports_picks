@@ -132,6 +132,24 @@ describe('BetSlip', () => {
     expect(screen.getByRole('button', { name: 'Place Bet' })).toBeDisabled()
   })
 
+  it("never shows or sends a tailed leg the server refused at the friend's old price", async () => {
+    useSlip.setState({ legs: [ml(1, 'H1 ML'),
+      ml(2, 'TB +9', { odds: 1141, locked: true, error: 'No book is quoting this bet right now.' })] })
+    vi.mocked(api.users.placePick).mockResolvedValueOnce(placed(11))
+    renderSlip()
+    expect(screen.queryByText('+1141')).toBeNull()
+    expect(screen.queryByLabelText('Stake for TB +9')).toBeNull()
+    fireEvent.click(await enabledButton('Place Bets'))
+    await screen.findByText('#P-11')
+    expect(api.users.placePick).toHaveBeenCalledTimes(1)
+  })
+
+  it('will not place a parlay holding a locked leg', async () => {
+    useSlip.setState({ mode: 'parlay', legs: [ml(1, 'H1 ML'), ml(2, 'TB +9', { locked: true, error: 'x' })] })
+    renderSlip()
+    expect(await screen.findByText('Remove the closed or locked legs to place this parlay.')).toBeInTheDocument()
+  })
+
   it('skips a leg whose game has started (Review Focus 3)', async () => {
     useSlip.setState({ legs: [ml(1, 'H1 ML', { startTime: '2000-01-01T00:00:00Z' }), ml(2, 'H2 ML')] })
     vi.mocked(api.users.placePick).mockResolvedValueOnce(placed(12))

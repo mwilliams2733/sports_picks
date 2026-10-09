@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom'
 const TABS = [
   { path: '/', label: 'Lobby', icon: '🏟️' },
   { path: '/bets', label: 'My Bets', icon: '🎟️' },
+  { path: '/leaders', label: 'Leaders', icon: '🏆' },
 ]
 
 export default function MainTabs({ className, researchActive, onResearch, openCount = 0 }: {

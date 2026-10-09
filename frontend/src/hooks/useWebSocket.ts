@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useFeedStore } from '../stores/feedStore'
 import type { FeedEvent } from '../stores/feedStore'
 
@@ -14,6 +15,7 @@ export function useWebSocket() {
   const heartbeatTimer = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
   const heartbeatTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const addEvent = useFeedStore((s) => s.addEvent)
+  const queryClient = useQueryClient()
   const setWsConnected = useFeedStore((s) => s.setWsConnected)
   const connectRef = useRef<() => void>(() => {})
 
@@ -58,7 +60,7 @@ export function useWebSocket() {
         const msg = JSON.parse(event.data)
         if (msg.type === 'pong') return
 
-        if (['pick_placed', 'pick_won', 'pick_lost', 'streak', 'feed_event'].includes(msg.type)) {
+        if (['pick_placed', 'pick_won', 'pick_lost', 'pick_pushed', 'streak', 'feed_event'].includes(msg.type)) {
           const feedEvent: FeedEvent = {
             id: crypto.randomUUID(),
             type: msg.data?.event_type || msg.type,
@@ -67,6 +69,9 @@ export function useWebSocket() {
             timestamp: msg.data?.timestamp || new Date().toISOString(),
           }
           addEvent(feedEvent)
+          // A feed event can mean money moved (a settlement) as well as a new
+          // feed line: refresh the feed, balances, My Bets and the board.
+          queryClient.invalidateQueries({ queryKey: ['users'] })
         }
       } catch (err) {
         console.error('WebSocket received malformed message:', event.data, err)
@@ -92,7 +97,7 @@ export function useWebSocket() {
     }
 
     wsRef.current = ws
-  }, [addEvent, setWsConnected, startHeartbeat, stopHeartbeat])
+  }, [addEvent, queryClient, setWsConnected, startHeartbeat, stopHeartbeat])
 
   useEffect(() => {
     connectRef.current = connect

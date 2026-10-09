@@ -360,3 +360,37 @@
 .sb-tint-losing { background: var(--red-dim); color: var(--red); }
 .sb-tint-even { background: var(--yellow-dim); color: var(--yellow); }
 @media (prefers-reduced-motion: reduce) { .sb-live { animation: none; } }
+
+/* ─── Leaders and feed (spec §10) ───────────────────────────── */
+.sb-leaders { max-width: 760px; margin: 0 auto; padding: 0.75rem; }
+.sb-page-title { font-size: 1.15rem; font-weight: 800; margin: 0.25rem 0 0.75rem; }
+.sb-lead-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+.sb-lead-table th { text-align: left; color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase;
+  letter-spacing: 0.05em; padding: 0.3rem 0.4rem; }
+.sb-lead-table td { padding: 0.5rem 0.4rem; border-top: 1px solid var(--border-subtle); white-space: nowrap; }
+.sb-lead-rank { font-weight: 800; color: var(--text-muted); width: 2rem; }
+.sb-lead-model td { color: var(--text-secondary); font-style: italic; }
+.sb-lead-pinned { position: sticky; bottom: 76px; background: var(--bg-active); border-radius: var(--radius-md); }
+.sb-avatar { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; margin-right: 0.45rem;
+  border-radius: 50%; background: var(--bg-elevated); border: 1px solid var(--border-strong); font-weight: 800; font-size: 0.75rem; }
+.sb-feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.sb-feed-item { display: flex; align-items: center; gap: 0.55rem; padding: 0.55rem 0.2rem; border-top: 1px solid var(--border-subtle); }
+.sb-feed-msg { flex: 1; min-width: 0; font-size: 0.85rem; }
+.sb-feed-time { color: var(--text-muted); font-size: 0.75rem; }
+.sb-tail { min-height: 30px; padding: 0.2rem 0.7rem; border-radius: 999px; border: 1px solid var(--accent);
+  background: none; color: var(--accent); font: inherit; font-size: 0.75rem; font-weight: 800; cursor: pointer; }
+.sb-tail:disabled { opacity: 0.5; cursor: wait; }
+@media (min-width: 900px) { .sb-lead-pinned { bottom: 0.5rem; } }
+
+.sb-ticker { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; padding: 0.45rem 0.7rem;
+  border-radius: var(--radius-md); background: var(--bg-surface); border: 1px solid var(--border-default);
+  color: var(--text-secondary); text-decoration: none; font-size: 0.8rem; min-height: 0; }
+.sb-ticker-tag { color: var(--accent); font-weight: 800; font-size: 0.65rem; letter-spacing: 0.06em; }
+.sb-ticker-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Phone: keep the board inside the screen (it overflowed at 390px). */
+@media (max-width: 899px) {
+  .sb-lead-table { font-size: 0.78rem; }
+  .sb-lead-table th, .sb-lead-table td { padding: 0.45rem 0.2rem; }
+  .sb-lead-table td:last-child { white-space: normal; font-size: 0.68rem; color: var(--text-muted); }
+  .sb-avatar { width: 1.3rem; height: 1.3rem; margin-right: 0.3rem; font-size: 0.65rem; }
+}

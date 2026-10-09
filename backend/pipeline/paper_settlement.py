@@ -120,8 +120,8 @@ def parlay_win_payout(stake: float, leg_odds: list[int]) -> float:
     return stake * (decimal - 1)
 
 
-def settle_parlays(session) -> int:
-    settled = 0
+def settle_parlays_list(session) -> list[Parlay]:
+    settled: list[Parlay] = []
     for parlay in session.query(Parlay).filter(Parlay.result.is_(None)).all():
         legs = session.query(PaperPick).filter(PaperPick.parlay_id == parlay.id).all()
         if len(legs) < 2 or any(leg.result is None for leg in legs):
@@ -133,6 +133,11 @@ def settle_parlays(session) -> int:
             parlay.result, parlay.payout = "push", 0.0
         else:
             parlay.result, parlay.payout = "win", parlay_win_payout(parlay.stake, [leg.odds for leg in legs])
-        settled += 1
+        settled.append(parlay)
     session.commit()
     return settled
+
+
+def settle_parlays(session) -> int:
+    """How many parlays settled -- the count older callers and tests read."""
+    return len(settle_parlays_list(session))

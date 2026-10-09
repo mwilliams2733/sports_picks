@@ -896,13 +896,13 @@ def grade_pending_picks(session) -> dict:
     logger.info("Graded %d strategy picks (%d skipped as ungradeable here)",
                 len(ungraded) - skipped, skipped)
 
-    # Also grade pending PaperPicks -- the same code /users/grade runs.
-    from backend.pipeline import paper_settlement
-    paper_graded = len(paper_settlement.grade_paper_picks(session))
-    logger.info("Auto-graded %d paper picks", paper_graded)
-
-    parlays = paper_settlement.settle_parlays(session)
-    logger.info("Settled %d paper parlays", parlays)
+    # Paper bets: the same path the owner's /users/grade runs, so automatic
+    # grading announces results and updates streaks too (spec §10).
+    from backend.paper.feed import settle_and_announce
+    paper = settle_and_announce(session)
+    paper_graded, parlays = paper["graded"], paper["parlays_settled"]
+    logger.info("Auto-graded %d paper picks, settled %d parlays, %d feed events",
+                paper_graded, parlays, paper["events"])
 
     return {"strategy": len(ungraded) - skipped, "skipped": skipped,
             "paper": paper_graded, "parlays": parlays}
