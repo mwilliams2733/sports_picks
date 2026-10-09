@@ -67,7 +67,7 @@ describe('MyBets', () => {
   it('lists settled bets with their result, filterable', async () => {
     renderPage()
     fireEvent.click(await screen.findByRole('tab', { name: 'Settled' }))
-    const wonCard = screen.getByRole('article', { name: 'Bet #P-5' })
+    const wonCard = await screen.findByRole('article', { name: 'Bet #P-5' })
     expect(wonCard).toHaveTextContent('Won +$91.74')
     expect(wonCard).toHaveClass('sb-bet-won')
     expect(screen.getByRole('article', { name: 'Bet #P-3' })).toHaveTextContent('Lost −$100.00')
