@@ -93,14 +93,6 @@ def test_a_moved_total_is_line_moved():
     assert h.reason_of(c, "straight", pid) == "line_moved"
 
 
-def test_the_other_side_must_quote_the_mirror_line():
-    c = h.client()
-    [g] = h.games(c)
-    pid = h.place(c, h.user(c), g, **HOME_SPREAD)
-    h.reprice(c, g, spread_away=4.0)            # HOME still -3.5, AWAY now +4
-    assert h.reason_of(c, "straight", pid) == "line_moved"
-
-
 def test_a_settled_bet_has_no_offer():
     c = h.client()
     [g] = h.games(c)
@@ -166,3 +158,29 @@ def test_offer_view_shapes():
         assert cashout.offer_view(s, "straight", pick) is None
     finally:
         s.close()
+
+
+def test_an_evenly_split_market_still_has_an_offer():
+    """Final review: on a tie quoted_line gives each side its WORSE line, so
+    HOME is quoted -3.5 while AWAY is quoted +3 -- the mirror of -3.5 is not
+    AWAY's own quoted line, and nothing has moved. The other side is priced
+    at the mirror line over the books quoting exactly it."""
+    from backend.tests.pricing_helpers import seed_fresh_odds
+    c = h.client()
+    [g] = h.games(c, spread_home=-3, spread_away=3)
+    seed_fresh_odds(c.app.state.engine, g, bookmaker="book2", spread_home=-3.5, spread_away=3.5)
+    pid = h.place(c, h.user(c), g, **HOME_SPREAD)
+    s = get_session(c.app.state.engine)
+    assert s.get(PaperPick, pid).pick_value == "HOME -3.5"
+    s.close()
+    assert h.offer_of(c, "straight", pid).amount == 90.68
+
+
+def test_a_mirror_line_no_book_quotes_is_not_quoted_rather_than_moved():
+    from backend.tests.pricing_helpers import seed_fresh_odds
+    c = h.client()
+    [g] = h.games(c)
+    pid = h.place(c, h.user(c), g, **HOME_SPREAD)          # HOME -3.5
+    seed_fresh_odds(c.app.state.engine, g, bookmaker="book2")
+    h.reprice(c, g, spread_away=4.0)                        # every book now AWAY +4
+    assert h.reason_of(c, "straight", pid) == "not_quoted"

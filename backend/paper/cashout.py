@@ -89,9 +89,12 @@ def _prop_moved(session, bet: PropBet) -> bool:
             .first()) is not None
 
 
-def _quote(session, game, bet, line, now) -> pricing.Quote:
+def _quote(session, game, bet, line, now, at_line: bool = False) -> pricing.Quote:
+    """This side at its quoted line (``line_moved`` if that is not the bet's
+    line), or -- ``at_line`` -- the other side priced at exactly ``line``."""
     try:
-        q = pricing.price(session, game, bet, now)
+        q = pricing.price(session, game, bet, now,
+                          at_line=line if at_line and isinstance(bet, GameBet) else None)
     except PricingError as e:
         if e.reason == "not_quoted" and isinstance(bet, PropBet) and _prop_moved(session, bet):
             raise CashOutUnavailable("line_moved") from None
@@ -106,7 +109,7 @@ def _leg_chance(session, pick: PaperPick, now: datetime) -> float:
     bet, line = _stored_bet(pick)
     mine = _quote(session, game, bet, line, now)
     other_bet, other_line = _opposite(bet, line)
-    theirs = _quote(session, game, other_bet, other_line, now)
+    theirs = _quote(session, game, other_bet, other_line, now, at_line=True)
     return remove_vig(american_to_implied_prob(mine.odds), american_to_implied_prob(theirs.odds))[0]
 
 

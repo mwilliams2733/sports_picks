@@ -817,9 +817,15 @@ owner's analysis can read them from the database directly.
 - **From 2026-10-09 (sportsbook phase 6), `result` can be `cashed_out`.**
   A player sold an open bet back before kickoff for
   `stake x placed decimal price x no-vig chance now x 0.95`, rounded down
-  to the cent. `payout` is that offer minus the stake. It is usually
-  negative even on a bet that was going well, because the 5% margin and
-  the fair price leave less than the stake plus the winnings.
+  to the cent. `payout` is that offer minus the stake. It is negative
+  unless the price has moved in the bettor's favour by more than the
+  margin and the vig: an immediate cash out at -110/-110 returns about 91%
+  of the stake, while a +150 bet whose fair chance has risen to 50% is
+  offered 1.19x the stake (`payout` +19% of stake).
+  - `p_now` prices the other side at the mirror of the bet's line (from
+    the books quoting exactly that line), so an evenly split market still
+    has an offer. The offer is withheld (`line_moved`) only when the
+    bet's own side is now quoted at a different line.
   - On a straight bet `graded_at` is the cash-out time.
   - A parlay has no `graded_at` column; its cash-out time is the
     `cashed_out` row in `activity_feed` (`$.bet_key = "parlay-<id>"`).

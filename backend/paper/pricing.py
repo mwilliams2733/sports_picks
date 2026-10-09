@@ -141,7 +141,7 @@ def _fresh(rows, timestamp_attr: str, now: datetime):
     return [r for r in rows if now - _utc(getattr(r, timestamp_attr)) <= MAX_QUOTE_AGE]
 
 
-def _price_game(session, game, bet: GameBet, now: datetime) -> Quote:
+def _price_game(session, game, bet: GameBet, now: datetime, at_line: float | None = None) -> Quote:
     # A combat bout's stored score is a 0/1 win/loss pair, not points: a
     # spread or total can never be graded (grader.grade_pick voids one as a
     # push rather than settle it). Refusing the QUOTE here, not just the
@@ -171,9 +171,15 @@ def _price_game(session, game, bet: GameBet, now: datetime) -> Quote:
         # A line a book is quoting, priced by the books quoting exactly it --
         # the rule props already followed. The average line was one no book
         # offered and could never push.
-        line = quoted_line([getattr(r, line_key) for r in fresh],
-                           higher_is_worse=bet.side == "Over")
+        # ``at_line`` (cash out's other side): the books quoting exactly that
+        # line, not this side's own quoted line -- on a tie quoted_line gives
+        # each side its worse line, so HOME -3.5 and AWAY +3 are both "the"
+        # line of one evenly split market.
+        line = at_line if at_line is not None else quoted_line(
+            [getattr(r, line_key) for r in fresh], higher_is_worse=bet.side == "Over")
         fresh = [r for r in fresh if abs(getattr(r, line_key) - line) < 1e-9]
+        if not fresh:
+            raise PricingError("not_quoted")
     odds = consensus_moneyline([getattr(r, price_key) for r in fresh])
     quoted_at = max(_utc(r.timestamp) for r in fresh)
     if bet.pick_type == "moneyline":
@@ -215,14 +221,19 @@ def _price_prop(session, game, bet: PropBet, now: datetime) -> Quote:
                  prop_player=bet.prop_player, prop_market=bet.prop_market)
 
 
-def price(session, game, bet: GameBet | PropBet, now: datetime | None = None) -> Quote:
-    """Price ``bet`` on ``game`` at the current consensus, or raise PricingError."""
+def price(session, game, bet: GameBet | PropBet, now: datetime | None = None,
+          at_line: float | None = None) -> Quote:
+    """Price ``bet`` on ``game`` at the current consensus, or raise PricingError.
+
+    ``at_line`` prices a spread or total at that exact line instead of the
+    line most books quote (cash out prices the other side at the mirror of
+    the bet's line). Bets are always placed without it."""
     now = now or datetime.now(timezone.utc)
     if not open_for_betting(game, now):
         raise PricingError("game_started")
     if isinstance(bet, PropBet):
         return _price_prop(session, game, bet, now)
-    return _price_game(session, game, bet, now)
+    return _price_game(session, game, bet, now, at_line)
 
 
 def combine(odds: list[int]) -> tuple[int, float]:
