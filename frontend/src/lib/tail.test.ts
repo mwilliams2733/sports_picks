@@ -32,7 +32,7 @@ describe('tailLegs', () => {
     expect(r.error).toBe('Betting has closed: this game has already started')
     expect(r.selection.odds).toBe(-109)                 // shown for reference only; the server re-prices
     await tailBet([leg()], fetchers([refused]))
-    expect(useSlip.getState().legs[0].error).toBe('Betting has closed: this game has already started')
+    expect(useSlip.getState().legs[0]).toMatchObject({ error: 'Betting has closed: this game has already started', locked: true })
   })
   it('locks a leg no book quotes any more', async () => {
     const [r] = await tailLegs([leg()], fetchers([]))

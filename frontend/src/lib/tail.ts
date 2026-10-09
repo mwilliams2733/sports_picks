@@ -39,7 +39,7 @@ export async function tailBet(legs: FeedLeg[], fetchers: Fetchers = LIVE): Promi
   const slip = useSlip.getState()
   for (const r of results) {
     slip.add(r.selection)
-    if (r.error) useSlip.getState().setError(r.selection.leg, r.error)
+    if (r.error) useSlip.getState().lock(r.selection.leg, r.error)
   }
   useSlip.getState().setOpen(true)
   return results.filter(r => r.error === null).length

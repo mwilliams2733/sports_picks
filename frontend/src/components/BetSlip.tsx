@@ -29,6 +29,7 @@ function LegRow({ l, singles, available, now }: { l: SlipLeg; singles: boolean; 
   const remove = useSlip(s => s.remove)
   const setStake = useSlip(s => s.setStake)
   const closed = isClosed(l, now)
+  const out = closed || !!l.locked
   return (
     <li className={`sb-slip-leg${l.error ? ' has-error' : ''}`}>
       <div className="sb-slip-leg-head">
@@ -36,7 +37,7 @@ function LegRow({ l, singles, available, now }: { l: SlipLeg; singles: boolean; 
           <strong>{l.label}</strong>
           <small>{l.gameLabel}</small>
         </div>
-        <span className="sb-slip-odds">{formatOdds(l.odds)}</span>
+        {!l.locked && <span className="sb-slip-odds">{formatOdds(l.odds)}</span>}
         <button type="button" className="sb-slip-remove" aria-label={`Remove ${l.label}`}
           onClick={() => remove(l.leg)}>✕</button>
       </div>
@@ -48,7 +49,7 @@ function LegRow({ l, singles, available, now }: { l: SlipLeg; singles: boolean; 
       )}
       {closed && <p className="sb-slip-error">Betting closed</p>}
       {l.error && <p className="sb-slip-error" role="alert">{l.error}</p>}
-      {singles && !closed && (
+      {singles && !out && (
         <>
           <StakeInput value={l.stake} max={available} label={`Stake for ${l.label}`} onChange={n => setStake(l.leg, n)} />
           <small className="sb-slip-towin">To win {formatMoney(toWin(l.stake, l.odds))}</small>
@@ -77,7 +78,8 @@ export default function BetSlip() {
   const pin = storedPin ?? pinInput
   const available = me?.available_balance ?? 0
   const parlay = s.mode === 'parlay'
-  const openLegs = s.legs.filter(l => !isClosed(l, now))
+  // A locked leg (tailed, no book will price it) is closed for betting too.
+  const openLegs = s.legs.filter(l => !isClosed(l, now) && !l.locked)
   const estimate = parlayEstimate(s.legs.map(l => l.odds))
   const total = parlay ? s.parlayStake : openLegs.reduce((a, l) => a + l.stake, 0)
   const totalToWin = parlay
@@ -86,7 +88,7 @@ export default function BetSlip() {
   const moved = s.legs.some(l => l.movedFrom)
   const blocked = !me ? 'Choose a player in the top bar, or join the league, to bet.'
     : parlay && s.legs.length < 2 ? 'A parlay needs at least 2 legs.'
-    : parlay && openLegs.length !== s.legs.length ? 'Remove the closed legs to place this parlay.'
+    : parlay && openLegs.length !== s.legs.length ? 'Remove the closed or locked legs to place this parlay.'
     : total > available ? `Over your available balance (${formatMoney(available)}).`
     : null
   const canPlace = !!me && !placing && !blocked && total > 0 && /^\d{4,6}$/.test(pin)

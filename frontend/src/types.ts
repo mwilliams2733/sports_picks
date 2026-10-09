@@ -342,6 +342,8 @@ export interface SlipLeg extends SlipSelection {
   movedFrom?: { odds: number; line: number | null } | null
   /** The server's refusal for this leg on the last attempt. */
   error?: string | null
+  /** A tailed leg no book will price now: shown for reference, never placed. */
+  locked?: boolean
 }
 
 export interface ReceiptBet {

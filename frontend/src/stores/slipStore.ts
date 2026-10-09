@@ -36,6 +36,7 @@ interface SlipActions {
   setOpen: (open: boolean) => void
   priceMoved: (leg: BetLeg, odds: number, line: number | null, pickValue: string) => void
   setError: (leg: BetLeg, message: string | null) => void
+  lock: (leg: BetLeg, message: string) => void
   setReceipt: (receipt: Receipt | null) => void
   refill: (legs: SlipLeg[]) => void
   clear: () => void
@@ -105,6 +106,7 @@ export const useSlip = create<SlipData & SlipActions>()(persist((set) => ({
       label: l.leg.pick_type === 'prop' || !l.homeTeam ? l.label : resolveLabel(pickValue, l.homeTeam, l.awayTeam),
     } : l)) })),
   setError: (leg, error) => set(st => ({ legs: st.legs.map(l => (onMarket(leg)(l) ? { ...l, error } : l)) })),
+  lock: (leg, error) => set(st => ({ legs: st.legs.map(l => (onMarket(leg)(l) ? { ...l, error, locked: true } : l)) })),
   setReceipt: (receipt) => set({ receipt }),
   refill: (legs) => set(st => ({
     legs: legs.reduce((acc, l) => addOrReplaceLeg(acc, { ...l, movedFrom: null, error: null }), st.legs) })),
