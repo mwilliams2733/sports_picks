@@ -58,8 +58,13 @@ describe('legs', () => {
   })
   it('shows a final score, the kickoff, or an unusual status (Review Focus 5)', () => {
     expect(gameLine(game({ status: 'final', home_score: 27, away_score: 20 }))).toBe('TB 20 – DAL 27 · Final')
-    expect(gameLine(game())).toMatch(/^TB @ DAL · \d{1,2}:\d{2}\s?[AP]M$/)
+    expect(gameLine(game(), new Date('2026-10-08T22:00:00Z'))).toMatch(/^TB @ DAL · \d{1,2}:\d{2}\s?[AP]M$/)
     expect(gameLine(game({ status: 'postponed' }))).toBe('TB @ DAL · Postponed')
+  })
+  it('names the day for a game that is not today in ET (final review)', () => {
+    const now = new Date('2026-10-08T22:00:00Z')            // Thu Oct 8, ET
+    expect(gameLine(game({ start_time: '2026-10-11T17:00:00+00:00' }), now)).toMatch(/^TB @ DAL · Sun Oct 11, \d{1,2}:\d{2}\s?[AP]M$/)
+    expect(gameLine(game({ start_time: '2026-10-09T00:15:00+00:00' }), now)).toMatch(/^TB @ DAL · \d{1,2}:\d{2}\s?[AP]M$/)
   })
 })
 

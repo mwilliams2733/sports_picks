@@ -1,6 +1,6 @@
 import type { Ticket, TicketGame, TicketLeg } from '../types'
 import { resolveLabel } from './quotes'
-import { formatMoney, startLabel } from './board'
+import { etToday, formatDay, formatMoney, startLabel } from './board'
 
 export type SettledFilter = 'all' | 'won' | 'lost'
 export type LegStatus = 'pending' | 'won' | 'lost' | 'push'
@@ -27,12 +27,20 @@ export function legStatus(l: TicketLeg): LegStatus {
   return l.result === 'win' ? 'won' : l.result === 'loss' ? 'lost' : l.result === 'push' ? 'push' : 'pending'
 }
 
+/** A kickoff as "8:15 PM" today (ET), or "Sun Oct 11, 1:00 PM" on another
+ *  day -- a ticket can be for a game up to a week out. */
+function kickoffLabel(start: string | null, now: Date): string {
+  if (!start) return startLabel(null)
+  const day = etToday(new Date(start))
+  return day === etToday(now) ? startLabel(start) : `${formatDay(day)}, ${startLabel(start)}`
+}
+
 /** "TB 20 – DAL 27 · Final", "TB @ DAL · 8:15 PM", or "TB @ DAL · Postponed". */
-export function gameLine(g: TicketGame): string {
+export function gameLine(g: TicketGame, now: Date = new Date()): string {
   if (g.status === 'final' && g.home_score !== null && g.away_score !== null) {
     return `${g.away_team} ${g.away_score} – ${g.home_team} ${g.home_score} · Final`
   }
-  const when = g.status === 'scheduled' ? startLabel(g.start_time)
+  const when = g.status === 'scheduled' ? kickoffLabel(g.start_time, now)
     : g.status.charAt(0).toUpperCase() + g.status.slice(1).replace(/_/g, ' ')
   return `${g.away_team} @ ${g.home_team} · ${when}`
 }
