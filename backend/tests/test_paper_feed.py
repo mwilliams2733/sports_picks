@@ -202,3 +202,21 @@ def test_the_owner_button_and_the_scheduler_announce_the_same_way():
     u = s.get(UserProfile, uid)
     assert (u.current_streak, u.streak_type) == (2, "win")
     s.close()
+
+
+def test_feed_times_are_utc_and_placed_messages_name_the_side():
+    """Visual check (Phase 5 Task 7): created_at went out naive, so browsers
+    read UTC as local time ("now" for a 5-hour-old bet); and placed-bet lines
+    said "AWAY ML" where every other surface names the team."""
+    client = _client()
+    g1, g2 = _games(client, 2)
+    uid = _user(client, "sam")
+    client.post(f"/users/{uid}/picks", json={"game_id": g1, "pick_type": "spread", "side": "AWAY", "stake": 50})
+    client.post(f"/users/{uid}/parlay", json={"legs": [
+        {"game_id": g1, "pick_type": "moneyline", "side": "HOME"},
+        {"game_id": g2, "pick_type": "over_under", "side": "Over"}], "stake": 20})
+    feed = client.get("/users/feed").json()
+    assert all(e["created_at"].endswith("+00:00") for e in feed)
+    messages = [e["payload"]["message"] for e in feed if e["event_type"] == "pick_placed"]
+    assert "sam bet A0 +3.5 -110 — $50" in messages
+    assert any(m.startswith("sam placed 2-leg parlay: H0 ML + Over 220.5") for m in messages)

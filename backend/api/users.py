@@ -18,7 +18,7 @@ from backend.digest.record import emailed_bets
 import json
 import logging
 from backend.api.picks import _resolve_pick_value
-from backend.time_utils import et_today, game_start_utc
+from backend.time_utils import as_utc, et_today, game_start_utc
 
 logger = logging.getLogger(__name__)
 
@@ -385,7 +385,8 @@ def get_activity_feed(request: Request, limit: int = Query(50, ge=1, le=200)):
                 "user_id": e.user_id,
                 "event_type": e.event_type,
                 "payload": json.loads(e.payload),
-                "created_at": e.created_at.isoformat() if e.created_at else None,
+                # Stored naive UTC; sent with its offset so a browser does not read it as local.
+                "created_at": as_utc(e.created_at).isoformat() if e.created_at else None,
             }
             for e in events
         ]
@@ -512,15 +513,16 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
         user = session.query(UserProfile).get(user_id)
         user_name = user.name if user else "Unknown"
         odds_str = f"{quote.odds:+d}" if quote.odds >= 0 else str(quote.odds)
+        placed_leg = _feed_leg(bet, quote, game)
         _log_feed_event(session, loop, user_id, "pick_placed", {
             "user_name": user_name,
-            "message": f"{user_name} bet {quote.pick_value} {odds_str} — ${bet.stake:,.0f}",
+            "message": f"{user_name} bet {placed_leg['label']} {odds_str} — ${bet.stake:,.0f}",
             "pick_value": quote.pick_value,
             "odds": quote.odds,
             "stake": bet.stake,
             "bet_id": pick.id,
             "kind": "straight",
-            "legs": [_feed_leg(bet, quote, game)],
+            "legs": [placed_leg],
         })
 
         return {
@@ -699,7 +701,8 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
         loop = request.app.state.loop
         user = session.query(UserProfile).get(user_id)
         user_name = user.name if user else "Unknown"
-        legs_str = " + ".join(q.pick_value for _, q, _ in quotes)
+        feed_legs = [_feed_leg(leg, q, g) for leg, q, g in quotes]
+        legs_str = " + ".join(fl["label"] for fl in feed_legs)
         _log_feed_event(session, loop, user_id, "pick_placed", {
             "user_name": user_name,
             "message": f"{user_name} placed {len(body.legs)}-leg parlay: {legs_str} — ${body.stake:,.0f} to win ${body.stake * (combined_decimal - 1):,.0f}",
@@ -707,7 +710,7 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
             "leg_count": len(body.legs),
             "bet_id": parlay.id,
             "kind": "parlay",
-            "legs": [_feed_leg(leg, q, g) for leg, q, g in quotes],
+            "legs": feed_legs,
         })
 
         return {
