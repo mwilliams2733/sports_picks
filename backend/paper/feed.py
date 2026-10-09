@@ -50,17 +50,15 @@ def update_streaks(session, loop, user_id: int) -> None:
              .all())
     if not picks:
         return
-    current = picks[0].result
-    if current == "push":
-        current = picks[1].result if len(picks) > 1 else "none"
+    # Pushes and cash outs are neither a win nor a loss: a streak passes
+    # over them (a cash out is a settled bet, not a decided one).
+    decided = [p.result for p in picks if p.result in ("win", "loss")]
+    current = decided[0] if decided else "none"
     streak = 0
-    for p in picks:
-        if p.result == "push":
-            continue
-        if p.result == current:
-            streak += 1
-        else:
+    for result in decided:
+        if result != current:
             break
+        streak += 1
     user = session.get(UserProfile, user_id)
     if not user:
         return
@@ -95,7 +93,7 @@ def _announced(session, bet_key: str) -> bool:
             .first()) is not None
 
 
-def _straight_label(session, pick: PaperPick) -> str:
+def straight_label(session, pick: PaperPick) -> str:
     if pick.pick_type == "prop":
         return pick.pick_value
     from backend.api.picks import _resolve_pick_value
@@ -137,7 +135,7 @@ def announce_settlements(session, loop, graded: list[PaperPick], parlays: list[P
 
     for pick in graded:
         if pick.parlay_id is None:
-            announce(pick.user_id, "straight", pick.id, pick.result, pick.payout, _straight_label(session, pick))
+            announce(pick.user_id, "straight", pick.id, pick.result, pick.payout, straight_label(session, pick))
     for parlay in parlays:
         legs = session.query(PaperPick).filter(PaperPick.parlay_id == parlay.id).count()
         announce(parlay.user_id, "parlay", parlay.id, parlay.result, parlay.payout, f"a {legs}-leg parlay")

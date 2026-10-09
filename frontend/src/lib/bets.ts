@@ -25,7 +25,8 @@ export function legLabel(l: TicketLeg): string {
 }
 
 export function legStatus(l: TicketLeg): LegStatus {
-  return l.result === 'win' ? 'won' : l.result === 'loss' ? 'lost' : l.result === 'push' ? 'push' : 'pending'
+  return l.result === 'win' ? 'won' : l.result === 'loss' ? 'lost'
+    : l.result === 'push' || l.result === 'cashed_out' ? 'push' : 'pending'
 }
 
 export type LegTint = 'winning' | 'losing' | 'even'

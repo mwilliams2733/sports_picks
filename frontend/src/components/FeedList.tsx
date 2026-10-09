@@ -10,7 +10,7 @@ function ago(iso: string, now = Date.now()): string {
   return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`
 }
 
-const DOT: Record<string, string> = { pick_won: 'won', pick_lost: 'lost', pick_pushed: 'push' }
+const DOT: Record<string, string> = { pick_won: 'won', pick_lost: 'lost', pick_pushed: 'push', cashed_out: 'push' }
 
 export default function FeedList({ items, meId, limit }: { items: FeedItem[]; meId?: number; limit?: number }) {
   const [tailing, setTailing] = useState<number | null>(null)

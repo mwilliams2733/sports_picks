@@ -149,6 +149,9 @@ export const api = {
       combined_odds: number; potential_payout: number;
       result: string | null; payout: number | null; new_balance: number;
     }>(`/users/${userId}/parlay`, data, { 'X-Player-Pin': pin }),
+    cashOut: (userId: number, data: { bet_id: number; kind: 'straight' | 'parlay'; expected_offer: number },
+      pin: string) => post<{ bet_id: number; kind: string; offer: number; payout: number; available: number }>(
+      `/users/${userId}/cashout`, data, { 'X-Player-Pin': pin }),
   },
   paper: {
     quotes: (gameId: number) => get<{ game_id: number; quotes: GameQuote[] }>(`/paper/quotes?game_id=${gameId}`),

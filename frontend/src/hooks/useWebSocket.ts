@@ -60,7 +60,7 @@ export function useWebSocket() {
         const msg = JSON.parse(event.data)
         if (msg.type === 'pong') return
 
-        if (['pick_placed', 'pick_won', 'pick_lost', 'pick_pushed', 'streak', 'feed_event'].includes(msg.type)) {
+        if (['pick_placed', 'pick_won', 'pick_lost', 'pick_pushed', 'cashed_out', 'streak', 'feed_event'].includes(msg.type)) {
           const feedEvent: FeedEvent = {
             id: crypto.randomUUID(),
             type: msg.data?.event_type || msg.type,
