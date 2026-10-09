@@ -159,3 +159,24 @@ def test_the_job_is_registered_every_two_minutes():
     assert job is not None
     assert job.trigger.interval == timedelta(minutes=2)
     assert (job.coalesce, job.max_instances) == (True, 1)
+
+
+def test_the_results_path_still_finalises_an_in_progress_game(session):
+    """Spec §8 verify item 1 / Review Focus 3: _store_games' guard only skips
+    in_progress rows during cancel-reconciliation, not on a final upsert."""
+    from backend.pipeline.full_pipeline import _store_games
+    g = _game(session, status="in_progress")
+    g.home_score, g.away_score, g.live_detail = 17, 14, "Q4 0:12"
+    session.commit()
+    _store_games(session, "nfl", TODAY, [{
+        "espn_id": "401", "date": "2026-10-11T17:00Z", "status": "final",
+        "home_team": "DAL", "home_team_name": "DAL", "away_team": "TB", "away_team_name": "TB",
+        "home_score": 24, "away_score": 21}], reconcile=False)
+    session.refresh(g)
+    assert (g.status, g.home_score, g.away_score) == ("final", 24, 21)
+
+
+def test_an_in_progress_game_is_not_open_for_betting():
+    """Spec §8 verify item 2."""
+    from backend.paper.pricing import open_for_betting
+    assert open_for_betting(Game(status="in_progress", start_time=None)) is False

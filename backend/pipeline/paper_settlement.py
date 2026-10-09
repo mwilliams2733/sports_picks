@@ -88,6 +88,8 @@ def _push_ungradeable(session, today: date) -> list[PaperPick]:
     A still-``scheduled`` game gets `STALE_SCHEDULED_DAYS` instead: it may
     yet finalize late, but one that never does would otherwise hold its
     stake forever -- the same failure, without the status saying so.
+    So does one stuck ``in_progress`` (the live_scores job never writes final; a
+    game postponed mid-way or an ESPN gap would otherwise sit there).
     Runs after the grading pass, so a pending bet on a ``final`` game here
     is one that pass could not grade.
     """
@@ -99,7 +101,7 @@ def _push_ungradeable(session, today: date) -> list[PaperPick]:
         .filter(PaperPick.result.is_(None))
         .filter(or_(
             and_(Game.status.in_(UNPLAYED + ("final",)), Game.date <= cutoff),
-            and_(Game.status == "scheduled", Game.date <= stale),
+            and_(Game.status.in_(("scheduled", "in_progress")), Game.date <= stale),
         ))
         .all()
     )

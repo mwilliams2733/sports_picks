@@ -24,7 +24,7 @@ def _game(game, home, away) -> dict:
     return {"id": game.id, "sport": game.sport, "home_team": home.abbreviation,
             "away_team": away.abbreviation, "start_time": start.isoformat() if start else None,
             "status": game.status, "home_score": game.home_score, "away_score": game.away_score,
-            "live_detail": None}                     # Phase 4 fills this in
+            "live_detail": game.live_detail}
 
 
 def _leg(pick, game, home, away) -> dict:
