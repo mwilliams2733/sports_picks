@@ -100,3 +100,105 @@ def test_a_placed_prop_event_carries_the_prop_request():
     request = {k: v for k, v in ev["legs"][0].items() if k not in DISPLAY}
     assert request == {"game_id": gid, "pick_type": "prop", "prop_player": "QB One",
                        "prop_market": "player_pass_yds", "outcome": "Over", "line": 225.5}
+
+
+from backend.paper import feed as feed_mod                                   # noqa: E402
+from backend.pipeline.paper_settlement import grade_paper_picks             # noqa: E402,F401
+from backend.models import Parlay                                            # noqa: E402
+
+
+def _finish(client, gid, home, away):
+    s = get_session(client.app.state.engine)
+    g = s.get(Game, gid)
+    g.status, g.home_score, g.away_score = "final", home, away
+    s.commit()
+    s.close()
+
+
+def _settle(client):
+    s = get_session(client.app.state.engine)
+    try:
+        return feed_mod.settle_and_announce(s)
+    finally:
+        s.close()
+
+
+def test_a_settled_straight_bet_is_announced_once_with_its_result():
+    client = _client()
+    [gid] = _games(client)
+    uid = _user(client, "sam")
+    pid = client.post(f"/users/{uid}/picks", json={"game_id": gid, "pick_type": "moneyline",
+                                                   "side": "HOME", "stake": 110}).json()["id"]
+    _finish(client, gid, 24, 17)
+    assert _settle(client)["events"] == 1
+    [ev] = _events(client, "pick_won")
+    assert (ev["bet_key"], ev["bet_id"], ev["kind"], ev["result"], ev["payout"]) == \
+        (f"straight-{pid}", pid, "straight", "win", 100.0)
+    assert ev["message"] == "sam won H0 ML — +$100.00"
+    assert _settle(client)["events"] == 0                    # nothing new, nothing re-announced
+
+
+def test_a_parlay_is_announced_once_and_its_legs_never():
+    client = _client()
+    g1, g2 = _games(client, 2)
+    uid = _user(client, "sam")
+    pl = client.post(f"/users/{uid}/parlay", json={"legs": [
+        {"game_id": g1, "pick_type": "moneyline", "side": "HOME"},
+        {"game_id": g2, "pick_type": "moneyline", "side": "HOME"}], "stake": 20}).json()
+    _finish(client, g1, 24, 17)
+    _finish(client, g2, 10, 13)                              # second leg loses
+    _settle(client)
+    assert _events(client, "pick_won") == []
+    [ev] = _events(client, "pick_lost")
+    assert (ev["bet_key"], ev["kind"], ev["message"]) == (f"parlay-{pl['id']}", "parlay",
+                                                          "sam lost a 2-leg parlay — −$20.00")
+
+
+def test_a_push_is_announced():
+    client = _client()
+    [gid] = _games(client)
+    uid = _user(client, "sam")
+    client.post(f"/users/{uid}/picks", json={"game_id": gid, "pick_type": "moneyline", "side": "HOME", "stake": 10})
+    _finish(client, gid, 20, 20)
+    _settle(client)
+    [ev] = _events(client, "pick_pushed")
+    assert ev["message"] == "sam pushed H0 ML — $0.00"
+
+
+def test_the_same_bet_is_never_announced_twice_review_focus_1():
+    """The owner's Grade button and the scheduler can both see a bet graded;
+    whichever announces second must find the first announcement."""
+    client = _client()
+    [gid] = _games(client)
+    uid = _user(client, "sam")
+    client.post(f"/users/{uid}/picks", json={"game_id": gid, "pick_type": "moneyline", "side": "HOME", "stake": 10})
+    _finish(client, gid, 24, 17)
+    s = get_session(client.app.state.engine)
+    graded = grade_paper_picks(s)
+    assert feed_mod.announce_settlements(s, None, graded, []) == 1
+    assert feed_mod.announce_settlements(s, None, graded, []) == 0
+    s.close()
+    assert len(_events(client, "pick_won")) == 1
+
+
+def test_the_owner_button_and_the_scheduler_announce_the_same_way():
+    """Before this, the scheduler's automatic grading wrote no feed events and
+    updated no streaks; only POST /users/grade did."""
+    from backend.pipeline.scheduler import grade_pending_picks
+    client = _client()
+    g1, g2 = _games(client, 2)
+    uid = _user(client, "sam")
+    for gid in (g1, g2):
+        client.post(f"/users/{uid}/picks", json={"game_id": gid, "pick_type": "moneyline", "side": "HOME", "stake": 10})
+    _finish(client, g1, 24, 17)
+    assert client.post("/users/grade").json()["graded"] == 1        # the owner's path
+    _finish(client, g2, 30, 3)
+    s = get_session(client.app.state.engine)
+    grade_pending_picks(s)                                            # the scheduler's path
+    s.close()
+    assert len(_events(client, "pick_won")) == 2
+    s = get_session(client.app.state.engine)
+    from backend.models import UserProfile
+    u = s.get(UserProfile, uid)
+    assert (u.current_streak, u.streak_type) == (2, "win")
+    s.close()

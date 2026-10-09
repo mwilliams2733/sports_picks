@@ -7,17 +7,15 @@ from backend.api.auth import require_owner
 from backend.api.pins import PIN_PATTERN, guard as pin_guard, hash_pin, require_player_pin
 from backend.database import get_session
 from backend.models import UserProfile, PaperPick, Game, ActivityFeed, Parlay
-from backend.pipeline import paper_settlement
-from backend.pipeline.paper_settlement import settle_parlays
 from backend.paper import bets as bets_mod
 from backend.paper import pricing
+from backend.paper.feed import log_feed_event as _log_feed_event, settle_and_announce
 from backend.paper.pricing import PricingError
 from backend.pipeline.team_stats import COMBAT_SPORTS
 from backend.analysis.paper_bets import player_bets
 from backend.analysis.scorecard import summarize, effective_bets
 from backend.digest.record import emailed_bets
 import json
-import asyncio
 import logging
 from backend.api.picks import _resolve_pick_value
 from backend.time_utils import et_today, game_start_utc
@@ -25,34 +23,6 @@ from backend.time_utils import et_today, game_start_utc
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def _log_feed_event(session, loop, user_id: int | None, event_type: str, payload: dict):
-    """Save activity event to DB and broadcast via WebSocket.
-
-    ``loop`` is the running asyncio event loop captured on ``app.state.loop``
-    at lifespan startup. Handlers here are synchronous and run in an anyio
-    worker thread, so we schedule the broadcast onto that loop from this
-    thread with ``run_coroutine_threadsafe`` rather than trying to create a
-    task directly (there is no event loop in this thread).
-    """
-    session.add(ActivityFeed(
-        user_id=user_id,
-        event_type=event_type,
-        payload=json.dumps(payload),
-    ))
-    session.commit()
-    # Broadcast via WebSocket (fire-and-forget)
-    if loop is None:
-        logger.debug("Feed broadcast skipped: no event loop available")
-        return
-    try:
-        from backend.api.websocket import manager
-        asyncio.run_coroutine_threadsafe(
-            manager.broadcast(event_type, payload), loop
-        )
-    except Exception:
-        logger.warning("Feed broadcast failed", exc_info=True)
 
 
 def _check_pin(value: str) -> str:
@@ -755,76 +725,15 @@ def place_parlay(request: Request, user_id: int, body: PlaceParlayRequest):
 
 @router.post("/grade", dependencies=[Depends(require_owner)])
 def grade_paper_picks(request: Request):
-    """Grade all pending paper picks for games that are final."""
+    """Grade all pending paper picks for games that are final -- the same
+    path the scheduler's automatic grading runs (backend/paper/feed.py)."""
     session = get_session(request.app.state.engine)
-    loop = request.app.state.loop
     try:
-        # The scheduler's own paper grading, so the two cannot disagree.
-        graded_picks = paper_settlement.grade_paper_picks(session)
-        for pick in graded_picks:
-            # Log grading events to activity feed
-            user = session.get(UserProfile, pick.user_id)
-            user_name = user.name if user else "Unknown"
-            event_type = "pick_won" if pick.result == "win" else "pick_lost"
-            if pick.result in ("win", "loss"):
-                _log_feed_event(session, loop, pick.user_id, event_type, {
-                    "user_name": user_name,
-                    "message": f"{user_name} {'won' if pick.result == 'win' else 'lost'} {pick.pick_value} — {'+'  if (pick.payout or 0) > 0 else ''}${pick.payout or 0:,.0f}",
-                    "result": pick.result,
-                    "payout": pick.payout,
-                })
-
-        # Update streaks for every user with a newly graded pick
-        for uid in {pick.user_id for pick in graded_picks}:
-            _update_streaks(session, loop, uid)
-
-        session.commit()
-        parlays_settled = settle_parlays(session)
-        return {"graded": len(graded_picks), "parlays_settled": parlays_settled}
+        done = settle_and_announce(session, request.app.state.loop)
+        # The response keeps its shape (callers and tests read exactly these).
+        return {"graded": done["graded"], "parlays_settled": done["parlays_settled"]}
     finally:
         session.close()
-
-
-def _update_streaks(session, loop, user_id: int):
-    """Recompute streaks from the user's most recent graded picks."""
-    picks = (
-        session.query(PaperPick)
-        .filter(PaperPick.user_id == user_id, PaperPick.result.isnot(None))
-        .order_by(PaperPick.created_at.desc())
-        .all()
-    )
-    if not picks:
-        return
-
-    # Current streak = consecutive same results from most recent
-    current_result = picks[0].result
-    if current_result == "push":
-        current_result = picks[1].result if len(picks) > 1 else "none"
-
-    streak = 0
-    for p in picks:
-        if p.result == "push":
-            continue
-        if p.result == current_result:
-            streak += 1
-        else:
-            break
-
-    user = session.get(UserProfile, user_id)
-    if user:
-        user.current_streak = streak
-        user.streak_type = "win" if current_result == "win" else "loss" if current_result == "loss" else "none"
-        if current_result == "win" and streak > (user.best_streak or 0):
-            user.best_streak = streak
-
-        # Log streak event if notable (3+)
-        if streak >= 3:
-            _log_feed_event(session, loop, user_id, "streak", {
-                "user_name": user.name,
-                "message": f"{user.name} is on a {streak}-pick {'win' if current_result == 'win' else 'loss'} streak!",
-                "streak": streak,
-                "streak_type": user.streak_type,
-            })
 
 
 def _compute_period_stats(bets) -> dict:
