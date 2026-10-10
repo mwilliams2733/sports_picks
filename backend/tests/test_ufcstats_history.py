@@ -54,3 +54,15 @@ def test_bouts_wins_losses_draws_and_skips(tmp_path):              # Review Focu
         HistoricalBout(date(2026, 9, 26), "UFC Fight Night: A vs. B", "Draw One", "Draw Two", 1, 1),
     ]
     assert skipped == {"no_result": 1, "event_date_unknown": 2, "bad_bout": 1}
+
+
+def test_verified_spelling_variants_are_one_fighter():               # Review Focus 2
+    # Measured 2026-10-10: the odds feed and UFCStats spell these four
+    # fighters differently in ways name_key cannot unify (given name vs
+    # nickname, spacing). Each pair was checked to be the same person.
+    for feed, ufcstats in [("Alex Volkanovski", "Alexander Volkanovski"),
+                           ("Lupita Godinez", "Loopy Godinez"),
+                           ("Su Young You", "SuYoung You"),
+                           ("Timothy Cuamba", "Timmy Cuamba")]:
+        assert name_key(feed) == name_key(ufcstats), feed
+    assert name_key("Alex Perez") != name_key("Alexander Volkanovski")

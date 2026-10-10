@@ -23,11 +23,30 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 _OUTCOMES = {"W/L": (1, 0), "L/W": (0, 1), "D/D": (1, 1)}
 
 
-def name_key(name: str) -> str:
-    """A fighter's name as an order-free key: "Wang Cong" == "Cong Wang";
-    accents, punctuation, hyphens and Jr./Sr./II-IV are ignored."""
+def _key(name: str) -> str:
     tokens = [t for t in normalize_name(name).split() if t not in _SUFFIXES]
     return " ".join(sorted(tokens))
+
+
+#: Spellings of ONE fighter that the key cannot unify (given name vs
+#: nickname, spacing), odds feed -> UFCStats. Measured 2026-10-10 against the
+#: next 30 days' MMA cards: 4 of the 32 fighters left without history were
+#: these; the other 28 fight outside the UFC. Add a pair only after checking
+#: it is the same person -- a guessed alias merges two fighters' records.
+_ALIASES = {_key(feed): _key(ufcstats) for feed, ufcstats in [
+    ("Alex Volkanovski", "Alexander Volkanovski"),
+    ("Lupita Godinez", "Loopy Godinez"),
+    ("Su Young You", "SuYoung You"),
+    ("Timothy Cuamba", "Timmy Cuamba"),
+]}
+
+
+def name_key(name: str) -> str:
+    """A fighter's name as an order-free key: "Wang Cong" == "Cong Wang";
+    accents, punctuation, hyphens and Jr./Sr./II-IV are ignored, and a
+    verified alias (`_ALIASES`) maps to its UFCStats spelling."""
+    key = _key(name)
+    return _ALIASES.get(key, key)
 
 
 @dataclass(frozen=True)
