@@ -24,8 +24,12 @@ _LINK = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 _TEMPLATE = re.compile(r"\{\{[^{}]*\}\}")
 _ABBR = re.compile(r"\{\{\s*abbr\s*\|([^|}]*)\|[^}]*\}\}", re.I)
 _DTS = re.compile(r"\{\{\s*dts\s*\|\s*(\d{4})\s*\|\s*(\d{1,2})\s*\|\s*(\d{1,2})", re.I)
+#: Formatting wrappers whose argument IS the cell text ({{small|2015-05-30}});
+#: unwrapped before the general template strip, which would delete the date.
+_WRAPPER = re.compile(r"\{\{\s*(?:small|nowrap|nobr)\s*\|([^{}|]*)\}\}", re.I)
+_ISO = re.compile(r"(\d{4})\s*[-–]\s*(\d{1,2})\s*[-–]\s*(\d{1,2})")
 _DMY = re.compile(r"(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{4})")
-_MDY = re.compile(r"([A-Za-z]{3,9})\.?\s+(\d{1,2}),\s*(\d{4})")
+_MDY = re.compile(r"([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s*(\d{4})")
 _OPPONENT_HEADER = re.compile(r"^!.*Opponent", re.M | re.I)
 _MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
@@ -108,7 +112,10 @@ def parse_date(cell: str) -> date | None:
         return _safe(int(m.group(1)), int(m.group(2)), int(m.group(3)))
     link = _LINK.search(cell)
     text = (link.group(2) or link.group(1)) if link else cell
-    text = _TEMPLATE.sub("", text)
+    text = _TEMPLATE.sub("", _WRAPPER.sub(r"\1", text))
+    m = _ISO.search(text)
+    if m:
+        return _safe(int(m.group(1)), int(m.group(2)), int(m.group(3)))
     m = _DMY.search(text)
     if m and m.group(2)[:3].lower() in _MONTHS:
         return _safe(int(m.group(3)), _MONTHS[m.group(2)[:3].lower()], int(m.group(1)))

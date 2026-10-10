@@ -159,3 +159,18 @@ def test_cached_titles_are_never_fetched_again_and_live_calls_are_spaced(tmp_pat
     assert c2.wikitext("A (boxer)") == PAGE and c2.wikitext("Missing Page") is None
     assert len(fake.calls) == n and c2.live_requests == 0      # both answered from the cache
     assert all(s <= 1.0 for s in slept) and len(slept) >= 1      # spaced, never more than the interval
+
+
+def test_iso_and_wrapped_dates_found_in_the_real_fetch():
+    # 2026-10-10 live fetch: ~3,500 rows were skipped as bad dates, nearly all
+    # ISO dates or dates wrapped in {{small|...}} (the wrapper strip ate them).
+    assert parse_date("1997-07-04") == date(1997, 7, 4)
+    assert parse_date("2025-04-5") == date(2025, 4, 5)
+    assert parse_date("2016–06–25") == date(2016, 6, 25)          # en dashes
+    assert parse_date("{{small|1994-04-25}}") == date(1994, 4, 25)
+    assert parse_date("{{small|30 May 2015}}") == date(2015, 5, 30)
+    assert parse_date("{{nowrap|Nov 8, 2014}}") == date(2014, 11, 8)
+    assert parse_date("[[Fury vs. Usyk|2024-05-18]]") == date(2024, 5, 18)
+    assert parse_date("Dec 17 2022") == date(2022, 12, 17)
+    assert parse_date("04/05/2019") is None        # day/month order unknowable: stays skipped
+    assert parse_date("2019-13-40") is None
