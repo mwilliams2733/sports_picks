@@ -49,3 +49,14 @@ def test_replay_matches_the_live_feature_builder(db_engine, db_session):   # Rev
     f = replay(bouts, k=get_k_factor("mma"))[-1]      # the K rebuild_combat_elo uses
     assert (f.elo_a, f.form_a, f.fights_a) == (live.elo_rating, live.recent_form_score, live.fights_count)
     assert abs(f.quality_a - live.opponent_avg_elo) < 1e-9
+
+
+def test_two_bouts_on_one_date_never_see_each_other():          # Review Focus 2/3
+    # Final review: early UFC tournaments put a fighter in 2-3 bouts in one
+    # night, and the CSV lists the final first (lowest id). Live reads only
+    # bouts on EARLIER dates, so neither same-day bout may see the other.
+    final, semi = _b(1, 1, 1, 2, 1.0), _b(2, 1, 1, 3, 1.0)
+    f = replay([final, semi], k=24)
+    assert (f[1].fights_a, f[1].elo_a, f[1].form_a) == (0, 1500, 0.5)
+    nxt = replay([final, semi, _b(3, 2, 1, 4, 1.0)], k=24)[2]
+    assert nxt.fights_a == 2                    # both count from the next date on

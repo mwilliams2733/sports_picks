@@ -109,19 +109,34 @@ def market_report(session, coef, k: float, min_edge: float) -> dict:
     """The fitted model vs the books on MMA finals that have prices, and the
     picks the strategy's rule would have made from it. n is small and bouts
     on one card are correlated: this can show the underdog pattern, not an edge.
-    Prices are averaged with `strategy.average_odds`, as the strategy does."""
+    Prices are averaged with `strategy.average_odds`, as the strategy does.
+
+    Prices are PRE-FIGHT only (final review, 2026-10-10): the Odds table keeps
+    each book's latest price, which for MMA can be in-play or settled (games
+    from the odds feed have no start time, so nothing stops a fight-day fetch).
+    Each book's price is the last line snapshot captured before 00:00 UTC on
+    the bout date -- the evening before in ET, before any card starts. A bout
+    with no such price is left out."""
     from collections import defaultdict
     from backend.analysis.odds_utils import american_to_implied_prob, remove_vig, value_edge
     from backend.analysis.strategy import average_odds
     from backend.data_types import OddsSnapshot
-    from backend.models import Game, Odds
+    from datetime import datetime, time
+    from backend.models import Game, LineSnapshot
 
     feats = {f.game_id: f for f in replay(load_bouts(session, "mma"), k)}
+    latest: dict[tuple[int, str], LineSnapshot] = {}
+    for snap, game_date in (session.query(LineSnapshot, Game.date)
+                            .join(Game, Game.id == LineSnapshot.game_id)
+                            .filter(Game.sport == "mma", Game.status == "final")
+                            .order_by(LineSnapshot.captured_at)):
+        cutoff = datetime.combine(game_date, time(0, 0))
+        captured = snap.captured_at.replace(tzinfo=None)
+        if captured < cutoff and snap.moneyline_home and snap.moneyline_away:
+            latest[(snap.game_id, snap.bookmaker)] = snap      # later wins: price at cutoff
     by_game = defaultdict(list)
-    for o in (session.query(Odds).join(Game, Game.id == Odds.game_id)
-              .filter(Game.sport == "mma", Game.status == "final")):
-        if o.moneyline_home and o.moneyline_away:
-            by_game[o.game_id].append(o)
+    for (gid, _), snap in latest.items():
+        by_game[gid].append(snap)
     model_p, market_p, ys = [], [], []
     picks = dogs = 0
     on_picks_model, on_picks_market = [], []

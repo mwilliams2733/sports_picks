@@ -5,7 +5,11 @@ generator would have seen BEFORE it (`pick_generator._build_fighter_stats`):
 current Elo, last-n form (wins / bouts; a draw is not a win), the CURRENT
 rating of the last-n opponents, and the bout count capped at n. Elo is
 updated after the features are taken, with the grader's arithmetic
-(`combat_elo`), so no bout's result reaches its own features.
+(`combat_elo`), so no bout's result reaches its own features. Features are
+taken for EVERY bout on a date before any of that date's results apply: live
+reads only bouts on earlier dates (`Game.date < before_date`), and the early
+UFC tournaments put a fighter in several bouts in one night, listed final
+first.
 """
 from __future__ import annotations
 
@@ -68,14 +72,22 @@ def replay(bouts: list[Bout], k: float, last_n: int = 5) -> list[BoutFeatures]:
         quality = sum(rating[opp] for _, opp in past) / len(past)
         return rating[fid], wins / len(past), quality, len(past)
 
-    for bout in bouts:
-        ea, fa, qa, na = side(bout.a)
-        eb, fb, qb, nb = side(bout.b)
-        out.append(BoutFeatures(bout.game_id, bout.date, bout.a, bout.b, ea, eb, fa, fb,
-                                qa, qb, na, nb, bout.a_score))
-        delta = elo_delta(rating[bout.a], rating[bout.b], bout.a_score, k)
-        rating[bout.a] += delta
-        rating[bout.b] -= delta
-        recent[bout.a].appendleft((bout.a_score == 1.0, bout.b))
-        recent[bout.b].appendleft((bout.a_score == 0.0, bout.a))
+    i = 0
+    while i < len(bouts):
+        j = i
+        while j < len(bouts) and bouts[j].date == bouts[i].date:
+            j += 1
+        day = bouts[i:j]
+        for bout in day:
+            ea, fa, qa, na = side(bout.a)
+            eb, fb, qb, nb = side(bout.b)
+            out.append(BoutFeatures(bout.game_id, bout.date, bout.a, bout.b, ea, eb, fa, fb,
+                                    qa, qb, na, nb, bout.a_score))
+        for bout in day:
+            delta = elo_delta(rating[bout.a], rating[bout.b], bout.a_score, k)
+            rating[bout.a] += delta
+            rating[bout.b] -= delta
+            recent[bout.a].appendleft((bout.a_score == 1.0, bout.b))
+            recent[bout.b].appendleft((bout.a_score == 0.0, bout.a))
+        i = j
     return out

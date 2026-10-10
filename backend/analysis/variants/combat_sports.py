@@ -14,10 +14,11 @@ from backend.data_types import GameData, Pick
 #: (backend/analysis/combat_calibration.py; docs/FINDINGS.md): logistic on
 #: (elo_diff/400, form_diff, quality_diff/400, log1p(fights) diff), no
 #: intercept, fitted symmetric (UFCStats lists winners first), K=16 chosen on
-#: 2021-2023. Test window 2024+ (n=1,181): log-loss .6744 vs .6814 for the old
-#: blend. Still far less informed than the market (67 priced bouts: .664 vs
-#: .586), so MMA picks stay tracking-only (pick_generator.TRACKING_ONLY_SPORTS).
-MMA_COEF = (2.5298, 0.7318, 2.3962, 0.0325)
+#: 2021-2023. Test window 2024+ (n=1,181): log-loss .6747 vs .6815 for the old
+#: blend. Still far less informed than the market (66 bouts with PRE-FIGHT
+#: prices: .666 vs .590), so MMA picks stay tracking-only
+#: (pick_generator.TRACKING_ONLY_SPORTS).
+MMA_COEF = (2.5169, 0.7308, 2.3862, 0.0340)
 
 
 class CombatSportsStrategy(Strategy):

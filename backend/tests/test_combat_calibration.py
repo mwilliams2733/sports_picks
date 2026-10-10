@@ -19,18 +19,19 @@ def test_probability_is_symmetric_in_the_corners():               # Review Focus
     assert abs(probability(coef, f) + probability(coef, g) - 1.0) < 1e-12
 
 
-def test_first_listed_always_winning_is_not_learned():             # Review Focus 1
-    # The CSV's artifact in its purest form: the first-listed fighter ALWAYS
-    # wins, and the features are symmetric (each pairing appears in both
-    # orders). Any corner term would learn "first wins"; this model must not.
+def test_first_listed_winning_more_often_is_not_learned():          # Review Focus 1
+    # The CSV's artifact: the first-listed fighter wins 64% of the time, and
+    # nothing else carries signal (each pairing appears in both orders, the
+    # result is drawn independently of the ratings). A corner term would learn
+    # P(first) = 0.64; this model must stay at 0.5 for equal fighters.
     rng = np.random.default_rng(0)
     data = []
-    for _ in range(1000):
+    for _ in range(2000):
         ea, eb = 1500 + rng.normal(0, 80), 1500 + rng.normal(0, 80)
-        data += [_f(ea, eb, 1.0), _f(eb, ea, 1.0)]
+        data += [_f(ea, eb, float(rng.random() < 0.64)), _f(eb, ea, float(rng.random() < 0.64))]
     coef = fit(data)
-    assert abs(probability(coef, _f(1500, 1500, 1.0)) - 0.5) < 1e-9   # no intercept, mirrored
-    assert np.all(np.abs(coef) < 1e-3)                                 # nothing to learn but the order
+    assert abs(probability(coef, _f(1500, 1500, 1.0)) - 0.5) < 1e-9
+    assert np.all(np.abs(coef) < 0.2)
 
 
 def test_a_real_rating_signal_is_recovered():
@@ -53,7 +54,7 @@ def test_market_report_scores_priced_eligible_bouts_and_counts_dog_picks(db_engi
     from datetime import datetime
     from backend.analysis.combat_calibration import market_report
     from backend.analysis.odds_utils import american_to_implied_prob, remove_vig
-    from backend.models import Base, Game, Odds, Team
+    from backend.models import Base, Game, LineSnapshot, Team
     Base.metadata.create_all(db_engine)
     for tid in range(1, 5):
         db_session.add(Team(id=tid, name=f"F{tid}", abbreviation=f"F{tid}", sport="mma"))
@@ -66,12 +67,19 @@ def test_market_report_scores_priced_eligible_bouts_and_counts_dog_picks(db_engi
         db_session.add(Game(id=gid, sport="mma", season="2026", date=date(2026, 1, d),
                             home_team_id=h, away_team_id=a, status="final", home_score=1, away_score=0))
     db_session.flush()
-    db_session.add_all([
-        Odds(game_id=3, bookmaker="dk", moneyline_home=-200, moneyline_away=170,
-             spread_home=0.0, spread_away=0.0, over_under=0.0, timestamp=datetime(2026, 1, 10)),
-        Odds(game_id=4, bookmaker="dk", moneyline_home=150, moneyline_away=-180,
-             spread_home=0.0, spread_away=0.0, over_under=0.0, timestamp=datetime(2026, 1, 11)),
-    ])
+    # Final review: the Odds table keeps the LATEST price, which for MMA can be
+    # in-play or settled. Only line snapshots captured before the fight date
+    # count -- the last one per book before 00:00 UTC on the bout date.
+    def snap(gid, when, home, away):
+        db_session.add(LineSnapshot(game_id=gid, bookmaker="dk", moneyline_home=home,
+                                    moneyline_away=away, captured_at=when, last_seen_at=when))
+    snap(3, datetime(2026, 1, 9, 12), -200, 170)       # pre-fight: used
+    snap(3, datetime(2026, 1, 10, 3), -1500, 900)      # fight day: ignored
+    snap(4, datetime(2026, 1, 10, 12), 150, -180)      # pre-fight: used
+    db_session.add(Game(id=5, sport="mma", season="2026", date=date(2026, 1, 12),
+                        home_team_id=1, away_team_id=4, status="final", home_score=1, away_score=0))
+    db_session.flush()
+    snap(5, datetime(2026, 1, 12, 2), -300, 250)       # only an in-fight price: bout excluded
     db_session.commit()
     coef = np.array([0.0, 0.0, 0.0, 0.0])         # model says 50% every time
     rep = market_report(db_session, coef, k=24, min_edge=5.0)

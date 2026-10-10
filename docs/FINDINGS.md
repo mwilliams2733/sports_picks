@@ -136,17 +136,27 @@ choose K on 2021-2023, report 2024+ once. Only bouts the live model prices
 
 - Validation 2021-2023 (n=1,221), log-loss by K: 16 .6819, 24 .6823, 32 .6825,
   48/64/96 .6826 -- K barely matters; chose 16.
-- Coefficients (refit < 2024): elo 2.5298, form 0.7318, quality 2.3962,
-  experience 0.0325.
-- Test 2024+ (n=1,181): log-loss .6744, Brier .2408 vs the old blend at K=24
-  .6814 / .2442. Coin flip: .6931 / .25. Better than the blend, but fight
-  outcomes are only weakly predictable from these features (mean |p - 0.5| =
-  .057).
-- **Against the market** (MMA finals with prices where both fighters had
-  history: n=67, about a dozen cards, so correlated -- this cannot show an
-  edge): model log-loss .6644, Brier .2358; **market .5858 / .1994**. The
-  books know far more. At the live 3% edge bar the model would bet 54 of 67,
-  **96% of them underdogs** (mean model .475 vs market .312).
+- Coefficients (refit < 2024): elo 2.5169, form 0.7308, quality 2.3862,
+  experience 0.0340.
+- Test 2024+ (n=1,181, the same bouts for both models): log-loss .6747, Brier
+  .2409 vs the old blend at K=24 .6815 / .2442. Coin flip: .6931 / .25.
+  Better than the blend, but fight outcomes are only weakly predictable from
+  these features (mean |p - 0.5| = .056). No interval was computed (a
+  card-clustered bootstrap would give one); treat the gap as modest.
+- K=16 is the smallest K tried: validation fell monotonically toward it, so
+  the best K may be lower. The spread (.6819 to .6827) is noise-level.
+- **Against the market**, PRE-FIGHT prices only (each book's last line
+  snapshot captured before 00:00 UTC on the bout date; the `odds` table was
+  NOT used -- 175 of its 593 MMA rows were written on or after the fight date
+  and 21 carry |moneyline| >= 1000, i.e. in-play or settled prices): n=66
+  bouts with history on both sides, about a dozen cards, so correlated --
+  this cannot show an edge. Model log-loss .6658, Brier .2365; **market .5896
+  / .2012**. The books know far more. At the live 3% edge bar the model would
+  bet 53 of 66, **96% of them underdogs** (mean model .476 vs market .312).
+- The replay takes every bout's features before any result on that date
+  applies (live reads only earlier dates); early UFC tournaments put a fighter
+  in several bouts one night, listed final first. Fixing this moved the
+  coefficients by under 0.02.
 - Snapshot after replaying Elo at K=16: MMA Elo sd 31.7 -> 21.6; top ten still
   the champions (Jones, St-Pierre, Makhachev, Holloway, Oliveira, Khabib,
   Nunes, Sterling, D. Johnson, Volkanovski). The next three cards: 15 picks,
