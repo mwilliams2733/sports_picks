@@ -203,3 +203,14 @@ def test_a_bout_dated_in_the_future_is_a_bad_date_not_a_result():
     bouts, skipped, _ = parse_record(PAGE.replace("9 May 2026", "9 May 2926"), subject="Daniel Dubois")
     assert [b.fighter_b for b in bouts] == ["Oleksandr Usyk", "Joe Bloggs", "Unlinked Opponent"]
     assert skipped["bad_date"] == 2
+
+
+def test_a_record_table_closed_by_s_end_is_still_read():
+    # Mateusz Masternak's page (2026-10-10 fetch) ends the table with
+    # {{s-end}} instead of |}; 82 of 1,268 fetched record sections lost their
+    # table this way. An unclosed table runs to the end of its section.
+    head, sep, tail = PAGE.rpartition("\n|}")
+    assert sep
+    unclosed = head + "\n{{s-end}}" + tail
+    assert parse_record(unclosed, subject="Daniel Dubois") == parse_record(PAGE, subject="Daniel Dubois")
+    assert parse_record(unclosed, subject="Daniel Dubois")[0]

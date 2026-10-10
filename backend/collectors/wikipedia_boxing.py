@@ -19,7 +19,9 @@ from backend.collectors.ufcstats_history import HistoricalBout
 
 _SECTION = re.compile(r"^==+\s*Professional boxing record\s*==+\s*$", re.M | re.I)
 _NEXT_L2 = re.compile(r"^==[^=]", re.M)
-_TABLE = re.compile(r"^\{\|.*?^\|\}", re.M | re.S)
+#: A table runs to its |} -- or, unclosed (some pages end it with {{s-end}}),
+#: to the end of the section it is searched in.
+_TABLE = re.compile(r"^\{\|.*?(?:^\|\}|\Z)", re.M | re.S)
 _REF = re.compile(r"<ref[^>]*/>|<ref[^>]*>.*?</ref>", re.S | re.I)
 _LINK = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 _TEMPLATE = re.compile(r"\{\{[^{}]*\}\}")
