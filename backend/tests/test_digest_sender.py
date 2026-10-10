@@ -338,3 +338,19 @@ def test_a_send_bar_missing_min_odds_sends_nothing_and_errors(monkeypatch):
 
     assert result["sent"] is False
     assert result["error"] == "ValueError"
+
+
+def test_job_asks_the_selector_for_games_not_yet_started(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from backend.database import get_engine
+    from backend.models import Base
+    engine = get_engine(":memory:")
+    Base.metadata.create_all(engine)
+    seen = {}
+    monkeypatch.setattr("backend.digest.job.select_digest",
+                        lambda *a, **k: seen.update(k) or [])
+    send_daily_digest({"seasons": {}, "digest": {"enabled": True}},
+                      engine, target_date=date(2026, 11, 1))
+    now = seen.get("now")
+    assert now is not None and now.tzinfo is None   # games.start_time is naive UTC
+    assert abs(now - datetime.now(timezone.utc).replace(tzinfo=None)) < timedelta(minutes=1)

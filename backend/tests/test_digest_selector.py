@@ -694,3 +694,18 @@ def test_a_non_numeric_send_bar_value_raises_valueerror_not_typeerror(bad_value)
     broken_bar = {**OPEN_BAR, "max_odds": bad_value}
     with pytest.raises(ValueError, match="digest.send_bar.max_odds is required"):
         select_digest(_session(), date(2026, 11, 1), ["nfl"], SEASONS, send_bar=broken_bar)
+
+
+def test_a_game_that_has_started_is_left_out():
+    """A late send (2026-10-10, the remaining college games) must not email a
+    pick on a game already under way. Unknown start time: kept."""
+    s = _session()
+    d = date(2026, 11, 1)
+    now = datetime(2026, 11, 1, 18, 0)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 9.0, -110, 0.55)], start_time=datetime(2026, 11, 1, 17, 0))
+    _mk_priced(s, "nfl", 2, 3, 4, d, [(3, 8.0, -110, 0.55)], start_time=datetime(2026, 11, 1, 18, 0))
+    _mk_priced(s, "nfl", 3, 5, 6, d, [(3, 7.0, -110, 0.55)], start_time=datetime(2026, 11, 1, 20, 0))
+    _mk_priced(s, "nfl", 4, 7, 8, d, [(3, 6.0, -110, 0.55)])
+    sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR, now=now)
+    assert [p.pick_value for p in sections[0].picks] == ["P3-0", "P4-0"]
+    assert sections[0].diagnostics.games == 2

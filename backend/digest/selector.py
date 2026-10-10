@@ -239,8 +239,12 @@ def _suppressed(record, min_trailing_win_pct, min_trailing_picks, sport) -> bool
 
 def select_digest(session, target_date, sports, seasons, send_bar: dict | None = None,
                   min_trailing_win_pct: float | None = None,
-                  min_trailing_picks: int = 20):
+                  min_trailing_picks: int = 20, now: datetime | None = None):
     """Return one DigestSection per in-season sport.
+
+    ``now`` (naive UTC, as games.start_time is stored) leaves out every game
+    that has already started, so a late send carries only what is still
+    bettable; a game with no start time is kept. None considers every game.
 
     A sport in season always gets a section, even one with no games that day
     or no picks priced inside the window -- ``diagnostics`` on each section
@@ -295,6 +299,9 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
             .filter(Game.sport == sport, Game.date == target_date)
             .all()
         )
+        if now is not None:
+            games = [g for g in games if g.start_time is None
+                     or g.start_time.replace(tzinfo=None) > now]
         games_by_id = {g.id: g for g in games}
 
         if not games:
