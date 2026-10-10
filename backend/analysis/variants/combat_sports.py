@@ -4,10 +4,20 @@ Uses fighter Elo + recent-form score + opponent-quality adjustment. Does not
 emit spread or total picks (those don't apply to combat sports).
 """
 from __future__ import annotations
+import math
 from backend.analysis.strategy import Strategy
 from backend.analysis.confidence import calculate_confidence
 from backend.analysis.odds_utils import american_to_implied_prob, remove_vig, value_edge
 from backend.data_types import GameData, Pick
+
+#: MMA win model fitted 2026-10-10 on 8,867 UFC bouts
+#: (backend/analysis/combat_calibration.py; docs/FINDINGS.md): logistic on
+#: (elo_diff/400, form_diff, quality_diff/400, log1p(fights) diff), no
+#: intercept, fitted symmetric (UFCStats lists winners first), K=16 chosen on
+#: 2021-2023. Test window 2024+ (n=1,181): log-loss .6744 vs .6814 for the old
+#: blend. Still far less informed than the market (67 priced bouts: .664 vs
+#: .586), so MMA picks stay tracking-only (pick_generator.TRACKING_ONLY_SPORTS).
+MMA_COEF = (2.5298, 0.7318, 2.3962, 0.0325)
 
 
 class CombatSportsStrategy(Strategy):
@@ -42,7 +52,7 @@ class CombatSportsStrategy(Strategy):
         ):
             return []
 
-        home_prob = self._model_probability(home_fighter, away_fighter)
+        home_prob = self._model_probability(home_fighter, away_fighter, game.sport)
         away_prob = 1.0 - home_prob
 
         avg_odds = self._average_odds(game)
@@ -77,11 +87,19 @@ class CombatSportsStrategy(Strategy):
                 factors=self._build_factors(game, "away")))
         return picks
 
-    def _model_probability(self, home, away) -> float:
-        """Blend: 70% Elo + 20% recent form + 10% opponent quality.
-        When opponent_avg_elo is missing for either fighter (debut), fall back
-        to 78% Elo + 22% form (re-normalized).
+    def _model_probability(self, home, away, sport: str | None = None) -> float:
+        """MMA: the fitted logistic model (MMA_COEF). Any other sport (boxing):
+        the blend -- 70% Elo + 20% recent form + 10% opponent quality, or
+        78% Elo + 22% form when opponent_avg_elo is missing for either fighter.
         """
+        if sport == "mma":
+            quality = (0.0 if home.opponent_avg_elo is None or away.opponent_avg_elo is None
+                       else (home.opponent_avg_elo - away.opponent_avg_elo) / 400)
+            z = (MMA_COEF[0] * (home.elo_rating - away.elo_rating) / 400
+                 + MMA_COEF[1] * (home.recent_form_score - away.recent_form_score)
+                 + MMA_COEF[2] * quality
+                 + MMA_COEF[3] * (math.log1p(home.fights_count) - math.log1p(away.fights_count)))
+            return max(0.05, min(0.95, 1 / (1 + math.exp(-z))))
         elo_diff = home.elo_rating - away.elo_rating
         elo_term = 1 / (1 + 10 ** (-elo_diff / 400))
 
