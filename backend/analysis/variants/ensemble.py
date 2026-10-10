@@ -68,6 +68,11 @@ DEFAULT_MAX_ODDS = None
 
 DEFAULT_MAX_EDGE = 20.0
 
+#: Sports that get a moneyline pick on EVERY game (owner, 2026-10-10:
+#: "publish picks on every NFL game"). Where neither side clears min_edge /
+#: max_edge, the side with the larger edge is published at confidence 1.
+EVERY_GAME_SPORTS = ("nfl",)
+
 #: How many games of evidence a rolling margin needs before it is taken at
 #: close to face value. Measured, not chosen: `backend.analysis.margin_report`
 #: sweeps it against realised margins, and 5 minimises mean absolute error in
@@ -311,22 +316,31 @@ class EnsembleStrategy(Strategy):
             implied_home, implied_away = remove_vig(raw_home, raw_away)
             home_edge = value_edge(home_prob, avg_odds["moneyline_home"])
             away_edge = value_edge(away_prob, avg_odds["moneyline_away"])
+
+            def _ml_pick(side: str, every_game: bool = False) -> Pick:
+                prob, edge, fair = ((home_prob, home_edge, implied_home) if side == "home"
+                                    else (away_prob, away_edge, implied_away))
+                odds = avg_odds[f"moneyline_{side}"]
+                models, available = self._count_agreeing_models(game, side)
+                confidence = (1 if every_game  # cleared no bar: always "Low"
+                              else calculate_confidence(edge, models, self.thresholds, available))
+                return Pick(game_id=game.game_id, pick_type="moneyline", pick_value=f"{side.upper()} ML",
+                    confidence=confidence, edge_pct=round(edge, 1),
+                    model_probability=round(prob, 4), implied_probability=round(fair, 4),
+                    odds_at_pick=odds,
+                    suggested_unit_size=fractional_kelly(prob, odds, kelly_fraction),
+                    factors=self._build_factors(game, side))
+
             if _takeable(home_edge, "moneyline", avg_odds["moneyline_home"]):
-                models, available = self._count_agreeing_models(game, "home")
-                picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="HOME ML",
-                    confidence=calculate_confidence(home_edge, models, self.thresholds, available), edge_pct=round(home_edge, 1),
-                    model_probability=round(home_prob, 4), implied_probability=round(implied_home, 4),
-                    odds_at_pick=avg_odds["moneyline_home"],
-                    suggested_unit_size=fractional_kelly(home_prob, avg_odds["moneyline_home"], kelly_fraction),
-                    factors=self._build_factors(game, "home")))
+                picks.append(_ml_pick("home"))
             elif _takeable(away_edge, "moneyline", avg_odds["moneyline_away"]):
-                models, available = self._count_agreeing_models(game, "away")
-                picks.append(Pick(game_id=game.game_id, pick_type="moneyline", pick_value="AWAY ML",
-                    confidence=calculate_confidence(away_edge, models, self.thresholds, available), edge_pct=round(away_edge, 1),
-                    model_probability=round(away_prob, 4), implied_probability=round(implied_away, 4),
-                    odds_at_pick=avg_odds["moneyline_away"],
-                    suggested_unit_size=fractional_kelly(away_prob, avg_odds["moneyline_away"], kelly_fraction),
-                    factors=self._build_factors(game, "away")))
+                picks.append(_ml_pick("away"))
+            elif game.sport in EVERY_GAME_SPORTS:
+                # No side clears the bar: the side the model prefers at the
+                # price anyway, at the lowest tier ("Low") whatever its edge --
+                # an edge the max_edge ceiling refused is a likely model error,
+                # not high confidence. A negative edge sizes NO_BET.
+                picks.append(_ml_pick("home" if home_edge >= away_edge else "away", every_game=True))
 
         # Spread picks — distribution-based: P(cover) via normal CDF.
         # Published only where the margin model has been shown to beat the

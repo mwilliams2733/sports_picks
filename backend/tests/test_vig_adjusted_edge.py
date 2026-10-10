@@ -68,9 +68,13 @@ def test_the_edge_is_against_the_break_even_price(market, side, game):
 
 
 @pytest.mark.parametrize("market,side,game", CASES)
-def test_an_edge_only_the_vig_supplied_is_refused(market, side, game):
+def test_an_edge_only_the_vig_supplied_is_refused(market, side, game, monkeypatch):
     """Set min_edge between the vig-adjusted edge and the de-vigged one.
-    The old definition would make this pick; the new one must not."""
+    The old definition would make this pick; the new one must not.
+    The every-game rule (NFL from 2026-10-10: a game that clears no bar
+    still gets a Low pick) is off here -- this tests the bar itself;
+    test_every_game_picks.py owns that rule."""
+    monkeypatch.setattr("backend.analysis.variants.ensemble.EVERY_GAME_SPORTS", ())
     (pick,) = _by_market(game, market)
     devig_edge = (pick.model_probability - pick.implied_probability) * 100
     assert devig_edge - pick.edge_pct > 0.5, "the fixture's vig must be visible"
