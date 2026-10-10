@@ -1,0 +1,124 @@
+"""Fit and measure the MMA win-probability model on history (no leakage).
+
+Symmetric by construction: difference features, no intercept, every bout
+fitted as stored AND mirrored -- UFCStats lists the winner first (the
+first-listed fighter won 64% of imported bouts), so any corner term would
+learn the CSV's ordering, not fighting.
+
+Time split: fit < fit_end, choose K on [fit_end, val_end), report >= val_end
+once. Only bouts the live model would price: both fighters with >= 1 earlier
+bout, decided (draws still move Elo, as 0.5, in the replay).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import sys
+from datetime import date
+
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+
+from backend.analysis.combat_history import BoutFeatures, load_bouts, replay
+from backend.data_types import FighterStats
+
+FEATURES = ("elo_diff", "form_diff", "quality_diff", "experience_diff")
+BASELINE_K = 24
+
+
+def design(f: BoutFeatures) -> np.ndarray:
+    quality = 0.0 if f.quality_a is None or f.quality_b is None else (f.quality_a - f.quality_b) / 400
+    return np.array([(f.elo_a - f.elo_b) / 400, f.form_a - f.form_b, quality,
+                     math.log1p(f.fights_a) - math.log1p(f.fights_b)])
+
+
+def eligible(f: BoutFeatures) -> bool:
+    return f.fights_a > 0 and f.fights_b > 0 and f.outcome in (0.0, 1.0)
+
+
+def fit(features: list[BoutFeatures]) -> np.ndarray:
+    X = np.array([design(f) for f in features])
+    y = np.array([f.outcome for f in features])
+    model = LogisticRegression(fit_intercept=False, C=1.0, max_iter=1000)
+    model.fit(np.vstack([X, -X]), np.concatenate([y, 1 - y]))
+    return model.coef_[0]
+
+
+def probability(coef: np.ndarray, f: BoutFeatures) -> float:
+    return float(1 / (1 + math.exp(-float(design(f) @ coef))))
+
+
+def _stats(elo, form, quality, n) -> FighterStats:
+    return FighterStats(elo_rating=elo, recent_form_score=form, opponent_avg_elo=quality,
+                        fights_count=n, days_since_last_fight=None)
+
+
+def baseline_probability(f: BoutFeatures) -> float:
+    """The live blend (CombatSportsStrategy._model_probability), called, not copied."""
+    from backend.analysis.variants.combat_sports import CombatSportsStrategy
+    strat = CombatSportsStrategy(name="baseline", config={})
+    return strat._model_probability(_stats(f.elo_a, f.form_a, f.quality_a, f.fights_a),
+                                    _stats(f.elo_b, f.form_b, f.quality_b, f.fights_b))
+
+
+def scores(probs: list[float], outcomes: list[float]) -> dict:
+    p = np.clip(np.array(probs), 1e-6, 1 - 1e-6)
+    y = np.array(outcomes)
+    return {"n": int(len(y)),
+            "log_loss": round(float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p))), 4),
+            "brier": round(float(np.mean((p - y) ** 2)), 4),
+            "mean_abs_from_half": round(float(np.mean(np.abs(p - 0.5))), 4)}
+
+
+def _window(features, start, end):
+    return [f for f in features if eligible(f) and (start is None or f.date >= start)
+            and (end is None or f.date < end)]
+
+
+def evaluate(session, ks=(16, 24, 32, 48, 64, 96), fit_end=date(2021, 1, 1),
+             val_end=date(2024, 1, 1)) -> dict:
+    bouts = load_bouts(session, "mma")
+    by_k = {}
+    for k in ks:
+        feats = replay(bouts, k)
+        train, val = _window(feats, None, fit_end), _window(feats, fit_end, val_end)
+        coef = fit(train)
+        by_k[k] = {"coef": coef, "feats": feats,
+                   "val": scores([probability(coef, f) for f in val], [f.outcome for f in val])}
+    best = min(ks, key=lambda k: by_k[k]["val"]["log_loss"])
+    # Refit on everything before the test window with the chosen K, then score
+    # the test window ONCE.
+    feats = by_k[best]["feats"]
+    coef = fit(_window(feats, None, val_end))
+    test = _window(feats, val_end, None)
+    base_feats = by_k[BASELINE_K]["feats"] if BASELINE_K in by_k else replay(bouts, BASELINE_K)
+    base_test = _window(base_feats, val_end, None)
+    return {
+        "bouts": len(bouts), "chosen_k": best, "features": list(FEATURES),
+        "coef": [round(float(c), 4) for c in coef],
+        "validation_by_k": {k: by_k[k]["val"] for k in ks},
+        "test_new": scores([probability(coef, f) for f in test], [f.outcome for f in test]),
+        "test_baseline_k24_blend": scores([baseline_probability(f) for f in base_test],
+                                          [f.outcome for f in base_test]),
+        "windows": {"fit_end": str(fit_end), "val_end": str(val_end)},
+    }
+
+
+def main(argv: list[str]) -> int:
+    from backend.config import load_config
+    from backend.database import get_engine, get_session
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--db")
+    args = parser.parse_args(argv)
+    db = args.db or load_config("config.yaml")["database_path"]
+    session = get_session(get_engine(db))
+    try:
+        print(json.dumps(evaluate(session), indent=2, default=str))
+        return 0
+    finally:
+        session.close()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
