@@ -66,6 +66,7 @@ from backend.analysis.calibrated_model import (
 from backend.analysis.variants.ensemble import EnsembleStrategy
 from backend.data_types import GameData, TeamStats
 from backend.models import Game
+from backend.pipeline.team_stats import COMBAT_SPORTS
 
 # The live ensemble configuration, so the measured probabilities are the ones
 # production would produce. Kept here rather than read from config.yaml because
@@ -235,6 +236,9 @@ def _final_games(session: Session, sport: str | None = None) -> list[Game]:
         Game.status == "final",
         Game.home_score.isnot(None),
         Game.away_score.isnot(None),
+        # Team sports only, like the model it reports on
+        # (calibrated_model.final_team_games).
+        Game.sport.notin_(COMBAT_SPORTS),
     ]
     if sport is not None:
         conds.append(Game.sport == sport)

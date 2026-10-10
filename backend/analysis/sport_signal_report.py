@@ -81,6 +81,7 @@ from backend.analysis.calibration_report import (
 )
 from backend.analysis.variants.ensemble import EnsembleStrategy
 from backend.models import Game
+from backend.pipeline.team_stats import COMBAT_SPORTS
 
 #: Below this many evaluation games a sport's row reports the refusal
 #: instead of a Brier number -- too thin a sample to say anything.
@@ -116,6 +117,8 @@ def _final_games(session: Session) -> list[Game]:
                 Game.home_score.isnot(None),
                 Game.away_score.isnot(None),
                 Game.season_type.notin_(NON_COMPETITIVE_PHASES),
+                # Team sports only (calibrated_model.final_team_games).
+                Game.sport.notin_(COMBAT_SPORTS),
             )
         )
         .order_by(Game.date, Game.id)

@@ -530,6 +530,16 @@ stated explicitly rather than left silent.
   least one earlier final bout. MMA picks from 2026-10-10 are therefore priced
   on real records, but see docs/FINDINGS.md (2026-10-10): the combat Elo is
   compressed and still favours underdogs.
+- **From 2026-10-10 the team-sport model never sees combat bouts.**
+  `calibrated_model.final_team_games` (the training set of the calibrated
+  model and the LightGBM, and the games behind `calibration_report` and
+  `sport_signal_report`) excludes mma and boxing. Before, every final bout
+  (103 MMA on 2026-10-10) was in the NFL/MLB/NBA training set, with an
+  `elo_diff` written after the bout (it contains the result). The fit sets of
+  the NFL and NBA calibration reports were identical with and without the
+  change on 2026-10-10 (843 and 2,016 games: no bout fell before their
+  split dates), so those baselines are unchanged; the live model loses its
+  ~3% of combat rows.
 - **All dates in this dictionary are UTC (see the note at the top of this
   file). Stars (`confidence`) were hidden from users 2026-09-30 UTC, and
   the 3-point shrunk-edge send bar was both introduced AND removed within

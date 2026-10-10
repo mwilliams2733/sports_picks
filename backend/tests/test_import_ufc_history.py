@@ -44,7 +44,8 @@ def test_import_matches_names_skips_known_bouts_and_creates_new_fighters(db_engi
     _seed(db_session)
     summary = import_bouts(db_session, BOUTS)
     assert summary == {"inserted": 2, "duplicates": 1, "same_fighter": 1,       # Review Focus 1
-                       "teams_created": 1, "ambiguous_existing": 1}           # Review Focus 2
+                       "teams_created": 1, "ambiguous_existing": 1,           # Review Focus 2
+                       "matched_non_final": []}
     figs = db_session.query(Game).filter(Game.date == date(2026, 10, 3)).one()
     assert (figs.home_team_id, figs.away_team_id, figs.home_score, figs.away_score, figs.status) == (
         4, 3, 0, 1, "final")
@@ -73,3 +74,48 @@ def test_elo_replays_from_the_imported_bouts_and_coverage_is_measured(db_engine,
     assert ratings[3] > 1500 > ratings[4]                 # Talbott beat Figueiredo
     after = coverage(db_session, date(2026, 10, 10))
     assert after == {"games": 1, "fighters": 2, "fighters_with_history": 1, "games_both_known": 0}
+
+
+def _pair_game(session, gid, home, away, day, status="final"):
+    session.add(Game(id=gid, sport="mma", season="2026", date=day, status=status,
+                     home_team_id=home, away_team_id=away,
+                     home_score=1 if status == "final" else None,
+                     away_score=0 if status == "final" else None))
+
+
+def test_a_fighter_split_across_two_rows_is_still_one_bout(db_engine, db_session):
+    # Final review: a history row "Wang Cong" and an odds-feed row "Cong Wang"
+    # for one fighter; the feed's graded bout is on the feed row. A refresh
+    # must not insert that bout again (the 09-20 double count).
+    Base.metadata.create_all(db_engine)
+    _team(db_session, 1, "Wang Cong")
+    _team(db_session, 2, "Natalia Silva")
+    _team(db_session, 20, "Cong Wang")
+    db_session.flush()
+    _pair_game(db_session, 100, 20, 2, date(2026, 10, 3))
+    db_session.commit()
+    summary = import_bouts(db_session, [BOUTS[0]])
+    assert (summary["inserted"], summary["duplicates"]) == (0, 1)
+
+
+def test_a_bout_two_days_off_is_the_same_card(db_engine, db_session):
+    # dedupe_combat_games.ADJACENT_DAYS: one card under two date conventions.
+    Base.metadata.create_all(db_engine)
+    _team(db_session, 1, "Cong Wang")
+    _team(db_session, 2, "Natalia Silva")
+    db_session.flush()
+    _pair_game(db_session, 100, 1, 2, date(2026, 10, 5))
+    db_session.commit()
+    assert import_bouts(db_session, [BOUTS[0]])["inserted"] == 0
+
+
+def test_a_bout_stored_unfinished_is_reported_not_silently_skipped(db_engine, db_session):
+    Base.metadata.create_all(db_engine)
+    _team(db_session, 1, "Cong Wang")
+    _team(db_session, 2, "Natalia Silva")
+    db_session.flush()
+    _pair_game(db_session, 100, 1, 2, date(2026, 10, 3), status="scheduled")
+    db_session.commit()
+    summary = import_bouts(db_session, [BOUTS[0]])
+    assert (summary["inserted"], summary["duplicates"], summary["matched_non_final"]) == (0, 0, [100])
+    assert db_session.get(Game, 100).status == "scheduled"     # never modified

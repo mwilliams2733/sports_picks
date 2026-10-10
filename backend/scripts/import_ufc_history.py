@@ -15,9 +15,13 @@ Rules:
   lowest id, counted in `ambiguous_existing`. An unknown fighter gets a new
   Team row. Known limitation: two different fighters with the same name
   become one row (the CSV has names, not fighter ids).
-- A bout whose two fighters already have a game within 1 day is skipped:
-  one card can be stored under two date conventions, and a double-counted
-  bout inflates Elo and form (the 2026-09-20 duplicate-bouts incident).
+- A bout whose two fighters (by name key, so a fighter split across two
+  rows still matches) already have a FINAL game within ADJACENT_DAYS is
+  skipped: one card can be stored under two date conventions, and a
+  double-counted bout inflates Elo and form (the 2026-09-20 duplicate-bouts
+  incident). A match on a game that is not final (stuck scheduled,
+  canceled) is not loaded either -- the plan never modifies existing games
+  -- but is listed in `matched_non_final` for the owner to resolve.
 - Existing games, picks and results are never modified. Re-running inserts
   only bouts not yet loaded.
 
@@ -40,24 +44,30 @@ from backend.collectors.ufcstats_history import (HistoricalBout, name_key, read_
 from backend.config import load_config
 from backend.database import get_engine, get_session
 from backend.models import Game, Team
-from backend.scripts.dedupe_combat_games import rebuild_combat_elo
+from backend.scripts.dedupe_combat_games import ADJACENT_DAYS, rebuild_combat_elo
 from backend.time_utils import et_today
 
-SAME_BOUT_DAYS = 1
+#: One card can sit under two date conventions (dedupe_combat_games).
+SAME_BOUT_DAYS = ADJACENT_DAYS
 
 
 def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma") -> dict:
     by_key: dict[str, int] = {}
+    key_of: dict[int, str] = {}
     ambiguous = 0
     for team in session.query(Team).filter(Team.sport == sport).order_by(Team.id):
         key = name_key(team.name)
+        key_of[team.id] = key
         if key in by_key:
             ambiguous += 1
             continue
         by_key[key] = team.id
-    known: dict[frozenset, list[date]] = defaultdict(list)
+    # Keyed on the fighters' NAME keys, not row ids: an odds-feed row and a
+    # history row for one fighter are one fighter here.
+    known: dict[frozenset, list[tuple[date, str, int]]] = defaultdict(list)
     for g in session.query(Game).filter(Game.sport == sport):
-        known[frozenset({g.home_team_id, g.away_team_id})].append(g.date)
+        pair = frozenset({key_of.get(g.home_team_id), key_of.get(g.away_team_id)})
+        known[pair].append((g.date, g.status, g.id))
 
     created = 0
 
@@ -69,27 +79,38 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma") -> di
             session.add(team)
             session.flush()
             by_key[key] = team.id
+            key_of[team.id] = key
             created += 1
         return by_key[key]
 
     inserted = duplicates = same_fighter = 0
+    non_final: list[int] = []
     for b in sorted(bouts, key=lambda b: b.date):
-        if name_key(b.fighter_a) == name_key(b.fighter_b):
+        a_key, b_key = name_key(b.fighter_a), name_key(b.fighter_b)
+        if a_key == b_key:
             same_fighter += 1
             continue
-        home, away = team_id(b.fighter_a), team_id(b.fighter_b)
-        pair = frozenset({home, away})
-        if any(abs((b.date - d).days) <= SAME_BOUT_DAYS for d in known[pair]):
+        pair = frozenset({a_key, b_key})
+        near = [(d, status, gid) for d, status, gid in known[pair]
+                if abs((b.date - d).days) <= SAME_BOUT_DAYS]
+        if any(status == "final" for _, status, _ in near):
             duplicates += 1
             continue
-        session.add(Game(sport=sport, season=str(b.date.year), date=b.date,
-                         home_team_id=home, away_team_id=away, status="final",
-                         home_score=b.a_score, away_score=b.b_score))
-        known[pair].append(b.date)
+        if near:
+            non_final.extend(gid for _, _, gid in near)
+            continue
+        home, away = team_id(b.fighter_a), team_id(b.fighter_b)
+        game = Game(sport=sport, season=str(b.date.year), date=b.date,
+                    home_team_id=home, away_team_id=away, status="final",
+                    home_score=b.a_score, away_score=b.b_score)
+        session.add(game)
+        session.flush()
+        known[pair].append((b.date, "final", game.id))
         inserted += 1
     session.flush()
     return {"inserted": inserted, "duplicates": duplicates, "same_fighter": same_fighter,
-            "teams_created": created, "ambiguous_existing": ambiguous}
+            "teams_created": created, "ambiguous_existing": ambiguous,
+            "matched_non_final": sorted(non_final)}
 
 
 def coverage(session, today: date, days: int = 30, sport: str = "mma") -> dict:

@@ -81,10 +81,16 @@ snapshot of the live db only.
 
 - Parsed 8,833 bouts, 1994-03-11 .. 2026-10-03. Skipped: 92 no-contests, 25
   bouts whose event name carries two different dates.
-- Inserted 8,749 final MMA games; 84 skipped as already stored (same two
-  fighters within a day -- the odds-feed and March-July rows); 2,509 new
-  fighter rows; 0 ambiguous existing names. Near-duplicate bouts (same pair,
-  <= 1 day apart): 0 before, 0 after.
+- Inserted 8,749 final MMA games; 69 skipped as already stored final (same
+  two fighters by name key within 2 days -- the odds-feed and March-July
+  rows); 2,509 new fighter rows; 0 ambiguous existing names. Near-duplicate
+  bouts (same pair, <= 1 day apart): 0 before, 0 after.
+- 15 bouts matched an existing game that is NOT final -- 12 stuck
+  `scheduled` and 3 marked `canceled` from March-July 2026 (e.g. Chimaev v
+  Strickland 05-10, Pereira v Gane 06-15, McGregor v Holloway 07-12), none
+  with a pick or a paper bet. The importer leaves them as they are (it never
+  modifies existing games) and lists their ids; their results are therefore
+  NOT in the Elo replay. Finalizing them from the CSV is an owner decision.
 - MMA Elo replayed over 8,852 bouts. Top of the table is recognisable: Jon
   Jones 1715.8, Islam Makhachev, Georges St-Pierre, Charles Oliveira, Khabib
   Nurmagomedov, Amanda Nunes, Aljamain Sterling, Max Holloway.
