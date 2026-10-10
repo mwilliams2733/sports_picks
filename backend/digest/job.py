@@ -5,7 +5,7 @@ owns pick generation's sibling jobs.
 """
 import logging
 import os
-from datetime import date as _date
+from datetime import date as _date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from backend.database import get_session
@@ -24,7 +24,6 @@ def send_daily_digest(config: dict, engine, target_date=None) -> dict:
     result = {"sent": False, "sections": 0, "picks": 0}
 
     if target_date is None:
-        from datetime import datetime
         target_date = datetime.now(tz=ET).date()
 
     session = None
@@ -39,6 +38,7 @@ def send_daily_digest(config: dict, engine, target_date=None) -> dict:
             send_bar=send_bar,
             min_trailing_win_pct=cfg.get("min_trailing_win_pct"),
             min_trailing_picks=cfg.get("min_trailing_picks", 20),
+            now=datetime.now(timezone.utc).replace(tzinfo=None),
         )
 
         # `select_digest` returns one section per in-season sport, even one

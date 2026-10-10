@@ -41,6 +41,14 @@ def _fmt_edge(edge_pct: float) -> str:
     return f"+{edge_pct:.1f}" if edge_pct >= 0 else f"{edge_pct:.1f}"
 
 
+def _confidence(tier: int) -> str:
+    """The stored confidence tier (1-5) in words, shown on every pick since
+    2026-10-10 (owner request, when the price window came off): 4-5 High,
+    3 Medium, else Low. Words, not stars -- stars stay hidden (2026-09-29)."""
+    level = "High" if tier >= 4 else "Medium" if tier == 3 else "Low"
+    return f"Confidence: {level}"
+
+
 def _fmt_odds(odds: int) -> str:
     """American odds with an explicit sign on a positive price.
 
@@ -195,13 +203,14 @@ def render_digest(sections: list[DigestSection], target_date: date):
                 f'<div style="{_FONT}font-size:13px;color:#374151;padding-top:2px;">'
                 f'{_escape(p.matchup)} &nbsp;·&nbsp; '
                 f'Model {_pct(p.model_prob)} &nbsp;·&nbsp; Price {_pct(p.price_prob)} '
-                f'&nbsp;·&nbsp; Edge {_fmt_edge(p.edge_pct)} pts</div>'
+                f'&nbsp;·&nbsp; Edge {_fmt_edge(p.edge_pct)} pts '
+                f'&nbsp;·&nbsp; {_confidence(p.confidence)}</div>'
                 f'{rationale_html}</td></tr>'
             )
             text_lines.append(
                 f"  {_selection_label(p)} {_price(p)} — {p.matchup} — "
                 f"Model {_pct(p.model_prob)} / Price {_pct(p.price_prob)} / "
-                f"Edge {_fmt_edge(p.edge_pct)} pts"
+                f"Edge {_fmt_edge(p.edge_pct)} pts / {_confidence(p.confidence)}"
             )
             if p.rationale:
                 text_lines.append(f"      {p.rationale}")
@@ -224,10 +233,11 @@ def render_digest(sections: list[DigestSection], target_date: date):
                     f'<div style="{_FONT}font-size:14px;color:#111827;">'
                     f'{_escape(_prop_label(p.pick_value))} <span style="color:#6b7280;">{_escape(_price(p))}</span></div>'
                     f'<div style="{_FONT}font-size:12px;color:#6b7280;padding-top:2px;">'
-                    f'{_escape(p.matchup)}</div></td></tr>'
+                    f'{_escape(p.matchup)} &nbsp;·&nbsp; {_confidence(p.confidence)}</div></td></tr>'
                 )
                 text_lines.append(
-                    f"    {_prop_label(p.pick_value)} {_price(p)} — {p.matchup}"
+                    f"    {_prop_label(p.pick_value)} {_price(p)} — {p.matchup} — "
+                    f"{_confidence(p.confidence)}"
                 )
         text_lines.append("")
 

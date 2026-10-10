@@ -470,3 +470,19 @@ def test_empty_day_subject_starts_with_the_product_name():
     section = DigestSection(sport="nfl", picks=[], props=[])
     subject, _, _ = render_empty_day_digest([section], date(2026, 9, 20), -150, 150)
     assert subject.startswith("Metric Edge — No qualifying picks — ")
+
+
+def test_each_pick_shows_its_confidence_level():
+    """Owner request 2026-10-10: every pick is sent with a confidence level,
+    the stored tier in words -- 4-5 High, 3 Medium, 1-2 Low."""
+    def pick(conf, value):
+        return DigestPick(sport="ncaaf", matchup="A @ B", pick_value=value, odds=-110,
+                          confidence=conf, edge_pct=5.0, rationale="")
+    section = DigestSection(sport="ncaaf",
+                            picks=[pick(5, "HOME ML"), pick(3, "AWAY ML"), pick(1, "X")],
+                            props=[pick(4, "Prop Over 1.5")])
+    _, html, text = render_digest([section], date(2026, 10, 10))
+    for body in (html, text):
+        assert body.count("Confidence: High") == 2
+        assert body.count("Confidence: Medium") == 1
+        assert body.count("Confidence: Low") == 1

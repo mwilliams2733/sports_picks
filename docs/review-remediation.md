@@ -149,3 +149,25 @@ spread (+0.16, 95% CI -0.19..+0.52, p 0.37); Brier model 0.1696 vs market
 anyway, consistent with NFL, which also measured no edge
 (`epa_experiment`). MLB picks are still generated and graded; only the email
 changes.
+
+## 2026-10-10 — price window off; confidence level shown; college football in
+
+**Owner decision.** "Remove the filter on the email notification and send
+the best available but include a confidence level", with NCAA football
+added to the digest sports.
+
+- **Price window off.** `digest.send_bar.min_odds` / `max_odds` set to
+  -100000 / +100000 in `config.yaml` (was -150 / +150). Picks are still
+  ranked by raw edge and capped (`max_game_picks: 3`, `max_props: 5`); a pick
+  with no stored price is still dropped. Tracking-only picks (spreads,
+  totals, MMA, football props) stay out -- `PickModel.published()` is
+  unchanged.
+- **Confidence level.** Every emailed pick shows its stored tier in words:
+  tiers 4-5 "High", 3 "Medium", 1-2 "Low". Stars stay hidden. Measured the
+  same day on all graded published moneylines: the tier has NOT tracked the
+  win rate (tier 1: 35% of 197; tier 4: 43% of 67; tier 5: 45% of 29, model
+  average 61%). NCAA football moneylines: 31-60, against a model average
+  near 58%. The label is the model's own confidence, not a measured one.
+- **Started games left out.** The digest now skips any game whose start
+  time has passed (a late send carries only what can still be bet).
+- **ncaaf** added to `digest.sports`.
