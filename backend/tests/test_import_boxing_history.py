@@ -104,3 +104,55 @@ def test_boxing_keeps_jr_and_sr_apart_and_the_feed_matches_the_same_way(db_engin
     # MMA is unchanged: the feed's "Jon Jones" is the history's "Jon Jones Jr."
     import_bouts(db_session, [HistoricalBout(date(2020, 1, 1), ev, "Jon Jones Jr.", "Al Bee", 1, 0)], sport="mma")
     assert _fighter_by_name_key(db_session, "mma", "Jon Jones").name == "Jon Jones Jr."
+
+
+def _hb(d, a, b, sa=1, sb=0):
+    from backend.collectors.ufcstats_history import HistoricalBout
+    return HistoricalBout(d, "wikipedia:x", a, b, sa, sb)
+
+
+def test_one_bout_under_two_spellings_of_an_opponent_is_one_game(db_engine, db_session):
+    # Final review 2026-10-10: Inoue v "T. J. Doheny" (Inoue's page) and v
+    # "TJ Doheny" (Doheny's page) were two games -- different name pairs, so
+    # the same-pair check never saw them. Same fighter, same surname, within
+    # the same-bout window: one bout.
+    Base.metadata.create_all(db_session.get_bind())
+    d = date(2024, 9, 3)
+    r = import_bouts(db_session, [_hb(d, "Naoya Inoue", "T. J. Doheny"),
+                                  _hb(d, "TJ Doheny", "Naoya Inoue", 0, 1)], sport="boxing")
+    assert r["inserted"] == 1 and r["name_variants"] == 1
+    assert db_session.query(Game).filter(Game.sport == "boxing").count() == 1
+
+
+def test_a_stuck_feed_game_under_a_variant_name_is_finalized_not_twinned(db_engine, db_session):
+    # Game 1323: the feed's "Jermaine Franklin Jr" v Itauma stayed canceled
+    # while Itauma's page (linking plain "Jermaine Franklin") inserted a final twin.
+    Base.metadata.create_all(db_session.get_bind())
+    for tid, name in [(1, "Moses Itauma"), (2, "Jermaine Franklin Jr")]:
+        db_session.add(Team(id=tid, name=name, abbreviation=name, sport="boxing"))
+    db_session.flush()
+    db_session.add(Game(id=1323, sport="boxing", season="2026", date=date(2026, 1, 24), status="canceled",
+                        home_team_id=2, away_team_id=1))   # the variant-named fighter at home
+    db_session.commit()
+    r = import_bouts(db_session, [_hb(date(2026, 1, 24), "Jermaine Franklin", "Moses Itauma", 0, 1)],
+                     sport="boxing", finalize_unfinished=True)
+    assert r["inserted"] == 0 and r["finalized"] == [1323]
+    g = db_session.get(Game, 1323)
+    assert (g.status, g.home_score, g.away_score) == ("final", 0, 1)   # Franklin lost
+
+
+def test_two_different_opponents_on_one_night_are_two_bouts(db_engine, db_session):
+    # Prizefighter-style tournaments: one boxer, several opponents, one night.
+    Base.metadata.create_all(db_session.get_bind())
+    d = date(2010, 2, 19)
+    r = import_bouts(db_session, [_hb(d, "Michael Sprott", "Danny Hughes"),
+                                  _hb(d, "Michael Sprott", "Lucas Browne")], sport="boxing")
+    assert r["inserted"] == 2 and r["name_variants"] == 0
+
+
+def test_mma_import_is_unchanged_by_the_variant_rule(db_engine, db_session):
+    Base.metadata.create_all(db_session.get_bind())
+    d = date(2024, 9, 3)
+    r = import_bouts(db_session, [_hb(d, "Naoya Inoue", "T. J. Doheny"),
+                                  _hb(d, "TJ Doheny", "Naoya Inoue", 0, 1)], sport="mma")
+    assert r["inserted"] == 2

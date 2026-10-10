@@ -41,7 +41,8 @@ from datetime import date, timedelta
 
 from sqlalchemy import or_
 
-from backend.collectors.ufcstats_history import (HistoricalBout, fighter_key, read_bouts,
+from backend.collectors.ufc import normalize_name
+from backend.collectors.ufcstats_history import (_SUFFIXES, HistoricalBout, fighter_key, read_bouts,
                                                  read_event_dates)
 from backend.config import load_config
 from backend.database import get_engine, get_session
@@ -51,6 +52,13 @@ from backend.time_utils import et_today
 
 #: One card can sit under two date conventions (dedupe_combat_games).
 SAME_BOUT_DAYS = ADJACENT_DAYS
+
+
+def surname(name: str) -> str:
+    """The last word of a name, Jr./Sr./II-IV aside: "T. J. Doheny" and "TJ
+    Doheny" -> "doheny"; "Jermaine Franklin Jr" -> "franklin"."""
+    words = [w for w in normalize_name(name).split() if w not in _SUFFIXES]
+    return words[-1] if words else ""
 
 
 def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
@@ -67,10 +75,26 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
         by_key[key] = team.id
     # Keyed on the fighters' NAME keys, not row ids: an odds-feed row and a
     # history row for one fighter are one fighter here.
-    known: dict[frozenset, list[tuple[date, str, int]]] = defaultdict(list)
+    known: dict[frozenset, list[tuple[date, int]]] = defaultdict(list)
+    status_of: dict[int, str] = {}
+    # Boxing only: each fighter's bouts as (date, opponent key, opponent
+    # surname, game id), to catch one bout stored under two spellings of a
+    # name -- a different name PAIR, which `known` cannot see (final review
+    # 2026-10-10: "T. J. Doheny" / "TJ Doheny", ~52 bouts doubled; the feed's
+    # "Jermaine Franklin Jr" v Itauma left canceled beside a final twin).
+    by_fighter: dict[str, list[tuple[date, str, str, int]]] = defaultdict(list)
+    name_of = {t.id: t.name for t in session.query(Team).filter(Team.sport == sport)}
+
+    def remember(gid, day, a_key, a_name, b_key, b_name, status):
+        known[frozenset({a_key, b_key})].append((day, gid))
+        status_of[gid] = status
+        if sport == "boxing":
+            by_fighter[a_key].append((day, b_key, surname(b_name), gid))
+            by_fighter[b_key].append((day, a_key, surname(a_name), gid))
+
     for g in session.query(Game).filter(Game.sport == sport):
-        pair = frozenset({key_of.get(g.home_team_id), key_of.get(g.away_team_id)})
-        known[pair].append((g.date, g.status, g.id))
+        remember(g.id, g.date, key_of.get(g.home_team_id), name_of.get(g.home_team_id, ""),
+                 key_of.get(g.away_team_id), name_of.get(g.away_team_id, ""), g.status)
 
     created = 0
 
@@ -86,7 +110,7 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
             created += 1
         return by_key[key]
 
-    inserted = duplicates = same_fighter = 0
+    inserted = duplicates = same_fighter = name_variants = 0
     non_final: list[int] = []
     finalized: list[int] = []
 
@@ -99,23 +123,31 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
             same_fighter += 1
             continue
         pair = frozenset({a_key, b_key})
-        near = [(d, status, gid) for d, status, gid in known[pair]
-                if abs((b.date - d).days) <= SAME_BOUT_DAYS]
-        if any(status == "final" for _, status, _ in near):
+        near = sorted({gid for d, gid in known[pair] if abs((b.date - d).days) <= SAME_BOUT_DAYS})
+        variant = False
+        if not near and sport == "boxing":
+            near = sorted({gid for me, other, other_name in ((a_key, b_key, b.fighter_b),
+                                                             (b_key, a_key, b.fighter_a))
+                           for d, opp_key, opp_surname, gid in by_fighter[me]
+                           if abs((b.date - d).days) <= SAME_BOUT_DAYS and opp_key != other
+                           and opp_surname and opp_surname == surname(other_name)})
+            variant = bool(near)
+        if any(status_of[gid] == "final" for gid in near):
             duplicates += 1
+            name_variants += variant
             continue
         if near:
-            if finalize_unfinished and len(near) == 1 and not has_bets(near[0][2]):
-                game = session.get(Game, near[0][2])
-                a_home = key_of.get(game.home_team_id) == a_key
+            if finalize_unfinished and len(near) == 1 and not has_bets(near[0]):
+                game = session.get(Game, near[0])
+                a_home = (key_of.get(game.home_team_id) == a_key
+                          or key_of.get(game.away_team_id) == b_key)
                 game.home_score, game.away_score = ((b.a_score, b.b_score) if a_home
                                                     else (b.b_score, b.a_score))
                 game.status = "final"
-                known[pair] = [(d, "final" if gid == game.id else s, gid)
-                               for d, s, gid in known[pair]]
+                status_of[game.id] = "final"
                 finalized.append(game.id)
                 continue
-            non_final.extend(gid for _, _, gid in near)
+            non_final.extend(near)
             continue
         home, away = team_id(b.fighter_a), team_id(b.fighter_b)
         game = Game(sport=sport, season=str(b.date.year), date=b.date,
@@ -123,10 +155,11 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
                     home_score=b.a_score, away_score=b.b_score)
         session.add(game)
         session.flush()
-        known[pair].append((b.date, "final", game.id))
+        remember(game.id, b.date, a_key, b.fighter_a, b_key, b.fighter_b, "final")
         inserted += 1
     session.flush()
-    return {"inserted": inserted, "duplicates": duplicates, "same_fighter": same_fighter,
+    return {"inserted": inserted, "duplicates": duplicates, "name_variants": name_variants,
+            "same_fighter": same_fighter,
             "teams_created": created, "ambiguous_existing": ambiguous,
             "matched_non_final": sorted(set(non_final)),
             "finalized": sorted(set(finalized))}

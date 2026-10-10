@@ -43,7 +43,7 @@ def test_import_matches_names_skips_known_bouts_and_creates_new_fighters(db_engi
     Base.metadata.create_all(db_engine)
     _seed(db_session)
     summary = import_bouts(db_session, BOUTS)
-    assert summary == {"inserted": 2, "duplicates": 1, "same_fighter": 1,       # Review Focus 1
+    assert summary == {"inserted": 2, "duplicates": 1, "name_variants": 0, "same_fighter": 1,       # Review Focus 1
                        "teams_created": 1, "ambiguous_existing": 1,           # Review Focus 2
                        "matched_non_final": [], "finalized": []}
     figs = db_session.query(Game).filter(Game.date == date(2026, 10, 3)).one()
