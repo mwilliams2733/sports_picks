@@ -17,6 +17,7 @@ import backend.pipeline.scheduler as sch
 from backend.database import get_session
 from backend.models import Base, Game, Team
 from backend.paper.pricing import MAX_QUOTE_AGE
+from backend.paper.board import MAX_DAYS
 
 TODAY = datetime.date(2026, 10, 2)
 SEASONS = {"nfl": {"start": "09-05", "end": "02-10"},
@@ -70,11 +71,42 @@ def _config(**kw):
     return {"odds_api_key": "k", "seasons": SEASONS, "odds_budget": {}, **kw}
 
 
-def test_refreshes_in_season_sports_with_a_game_still_to_play_today(engine, calls):
+def test_refreshes_every_in_season_sport_with_a_game_still_to_play_on_the_board(engine, calls):
     sch.refresh_prices(_config(), engine)
-    # mlb's only game today is final; nba is out of season.
+    # mlb's game today is final but it plays tomorrow (on the board); nba is
+    # out of season. Before 2026-10-09 only sports playing TODAY were
+    # refreshed, so NFL went stale every Friday and Saturday.
+    assert [sorted(s) for s in calls["odds"]] == [["mlb", "mma", "nfl"]]
+
+
+def _only_mlb_game_on(engine, day, status="scheduled"):
+    s = get_session(engine)
+    s.query(Game).filter(Game.sport == "mlb").delete()
+    s.add_all([Team(id=101, name="MH", abbreviation="MH", sport="mlb"),
+               Team(id=102, name="MA", abbreviation="MA", sport="mlb")])
+    s.flush()
+    s.add(Game(sport="mlb", season="2026", date=day, status=status,
+               home_team_id=101, away_team_id=102))
+    s.commit()
+    s.close()
+
+
+def test_a_game_on_the_last_board_day_is_refreshed(engine, calls):
+    _only_mlb_game_on(engine, TODAY + datetime.timedelta(days=MAX_DAYS - 1))
+    sch.refresh_prices(_config(), engine)
+    assert "mlb" in calls["odds"][0]
+
+
+def test_a_game_past_the_board_horizon_is_not_refreshed(engine, calls):
+    _only_mlb_game_on(engine, TODAY + datetime.timedelta(days=MAX_DAYS))
+    sch.refresh_prices(_config(), engine)
     assert [sorted(s) for s in calls["odds"]] == [["mma", "nfl"]]
 
+
+def test_a_game_from_before_today_is_not_refreshed(engine, calls):
+    _only_mlb_game_on(engine, TODAY - datetime.timedelta(days=1))
+    sch.refresh_prices(_config(), engine)
+    assert "mlb" not in calls["odds"][0]
 
 def test_refreshes_prices_only_never_picks(engine, calls):
     sch.refresh_prices(_config(), engine)
@@ -97,7 +129,8 @@ def test_a_sport_whose_games_today_have_all_started_is_not_fetched(engine, calls
     s.commit()
     s.close()
     sch.refresh_prices(_config(), engine)
-    assert calls["odds"] == [["mma"]]
+    # mlb plays tomorrow, so it is on the board too; the started nfl game is not.
+    assert [sorted(s) for s in calls["odds"]] == [["mlb", "mma"]]
 
 
 def test_nothing_to_play_today_spends_no_credit(engine, calls, monkeypatch):

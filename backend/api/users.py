@@ -57,6 +57,17 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+#: A bet note's limit: Claude's longest reasoning so far was 654 characters.
+NOTE_MAX = 1000
+
+
+def _clean_note(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip()
+    return v or None
+
+
 class GameLeg(_Strict):
     game_id: int
     pick_type: Literal["moneyline", "spread", "over_under"]
@@ -100,10 +111,22 @@ Leg = Annotated[Union[GameLeg, PropLeg], Field(discriminator="pick_type")]
 
 class GameBetRequest(GameLeg):
     stake: float = Field(allow_inf_nan=False)
+    note: str | None = Field(default=None, max_length=NOTE_MAX)
+
+    @field_validator("note")
+    @classmethod
+    def _note(cls, v):
+        return _clean_note(v)
 
 
 class PropBetRequest(PropLeg):
     stake: float = Field(allow_inf_nan=False)
+    note: str | None = Field(default=None, max_length=NOTE_MAX)
+
+    @field_validator("note")
+    @classmethod
+    def _note(cls, v):
+        return _clean_note(v)
 
 
 class PlacePickRequest(RootModel[Annotated[Union[GameBetRequest, PropBetRequest],
@@ -157,10 +180,11 @@ _FEED_DISPLAY_KEYS = ("label", "game_label", "start_time", "home_team", "away_te
 
 def _feed_leg(leg, quote: pricing.Quote, game) -> dict:
     """A placed leg as the feed carries it (spec §10): the bet request itself,
-    so Tail re-places it at today's price, plus what the feed shows."""
+    so Tail re-places it at today's price, plus what the feed shows. The
+    note is the bettor's, not the bet's: a Tail never carries it."""
     home, away = game.home_team.abbreviation, game.away_team.abbreviation
     start = game_start_utc(game)
-    request = leg.model_dump(exclude={"stake", "expected_odds", "expected_line"})
+    request = leg.model_dump(exclude={"stake", "expected_odds", "expected_line", "note"})
     label = quote.pick_value if quote.pick_type == "prop" else _resolve_pick_value(quote.pick_value, home, away)
     return {**request, "label": label, "game_label": f"{away} @ {home}",
             "start_time": start.isoformat() if start else None,
@@ -513,6 +537,7 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
             payout=None,
             prop_market=quote.prop_market,
             prop_player=quote.prop_player,
+            note=bet.note,
         )
         session.add(pick)
         session.commit()
@@ -523,7 +548,7 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
         user_name = user.name if user else "Unknown"
         odds_str = f"{quote.odds:+d}" if quote.odds >= 0 else str(quote.odds)
         placed_leg = _feed_leg(bet, quote, game)
-        _log_feed_event(session, loop, user_id, "pick_placed", {
+        payload = {
             "user_name": user_name,
             "message": f"{user_name} bet {placed_leg['label']} {odds_str} — ${bet.stake:,.0f}",
             "pick_value": quote.pick_value,
@@ -532,7 +557,10 @@ def place_pick(request: Request, user_id: int, body: PlacePickRequest):
             "bet_id": pick.id,
             "kind": "straight",
             "legs": [placed_leg],
-        })
+        }
+        if bet.note:
+            payload["note"] = bet.note
+        _log_feed_event(session, loop, user_id, "pick_placed", payload)
 
         return {
             "id": pick.id,

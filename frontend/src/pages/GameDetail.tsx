@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import OddsTile from '../components/OddsTile'
+import PickReasoningPanel from '../components/PickReasoning'
 import { GameLines } from '../components/BoardGameCard'
 import { useBoard } from '../hooks/useBoard'
 import { usePropQuotes } from '../hooks/useQuotes'
 import { groupProps, propSelection, startLabel } from '../lib/board'
+import { resolveLabel } from '../lib/quotes'
 import { sameLeg } from '../lib/slip'
 import { useSlip } from '../stores/slipStore'
 import type { BoardGame, PropQuote, SlipSelection } from '../types'
@@ -48,6 +50,12 @@ export default function GameDetail() {
       <Link to="/">‹ Lobby</Link>
       <h1>{game.away_team} @ {game.home_team}</h1>
       <p className="sb-card-head" style={{ padding: 0 }}>{startLabel(game.start_time)}</p>
+      {game.model_pick?.reasoning && (
+        <section className="sb-card sb-why-card">
+          <h2>Why the model likes {resolveLabel(game.model_pick.pick_value, game.home_team, game.away_team)}</h2>
+          <PickReasoningPanel r={game.model_pick.reasoning} />
+        </section>
+      )}
       {offline && <div role="alert" className="sb-offline">Board offline — prices unavailable</div>}
       <div className="sb-detail-tabs" role="tablist">
         <button role="tab" className="sb-sport-tab" aria-selected={tab === 'lines'} onClick={() => setTab('lines')}>Game Lines</button>

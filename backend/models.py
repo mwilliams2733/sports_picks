@@ -533,6 +533,9 @@ class PaperPick(Base):
     parlay_id = Column(Integer, ForeignKey("parlays.id"), nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(tz=timezone.utc))
     graded_at = Column(DateTime, nullable=True)
+    #: The bettor's written reasoning, shown on the ticket and in the feed
+    #: (Claude's picks since 2026-10-09). Straight bets only; never copied by Tail.
+    note = Column(Text, nullable=True)
     user = relationship("UserProfile")
     game = relationship("Game")
     parlay = relationship("Parlay", back_populates="legs")

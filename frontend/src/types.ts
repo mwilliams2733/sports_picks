@@ -317,7 +317,15 @@ export interface PlacedPick {
   pick_value: string; odds: number; line: number | null; quoted_at: string;
 }
 
-export interface ModelPick { pick_type: GamePickType; pick_value: string; odds: number | null; edge_pct: number }
+/** Why the model made a pick (board `model_pick.reasoning`): its numbers and a note written from them. */
+export interface PickReasoning {
+  model_prob: number; market_prob: number | null; edge_pct: number;
+  fair_odds: number | null; units: number | null; note: string;
+}
+export interface ModelPick {
+  pick_type: GamePickType; pick_value: string; odds: number | null; edge_pct: number;
+  reasoning?: PickReasoning | null;
+}
 
 export interface BoardGame {
   id: number; sport: string; date: string; start_time: string | null;
@@ -370,6 +378,8 @@ export interface Ticket {
   kind: 'straight' | 'parlay'; id: number; stake: number; odds: number; to_win: number;
   result: string | null; payout: number | null; created_at: string; sgp: boolean; legs: TicketLeg[];
   cash_out?: CashOutView | null;
+  /** The bettor's own written reasoning (straight bets). */
+  note?: string | null;
 }
 export interface BetsSummary { available: number; balance: number; open_stakes: number; today_pl: number }
 export interface MyBetsData { summary: BetsSummary; tickets: Ticket[] }
@@ -384,7 +394,7 @@ export type FeedLeg = BetLeg & {
 /** Older events carry only user_name/message; every other field is optional. */
 export interface FeedPayload {
   user_name?: string; message?: string; bet_id?: number; kind?: 'straight' | 'parlay';
-  legs?: FeedLeg[]; result?: string; payout?: number; stake?: number;
+  legs?: FeedLeg[]; result?: string; payout?: number; stake?: number; note?: string;
 }
 export interface FeedItem {
   id: number; user_id: number | null; event_type: string; payload: FeedPayload; created_at: string;

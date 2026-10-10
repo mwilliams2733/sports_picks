@@ -34,6 +34,16 @@ describe('GameDetail', () => {
     vi.mocked(api.users.list).mockResolvedValue([])
   })
 
+  it("explains the model's pick on the game page", async () => {
+    vi.mocked(api.paper.board).mockResolvedValue({ games: [{ ...game, model_pick: {
+      pick_type: 'moneyline', pick_value: 'HOME ML', odds: -150, edge_pct: 10.7, reasoning: {
+        model_prob: 0.58, market_prob: 0.52, edge_pct: 10.7, fair_odds: -138, units: 0.87,
+        note: 'The model gives Bucs a 58% chance to win.' } } }] })
+    renderAt('/game/5')
+    expect(await screen.findByRole('heading', { name: 'Why the model likes Bucs ML' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Why this pick')).toHaveTextContent('The model gives Bucs a 58% chance to win.')
+  })
+
   it('shows the matchup and every locked line when nothing is priced', async () => {
     renderAt('/game/5')
     expect(await screen.findByRole('heading', { name: 'Cowboys @ Bucs' })).toBeInTheDocument()

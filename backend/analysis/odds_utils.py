@@ -132,3 +132,13 @@ def compute_pick_clv(
             return None, None
         return None, signed_line_clv(pick_type, pick_value, line_at_close)
     return None, None
+
+
+def prob_to_american(prob: float) -> int:
+    """American odds whose implied probability is ``prob``, with no margin
+    (a fair price): 0.58 -> -138, 0.40 -> +150, 0.50 -> -100."""
+    if not 0 < prob < 1:
+        raise ValueError(f"probability must be strictly between 0 and 1, got {prob}")
+    if prob >= 0.5:
+        return -round(100 * prob / (1 - prob))
+    return round(100 * (1 - prob) / prob)

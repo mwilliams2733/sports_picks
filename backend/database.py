@@ -267,6 +267,18 @@ def migrate_pick_tracking_only(engine):
                     "BOOLEAN NOT NULL DEFAULT 0"))
 
 
+def migrate_paper_pick_note(engine):
+    """Add paper_picks.note if missing (2026-10-09): the bettor's written
+    reasoning for a straight bet. NULL for every earlier bet -- none had one."""
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "paper_picks" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("paper_picks")]
+        if "note" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE paper_picks ADD COLUMN note TEXT"))
+
+
 def migrate_pick_market_prob_novig(engine):
     """Add picks.market_prob_novig if missing.
 
@@ -672,6 +684,7 @@ MIGRATIONS = (
     migrate_pick_market_prob_novig,
     migrate_pick_withdrawal,
     migrate_game_live_detail,
+    migrate_paper_pick_note,
 )
 
 #: Migrations that can destroy data. run_migrations passes each of these an

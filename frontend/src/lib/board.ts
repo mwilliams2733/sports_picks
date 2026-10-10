@@ -26,12 +26,27 @@ export function formatMoney(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 }
 
+const DAY_MS = 86_400_000
+
+/** Whole days from `from` to `to` (both YYYY-MM-DD). */
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS)
+}
+
+/** Days from `today` to the Monday that ends its betting week. Weeks run
+ *  Tuesday-Monday ET, the NFL's week; Saturday college games fall inside it. */
+function daysToMonday(today: string): number {
+  return (8 - new Date(`${today}T00:00:00Z`).getUTCDay()) % 7
+}
+
 export function groupByDay(games: BoardGame[], today: string) {
   const days: { date: string; label: string; games: BoardGame[] }[] = []
   for (const g of games) {
     let day = days.find(d => d.date === g.date)
     if (!day) {
-      day = { date: g.date, label: g.date === today ? 'Today' : formatDay(g.date), games: [] }
+      const ahead = daysBetween(today, g.date)
+      const label = ahead === 0 ? 'Today' : ahead === 1 ? 'Tomorrow' : formatDay(g.date)
+      day = { date: g.date, label, games: [] }
       days.push(day)
     }
     day.games.push(g)
@@ -39,8 +54,42 @@ export function groupByDay(games: BoardGame[], today: string) {
   return days
 }
 
+/** The order a US sportsbook leads with; any other sport follows alphabetically. */
+export const SPORT_ORDER = ['nfl', 'ncaaf', 'mlb', 'nba', 'nhl', 'ncaab', 'mma', 'boxing']
+
 export function sportTabs(games: BoardGame[]): string[] {
-  return [...new Set(games.map(g => g.sport))]
+  const rank = (s: string) => {
+    const i = SPORT_ORDER.indexOf(s)
+    return i === -1 ? SPORT_ORDER.length : i
+  }
+  return [...new Set(games.map(g => g.sport))].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+}
+
+export type DateChip = 'all' | 'today' | 'tomorrow' | 'this_week' | 'next_week'
+export const DATE_CHIPS: Record<DateChip, string> = {
+  all: 'All', today: 'Today', tomorrow: 'Tomorrow', this_week: 'This week', next_week: 'Next week',
+}
+
+function inChip(date: string, chip: DateChip, today: string): boolean {
+  const ahead = daysBetween(today, date)
+  const end = daysToMonday(today)
+  switch (chip) {
+    case 'all': return true
+    case 'today': return ahead === 0
+    case 'tomorrow': return ahead === 1
+    case 'this_week': return ahead >= 0 && ahead <= end
+    case 'next_week': return ahead > end && ahead <= end + 7
+  }
+}
+
+export function filterByChip(games: BoardGame[], chip: DateChip, today: string): BoardGame[] {
+  return games.filter(g => inChip(g.date, chip, today))
+}
+
+/** "All" plus each chip that would show at least one game, in display order. */
+export function dateChips(games: BoardGame[], today: string): DateChip[] {
+  return (Object.keys(DATE_CHIPS) as DateChip[])
+    .filter(c => c === 'all' || games.some(g => inChip(g.date, c, today)))
 }
 
 export function findGameQuote(quotes: GameQuote[], pickType: GamePickType, side: GameSide): GameQuote | undefined {

@@ -62,6 +62,11 @@ describe('Leaders', () => {
     renderPage()
     expect(await screen.findByLabelText('Your position')).toHaveTextContent('Me')
   })
+  it("shows a placed bet's note under it in the feed", async () => {
+    vi.mocked(api.users.feed).mockResolvedValue([{ ...placed, payload: { ...placed.payload, note: 'Line has not moved.' } }])
+    renderPage()
+    expect(await screen.findByText('Line has not moved.')).toBeInTheDocument()
+  })
   it('does not pin your row when it is already on the board', async () => {
     vi.mocked(api.users.leaderboard).mockResolvedValue([row({ id: 1, name: 'Me', n: 3, wins: 2, losses: 1 })])
     renderPage()

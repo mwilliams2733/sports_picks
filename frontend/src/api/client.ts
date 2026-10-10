@@ -157,7 +157,7 @@ export const api = {
     quotes: (gameId: number) => get<{ game_id: number; quotes: GameQuote[] }>(`/paper/quotes?game_id=${gameId}`),
     propQuotes: (gameId: number) =>
       get<{ game_id: number; quotes: PropQuote[] }>(`/paper/prop-quotes?game_id=${gameId}`),
-    board: () => get<{ games: BoardGame[] }>('/paper/board?days=7'),
+    board: () => get<{ games: BoardGame[] }>('/paper/board?days=14'),
   },
   pipeline: {
     run: (sport?: string) => post<{

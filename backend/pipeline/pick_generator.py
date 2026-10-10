@@ -50,6 +50,16 @@ STRATEGY_MAP = {
     "combat_sports": CombatSportsStrategy,
 }
 
+#: A model probability of exactly one half means the model had no
+#: information (equal ratings, no stats): any "edge" is the price alone.
+#: Owner, 2026-10-09: such picks are tracked, not published, until the MMA
+#: investigation (docs/FINDINGS.md) says why MMA had no information.
+NO_INFORMATION_PROB = 0.5
+
+
+def is_no_information(model_prob: float | None) -> bool:
+    return model_prob is not None and abs(model_prob - NO_INFORMATION_PROB) < 1e-9
+
 def _bankroll_state(session: Session) -> tuple[float, float]:
     """``(current, peak)`` bankroll in units, from every settled pick.
 
@@ -284,6 +294,13 @@ def generate_and_store_picks(session: Session, strategy_id: int,
             # that will actually be stored, not everything predicted.
             # Tracked picks are excluded: they are not bets, so they must
             # not shrink the stake of the picks that are.
+            # A no-information pick is kept for the record but never
+            # published (owner, 2026-10-09). Set before sizing, so it does not
+            # shrink the stake of the picks that are bets; _refresh_pick copies
+            # the flag, so a refreshed pick follows the same rule.
+            for p in picks:
+                if is_no_information(getattr(p, "model_probability", None)):
+                    p.tracking_only = True
             keepers = [p for p in picks if p.confidence >= 1
                        and not getattr(p, "tracking_only", False)]
             game_fraction = sizing_fraction(
@@ -303,7 +320,14 @@ def generate_and_store_picks(session: Session, strategy_id: int,
                     existing = already.get((game.id, pick.pick_type))
                     if existing is not None:
                         if _refreshable(existing, game, graded_pick_ids):
+                            was_tracked = existing.tracking_only
                             _refresh_pick(existing, pick)
+                            # An emailed pick was advice people acted on: it
+                            # stays on the public record whatever the refresh
+                            # finds (e.g. a no-information 0.5), as it is
+                            # never withdrawn either.
+                            if existing.id in emailed_pick_ids:
+                                existing.tracking_only = was_tracked
                             record_pick_version(session, existing, "refresh")
                             refreshed += 1
                         continue
