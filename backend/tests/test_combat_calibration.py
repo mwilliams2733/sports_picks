@@ -47,3 +47,36 @@ def test_a_real_rating_signal_is_recovered():
 def test_eligibility_matches_the_live_gate():
     assert eligible(_f(1500, 1500, 1.0)) and not eligible(_f(1500, 1500, 0.5))
     assert not eligible(_f(1500, 1500, 1.0, n_a=0))
+
+
+def test_market_report_scores_priced_eligible_bouts_and_counts_dog_picks(db_engine, db_session):
+    from datetime import datetime
+    from backend.analysis.combat_calibration import market_report
+    from backend.analysis.odds_utils import american_to_implied_prob, remove_vig
+    from backend.models import Base, Game, Odds, Team
+    Base.metadata.create_all(db_engine)
+    for tid in range(1, 5):
+        db_session.add(Team(id=tid, name=f"F{tid}", abbreviation=f"F{tid}", sport="mma"))
+    db_session.flush()
+    # History so both fighters of bouts 3 and 4 have >= 1 earlier bout.
+    for gid, d, h, a in [(1, 1, 1, 3), (2, 2, 2, 4)]:
+        db_session.add(Game(id=gid, sport="mma", season="2026", date=date(2026, 1, d),
+                            home_team_id=h, away_team_id=a, status="final", home_score=1, away_score=0))
+    for gid, d, h, a in [(3, 10, 1, 2), (4, 11, 3, 4)]:
+        db_session.add(Game(id=gid, sport="mma", season="2026", date=date(2026, 1, d),
+                            home_team_id=h, away_team_id=a, status="final", home_score=1, away_score=0))
+    db_session.flush()
+    db_session.add_all([
+        Odds(game_id=3, bookmaker="dk", moneyline_home=-200, moneyline_away=170,
+             spread_home=0.0, spread_away=0.0, over_under=0.0, timestamp=datetime(2026, 1, 10)),
+        Odds(game_id=4, bookmaker="dk", moneyline_home=150, moneyline_away=-180,
+             spread_home=0.0, spread_away=0.0, over_under=0.0, timestamp=datetime(2026, 1, 11)),
+    ])
+    db_session.commit()
+    coef = np.array([0.0, 0.0, 0.0, 0.0])         # model says 50% every time
+    rep = market_report(db_session, coef, k=24, min_edge=5.0)
+    assert rep["n"] == 2
+    expected_home = remove_vig(american_to_implied_prob(-200), american_to_implied_prob(170))[0]
+    assert abs(rep["market_probs"][0] - expected_home) < 1e-9
+    # 50% vs a +170 dog and a +150 dog: both picks are the underdog.
+    assert rep["simulated_picks"] == 2 and rep["underdog_share"] == 1.0

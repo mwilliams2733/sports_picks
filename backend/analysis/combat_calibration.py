@@ -105,6 +105,56 @@ def evaluate(session, ks=(16, 24, 32, 48, 64, 96), fit_end=date(2021, 1, 1),
     }
 
 
+def market_report(session, coef, k: float, min_edge: float) -> dict:
+    """The fitted model vs the books on MMA finals that have prices, and the
+    picks the strategy's rule would have made from it. n is small and bouts
+    on one card are correlated: this can show the underdog pattern, not an edge.
+    Prices are averaged with `strategy.average_odds`, as the strategy does."""
+    from collections import defaultdict
+    from backend.analysis.odds_utils import american_to_implied_prob, remove_vig, value_edge
+    from backend.analysis.strategy import average_odds
+    from backend.data_types import OddsSnapshot
+    from backend.models import Game, Odds
+
+    feats = {f.game_id: f for f in replay(load_bouts(session, "mma"), k)}
+    by_game = defaultdict(list)
+    for o in (session.query(Odds).join(Game, Game.id == Odds.game_id)
+              .filter(Game.sport == "mma", Game.status == "final")):
+        if o.moneyline_home and o.moneyline_away:
+            by_game[o.game_id].append(o)
+    model_p, market_p, ys = [], [], []
+    picks = dogs = 0
+    on_picks_model, on_picks_market = [], []
+    for gid in sorted(by_game):
+        f = feats.get(gid)
+        if f is None or not eligible(f):
+            continue
+        rows = by_game[gid]
+        nv = [remove_vig(american_to_implied_prob(o.moneyline_home),
+                         american_to_implied_prob(o.moneyline_away))[0] for o in rows]
+        m, p = sum(nv) / len(nv), probability(coef, f)
+        model_p.append(p)
+        market_p.append(m)
+        ys.append(f.outcome)
+        avg = average_odds([OddsSnapshot(bookmaker=o.bookmaker, moneyline_home=o.moneyline_home,
+                                         moneyline_away=o.moneyline_away, spread_home=0.0,
+                                         spread_away=0.0, over_under=0.0) for o in rows])
+        if avg is None:
+            continue
+        for prob, price, mk in ((p, avg["moneyline_home"], m), (1 - p, avg["moneyline_away"], 1 - m)):
+            if value_edge(prob, price) >= min_edge:      # home first, as predict() does
+                picks += 1
+                dogs += int(price > 0)
+                on_picks_model.append(prob)
+                on_picks_market.append(mk)
+                break
+    return {"n": len(ys), "model": scores(model_p, ys), "market": scores(market_p, ys),
+            "market_probs": market_p, "simulated_picks": picks,
+            "underdog_share": round(dogs / picks, 4) if picks else None,
+            "mean_model_on_picks": round(float(np.mean(on_picks_model)), 4) if picks else None,
+            "mean_market_on_picks": round(float(np.mean(on_picks_market)), 4) if picks else None}
+
+
 def main(argv: list[str]) -> int:
     from backend.config import load_config
     from backend.database import get_engine, get_session
