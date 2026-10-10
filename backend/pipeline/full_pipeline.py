@@ -745,6 +745,29 @@ def _resolve_team(session: Session, sport: str, label: str) -> Team | None:
     )
 
 
+def _combat_start_time(sport: str, game: Game, commence: str) -> None:
+    """Give a scheduled combat game the feed's start time (2026-10-10).
+
+    Odds-feed MMA/boxing games had no start_time, so nothing knew a fight had
+    started: refreshes wrote in-play and settled prices over the pre-fight
+    one (175 of 593 MMA odds rows were written on or after the fight date),
+    the closing line was the last price seen, and paper bets stayed open
+    during the card. The feed's commence_time is the only start a combat game
+    has; it is re-applied on every fetch because the feed corrects
+    placeholder times. Team sports keep ESPN's start; finished games are
+    never touched. Stored as naive UTC, the convention of the column.
+    """
+    if not _is_combat(sport) or game.status != "scheduled":
+        return
+    try:
+        start = _parse_start_time(commence)
+    except (TypeError, ValueError):
+        return
+    start = start.astimezone(timezone.utc).replace(tzinfo=None)
+    if game.start_time != start:
+        game.start_time = start
+
+
 def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
     """Create a game from Odds API event if it doesn't already exist in the DB.
 
@@ -775,6 +798,7 @@ def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
                 logger.info("Odds event %s moved: %s -> %s (game %s)",
                             odds_api_id, existing.date, game_date, existing.id)
                 existing.date = game_date
+            _combat_start_time(sport, existing, commence)
             return
 
     # Resolve BEFORE the duplicate check below: that check is gated on both
@@ -803,6 +827,7 @@ def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
             # next date drift matches above instead of inserting a twin.
             if odds_api_id and existing.odds_api_id is None:
                 existing.odds_api_id = odds_api_id
+            _combat_start_time(sport, existing, commence)
             return
 
     # Create teams only if they don't exist.
@@ -842,12 +867,14 @@ def _ensure_game_from_odds(session: Session, sport: str, event: dict) -> None:
             away_team = team
 
 
-    session.add(Game(
+    game = Game(
         sport=sport, season=season_label(sport, game_date, seasons_config()),
         date=game_date,
         home_team_id=home_team.id, away_team_id=away_team.id,
         status="scheduled", odds_api_id=odds_api_id,
-    ))
+    )
+    _combat_start_time(sport, game, commence)
+    session.add(game)
     session.commit()
 
 
