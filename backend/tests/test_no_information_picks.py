@@ -12,7 +12,7 @@ import pytest
 
 import backend.pipeline.pick_generator as pg
 from backend.data_types import Pick
-from backend.models import Base, EloRating, Game, Odds, PickModel, StrategyModel, Team
+from backend.models import Base, EloRating, EmailedPick, Game, Odds, PickModel, StrategyModel, Team
 from backend.scripts import demote_no_information_picks as demote
 
 DAY = date(2026, 3, 1)
@@ -90,3 +90,50 @@ def test_the_demote_script_moves_only_published_unstarted_one_half_picks(db_engi
     pick(1, 0.5, pick_type="over_under", tracking_only=True)   # already tracked
     db_session.commit()
     assert [p.id for p in demote.candidates(db_session, now)] == [target.id]
+
+
+def test_an_emailed_pick_stays_published_when_a_refresh_finds_no_information(db_engine, db_session,
+                                                                             monkeypatch):
+    # An emailed pick was advice people acted on (withdraw_pick refuses it for
+    # the same reason): the public record keeps it whatever a refresh finds.
+    Base.metadata.create_all(db_engine)
+    _seed(db_session)
+    p = PickModel(game_id=1, strategy_id=1, pick_type="moneyline", pick_value="AWAY ML",
+                  confidence=3, edge_pct=10.0, odds_at_pick=130, model_prob=0.55)
+    db_session.add(p)
+    db_session.flush()
+    db_session.add(EmailedPick(digest_date=DAY, pick_id=p.id, game_id=1, sport="nba",
+                               pick_type="moneyline", pick_value="AWAY ML", odds=130))
+    db_session.commit()
+    monkeypatch.setitem(pg.STRATEGY_MAP, "value_only", _fake_strategy(0.5))
+    pg.generate_and_store_picks(db_session, strategy_id=1, target_date=DAY)
+    db_session.expire_all()
+    pick = db_session.get(PickModel, p.id)
+    assert pick.model_prob == 0.5            # refreshed...
+    assert pick.tracking_only is False       # ...but still on the public record
+
+
+def test_the_demote_script_skips_emailed_picks_and_apply_unpublishes(db_engine, db_session):
+    Base.metadata.create_all(db_engine)
+    now = datetime(2026, 10, 9, 22, 0, tzinfo=timezone.utc)
+    db_session.add_all([Team(id=1, name="H", abbreviation="H", sport="mma"),
+                        Team(id=2, name="A", abbreviation="A", sport="mma"),
+                        StrategyModel(id=1, name="x", config_json="{}")])
+    db_session.flush()
+    db_session.add(Game(id=1, sport="mma", season="2026", date=date(2026, 10, 10),
+                        status="scheduled", home_team_id=1, away_team_id=2))
+    db_session.flush()
+    emailed = PickModel(game_id=1, strategy_id=1, pick_type="moneyline", pick_value="AWAY ML",
+                        confidence=3, edge_pct=19.0, odds_at_pick=130, model_prob=0.5)
+    quiet = PickModel(game_id=1, strategy_id=1, pick_type="spread", pick_value="AWAY +1.5",
+                      confidence=3, edge_pct=19.0, odds_at_pick=130, model_prob=0.5)
+    db_session.add_all([emailed, quiet])
+    db_session.flush()
+    db_session.add(EmailedPick(digest_date=date(2026, 10, 9), pick_id=emailed.id, game_id=1,
+                               sport="mma", pick_type="moneyline", pick_value="AWAY ML", odds=130))
+    db_session.commit()
+    found = demote.candidates(db_session, now)
+    assert [p.id for p in found] == [quiet.id]
+    demote.apply(db_session, found)
+    published = {p.id for p in db_session.query(PickModel).filter(PickModel.published())}
+    assert published == {emailed.id}

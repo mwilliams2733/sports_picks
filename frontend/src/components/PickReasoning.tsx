@@ -12,7 +12,7 @@ export default function PickReasoningPanel({ r }: { r: PickReasoning }) {
         <div><dt>Model</dt><dd>{pct(r.model_prob)}</dd></div>
         {r.market_prob !== null && <div><dt>Market</dt><dd>{pct(r.market_prob)}</dd></div>}
         <div><dt>Edge</dt><dd>{r.edge_pct.toFixed(1)}%</dd></div>
-        {r.fair_odds !== null && <div><dt>Fair price</dt><dd>{formatOdds(r.fair_odds)}</dd></div>}
+        {r.fair_odds !== null && <div><dt>Model's fair price</dt><dd>{formatOdds(r.fair_odds)}</dd></div>}
         {r.units !== null && <div><dt>Model stake</dt><dd>{r.units.toFixed(2)}u</dd></div>}
       </dl>
       <p className="sb-why-note">{r.note}</p>

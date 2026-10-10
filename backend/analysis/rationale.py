@@ -98,6 +98,10 @@ SPORT_CAVEATS = {
             "this as one opinion, not a sure thing."),
     "mlb": ("The model has not shown an edge over MLB closing lines yet, so treat "
             "this as one opinion, not a sure thing."),
+    # config.yaml digest note: measured first, no edge over the close
+    # (backend/scripts/nba_market_experiment.py).
+    "nba": ("The model has not shown an edge over NBA closing lines yet, so treat "
+            "this as one opinion, not a sure thing."),
 }
 DEFAULT_CAVEAT = "This is the model's opinion, not a sure thing; its record is on the Track Record page."
 
@@ -136,7 +140,9 @@ def pick_note(*, sport: str, pick_type: str, pick_value: str, home: str, away: s
     if odds is not None and edge_pct is not None:
         price = f"At {_odds(odds)} that is a {edge_pct:.1f}% edge"
         if 0 < model_prob < 1:
-            price += f" (fair price {_odds(prob_to_american(model_prob))})"
+            # "the model's": right after the books' margin-free chance, a bare
+            # "fair price" reads as the books' own.
+            price += f" (the model's fair price {_odds(prob_to_american(model_prob))})"
         parts.append(price + ".")
     because = render_rationale(factors, home, away)
     if because:

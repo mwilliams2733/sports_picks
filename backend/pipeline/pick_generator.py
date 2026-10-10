@@ -320,7 +320,14 @@ def generate_and_store_picks(session: Session, strategy_id: int,
                     existing = already.get((game.id, pick.pick_type))
                     if existing is not None:
                         if _refreshable(existing, game, graded_pick_ids):
+                            was_tracked = existing.tracking_only
                             _refresh_pick(existing, pick)
+                            # An emailed pick was advice people acted on: it
+                            # stays on the public record whatever the refresh
+                            # finds (e.g. a no-information 0.5), as it is
+                            # never withdrawn either.
+                            if existing.id in emailed_pick_ids:
+                                existing.tracking_only = was_tracked
                             record_pick_version(session, existing, "refresh")
                             refreshed += 1
                         continue

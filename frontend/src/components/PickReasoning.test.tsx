@@ -18,7 +18,7 @@ describe('PickReasoningPanel', () => {
     render(<PickReasoningPanel r={{ ...r, market_prob: null, fair_odds: null, units: null }} />)
     const panel = screen.getByLabelText('Why this pick')
     expect(panel).not.toHaveTextContent('Market')
-    expect(panel).not.toHaveTextContent('Fair price')
+    expect(panel).not.toHaveTextContent(/fair price/i)
     expect(panel).not.toHaveTextContent(/NaN|null|undefined/)
   })
 })

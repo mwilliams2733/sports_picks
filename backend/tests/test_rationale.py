@@ -75,7 +75,7 @@ def _note(**kw):
 def test_a_full_nfl_moneyline_note():
     assert _note() == (
         "The model gives Kansas City a 58% chance to win; the books' price, with their margin "
-        "removed, says 52%. At -110 that is a 10.7% edge (fair price -138). Rating gap slightly "
+        "removed, says 52%. At -110 that is a 10.7% edge (the model's fair price -138). Rating gap slightly "
         "favors Kansas City. The model has not shown an edge over NFL closing lines yet, so treat "
         "this as one opinion, not a sure thing.")
 
@@ -91,3 +91,11 @@ def test_missing_numbers_are_left_out_never_invented():   # Review Focus 4
     note = _note(market_prob=None, odds=None, factors=[], sport="ncaaf")
     assert note == ("The model gives Kansas City a 58% chance to win. " + DEFAULT_CAVEAT)
     assert "None" not in note and "nan" not in note.lower()
+
+
+def test_nba_carries_its_measured_caveat():
+    # config.yaml digest note: NBA "was measured first and has no edge over the
+    # close (backend/scripts/nba_market_experiment.py)".
+    assert _note(sport="nba", factors=[]).endswith(
+        "The model has not shown an edge over NBA closing lines yet, so treat this as one "
+        "opinion, not a sure thing.")

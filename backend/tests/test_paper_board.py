@@ -180,6 +180,6 @@ def test_model_pick_carries_its_reasoning():
         "model_prob": 0.58, "market_prob": 0.52, "edge_pct": 10.7, "fair_odds": -138, "units": 0.87}
     assert r["note"] == (
         f"The model gives {home} a 58% chance to win; the books' price, with their margin removed, "
-        f"says 52%. At -110 that is a 10.7% edge (fair price -138). Rating gap slightly favors "
+        f"says 52%. At -110 that is a 10.7% edge (the model's fair price -138). Rating gap slightly favors "
         f"{home}. The model has not shown an edge over NFL closing lines yet, so treat this as one "
         f"opinion, not a sure thing.")
