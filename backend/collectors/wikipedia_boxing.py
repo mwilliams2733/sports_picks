@@ -14,6 +14,7 @@ import time
 from datetime import date
 from pathlib import Path
 
+from backend.collectors.ufc import normalize_name
 from backend.collectors.ufcstats_history import HistoricalBout
 
 _SECTION = re.compile(r"^==+\s*Professional boxing record\s*==+\s*$", re.M | re.I)
@@ -30,6 +31,8 @@ _WRAPPER = re.compile(r"\{\{\s*(?:small|nowrap|nobr)\s*\|([^{}|]*)\}\}", re.I)
 _ISO = re.compile(r"(\d{4})\s*[-–]\s*(\d{1,2})\s*[-–]\s*(\d{1,2})")
 _DMY = re.compile(r"(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{4})")
 _MDY = re.compile(r"([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s*(\d{4})")
+_PAREN = re.compile(r"\s*\([^)]*\)\s*$")
+_LEAD_NAME = re.compile(r"'''(.+?)'''")
 _OPPONENT_HEADER = re.compile(r"^!.*Opponent", re.M | re.I)
 _MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
@@ -125,12 +128,19 @@ def parse_date(cell: str) -> date | None:
     return None
 
 
+def page_name(title: str) -> str:
+    """The person a page title names: "Joe Bloggs (boxer)" -> "Joe Bloggs"."""
+    return _PAREN.sub("", title).strip()
+
+
 def _opponent(cell: str) -> tuple[str, str | None]:
-    """(display name, page title or None) of the opponent cell."""
+    """(name, page title or None) of the opponent cell. A linked opponent is
+    named by the page title, not the label: [[Floyd Mayweather Jr.|Floyd
+    Mayweather]] drops the "Jr." that tells him from his father."""
     link = _LINK.search(cell)
     if link:
         title = link.group(1).strip()
-        return (link.group(2) or title).strip(), title
+        return page_name(title), title
     return _TEMPLATE.sub("", cell).strip(), None
 
 
@@ -191,6 +201,16 @@ def _http_get(params: dict) -> dict:
     return r.json()
 
 
+def names_fighter(title: str, wikitext: str, name: str) -> bool:
+    """Every word of ``name`` is in the page title (minus its "(boxer)"
+    qualifier) or in the lead's bold name: "Saul Alvarez" is on the page
+    "Canelo Álvarez", whose lead names Santos Saúl Álvarez Barragán."""
+    words = set(normalize_name(name).split())
+    lead = _LEAD_NAME.search(wikitext)
+    candidates = [page_name(title)] + ([_TEMPLATE.sub("", lead.group(1))] if lead else [])
+    return bool(words) and any(words <= set(normalize_name(c).split()) for c in candidates)
+
+
 class WikiClient:
     """MediaWiki API reads, cached on disk, at most one live request per
     `min_interval` seconds. A cached answer -- including "no such page" -- is
@@ -218,10 +238,15 @@ class WikiClient:
         path.write_text(json.dumps(data), encoding="utf-8")
         return data
 
-    def wikitext(self, title: str) -> str | None:
+    def page(self, title: str) -> tuple[str, str | None]:
+        """(the title the API resolved ``title`` to, its wikitext or None)."""
         data = self._cached(f"page:{title}", {"action": "parse", "page": title,
                                               "prop": "wikitext", "redirects": 1})
-        return (data.get("parse") or {}).get("wikitext")
+        parsed = data.get("parse") or {}
+        return parsed.get("title") or title, parsed.get("wikitext")
+
+    def wikitext(self, title: str) -> str | None:
+        return self.page(title)[1]
 
     def search(self, query: str) -> list[str]:
         data = self._cached(f"search:{query}", {"action": "query", "list": "search",
@@ -230,14 +255,17 @@ class WikiClient:
 
     def record_page(self, name: str) -> tuple[str, str] | None:
         """The page of OUR fighter: '<name> (boxer)', then '<name>', then the
-        top search hits -- the first that has a record table. A namesake page
-        (no record table) is never accepted."""
+        top search hits -- the first that has a record table AND names our
+        fighter (`names_fighter`). A namesake page (no record table) and
+        another boxer's page (a search hit that only mentions ours: the
+        2026-10-10 fetch gave "Jordan Orozco" Terence Crawford's record) are
+        never accepted."""
         tried = set()
         for title in [f"{name} (boxer)", name] + self.search(f"{name} boxer"):
             if title in tried:
                 continue
             tried.add(title)
-            wt = self.wikitext(title)
-            if wt and record_table(wt):
+            resolved, wt = self.page(title)
+            if wt and record_table(wt) and names_fighter(resolved, wt, name):
                 return title, wt
         return None

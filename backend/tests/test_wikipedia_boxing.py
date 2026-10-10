@@ -174,3 +174,23 @@ def test_iso_and_wrapped_dates_found_in_the_real_fetch():
     assert parse_date("Dec 17 2022") == date(2022, 12, 17)
     assert parse_date("04/05/2019") is None        # day/month order unknowable: stays skipped
     assert parse_date("2019-13-40") is None
+
+
+def test_a_search_hit_about_another_boxer_is_never_our_fighter(tmp_path):
+    # 2026-10-10 live fetch: "Jordan Orozco" resolved through search to Terence
+    # Crawford's page and "Ivan Rosado" to Canelo's -- unknowns priced as champions.
+    crawford = "'''Terence Crawford''' is a boxer.\n" + PAGE
+    fake = FakeWiki({"Terence Crawford": crawford}, search_hits=["Terence Crawford"])
+    assert WikiClient(tmp_path / "a", getter=fake, sleep=lambda s: None).record_page("Jordan Orozco") is None
+    # A page under another title is still accepted when its lead names our fighter.
+    canelo = "'''Santos Saúl Álvarez Barragán''' (born 1990), known as Canelo, is a boxer.\n" + PAGE
+    fake = FakeWiki({"Canelo Álvarez": canelo}, search_hits=["Canelo Álvarez"])
+    assert WikiClient(tmp_path / "b", getter=fake, sleep=lambda s: None).record_page("Saul Alvarez")[0] == "Canelo Álvarez"
+
+
+def test_a_linked_opponent_is_named_by_the_page_title_not_the_label():
+    # [[Floyd Mayweather Jr.|Floyd Mayweather]] -- the label drops the "Jr."
+    # that tells him from his father.
+    page = PAGE.replace("[[Fabio Wardley]]", "[[Floyd Mayweather Jr.|Floyd Mayweather]]")
+    bouts, _, _ = parse_record(page, subject="Daniel Dubois")
+    assert bouts[0].fighter_b == "Floyd Mayweather Jr."

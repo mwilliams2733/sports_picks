@@ -17,19 +17,15 @@ On the live db: stop the scheduler and uvicorn and take a sqlite3.backup first.
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from collections import Counter
 from datetime import date
 
-from backend.collectors.wikipedia_boxing import WikiClient, parse_record, record_table
+from backend.collectors.wikipedia_boxing import WikiClient, page_name, parse_record, record_table
 from backend.models import Game, Team
 from backend.scripts.dedupe_combat_games import rebuild_combat_elo
 from backend.scripts.import_ufc_history import coverage, import_bouts
 from backend.time_utils import et_today
-
-_PAREN = re.compile(r"\s*\([^)]*\)\s*$")
-
 
 def fighters_to_fetch(session, since: date) -> list[str]:
     ids = set()
@@ -64,7 +60,7 @@ def collect_bouts(client: WikiClient, names: list[str], hops: int = 1):
             if not wikitext or record_table(wikitext) is None:
                 continue
             stats["opponent_pages"] += 1
-            rows, skipped, _ = parse_record(wikitext, subject=_PAREN.sub("", title))
+            rows, skipped, _ = parse_record(wikitext, subject=page_name(title))
             bouts += rows
             stats["rows_skipped"].update(skipped)
     stats["rows_skipped"] = dict(stats["rows_skipped"])

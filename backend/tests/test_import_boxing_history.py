@@ -85,3 +85,22 @@ def test_a_stuck_game_with_a_pick_is_reported_not_finalized(db_engine, db_sessio
     bouts, _ = _bouts(db_session, tmp_path)
     summary = import_bouts(db_session, bouts, sport="boxing", finalize_unfinished=True)
     assert db_session.get(Game, 10).status == "canceled" and summary["matched_non_final"] == [10]
+
+
+def test_boxing_keeps_jr_and_sr_apart_and_the_feed_matches_the_same_way(db_engine, db_session):
+    # 2026-10-10 live fetch: Floyd Mayweather Jr.'s record was filed under
+    # Floyd Mayweather Sr. -- name_key drops generational suffixes (fine for
+    # the UFC, wrong for boxing's fathers and sons).
+    from backend.collectors.ufcstats_history import HistoricalBout
+    from backend.pipeline.full_pipeline import _fighter_by_name_key
+    Base.metadata.create_all(db_session.get_bind())
+    ev = "wikipedia:x"
+    import_bouts(db_session, [HistoricalBout(date(1978, 9, 9), ev, "Floyd Mayweather Sr.", "Sugar Ray Leonard", 0, 1),
+                              HistoricalBout(date(2017, 8, 26), ev, "Floyd Mayweather Jr.", "Conor McGregor", 1, 0)],
+                 sport="boxing")
+    names = {t.name for t in db_session.query(Team).filter(Team.sport == "boxing")}
+    assert {"Floyd Mayweather Sr.", "Floyd Mayweather Jr."} <= names
+    assert _fighter_by_name_key(db_session, "boxing", "Floyd Mayweather Jr").name == "Floyd Mayweather Jr."
+    # MMA is unchanged: the feed's "Jon Jones" is the history's "Jon Jones Jr."
+    import_bouts(db_session, [HistoricalBout(date(2020, 1, 1), ev, "Jon Jones Jr.", "Al Bee", 1, 0)], sport="mma")
+    assert _fighter_by_name_key(db_session, "mma", "Jon Jones").name == "Jon Jones Jr."

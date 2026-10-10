@@ -41,7 +41,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import or_
 
-from backend.collectors.ufcstats_history import (HistoricalBout, name_key, read_bouts,
+from backend.collectors.ufcstats_history import (HistoricalBout, fighter_key, read_bouts,
                                                  read_event_dates)
 from backend.config import load_config
 from backend.database import get_engine, get_session
@@ -59,7 +59,7 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
     key_of: dict[int, str] = {}
     ambiguous = 0
     for team in session.query(Team).filter(Team.sport == sport).order_by(Team.id):
-        key = name_key(team.name)
+        key = fighter_key(sport, team.name)
         key_of[team.id] = key
         if key in by_key:
             ambiguous += 1
@@ -76,7 +76,7 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
 
     def team_id(name: str) -> int:
         nonlocal created
-        key = name_key(name)
+        key = fighter_key(sport, name)
         if key not in by_key:
             team = Team(name=name, abbreviation=name, sport=sport)
             session.add(team)
@@ -94,7 +94,7 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
         return (session.query(PickModel.id).filter(PickModel.game_id == game_id).first() is not None
                 or session.query(PaperPick.id).filter(PaperPick.game_id == game_id).first() is not None)
     for b in sorted(bouts, key=lambda b: b.date):
-        a_key, b_key = name_key(b.fighter_a), name_key(b.fighter_b)
+        a_key, b_key = fighter_key(sport, b.fighter_a), fighter_key(sport, b.fighter_b)
         if a_key == b_key:
             same_fighter += 1
             continue
