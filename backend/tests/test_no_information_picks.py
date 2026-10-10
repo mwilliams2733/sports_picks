@@ -160,3 +160,25 @@ def test_every_mma_pick_is_tracking_only_for_now(db_engine, db_session, monkeypa
     monkeypatch.setattr(pg, "CombatSportsStrategy", _fake_strategy(0.6))
     pg.generate_and_store_picks(db_session, strategy_id=1, target_date=DAY)
     assert db_session.query(PickModel).one().tracking_only is True
+
+
+def test_every_boxing_pick_is_tracking_only_for_now(db_engine, db_session, monkeypatch):
+    # Owner, 2026-10-10: boxing uses the uncalibrated blend that backed every
+    # MMA underdog; its picks are recorded, not published, until measured.
+    Base.metadata.create_all(db_engine)
+    db_session.add_all([Team(id=1, name="B One", abbreviation="B One", sport="boxing"),
+                        Team(id=2, name="B Two", abbreviation="B Two", sport="boxing")])
+    db_session.flush()
+    db_session.add(Game(id=1, sport="boxing", season="2026", date=DAY, home_team_id=1,
+                        away_team_id=2, status="scheduled"))
+    db_session.flush()
+    db_session.add_all([
+        Odds(game_id=1, bookmaker="dk", moneyline_home=-150, moneyline_away=130,
+             spread_home=0.0, spread_away=0.0, over_under=0.0,
+             timestamp=datetime(2026, 3, 1, 18, 0)),
+        StrategyModel(id=1, name="combat_sports", config_json="{}", is_active=True),
+    ])
+    db_session.commit()
+    monkeypatch.setattr(pg, "CombatSportsStrategy", _fake_strategy(0.6))
+    pg.generate_and_store_picks(db_session, strategy_id=1, target_date=DAY)
+    assert db_session.query(PickModel).one().tracking_only is True

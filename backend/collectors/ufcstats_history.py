@@ -49,6 +49,18 @@ def name_key(name: str) -> str:
     return _ALIASES.get(key, key)
 
 
+def fighter_key(sport: str, name: str) -> str:
+    """The key a combat fighter is matched on, for the history imports AND the
+    odds feed (one function, so the two cannot disagree). Boxing keeps
+    Jr./Sr./II-IV: there they name fathers and sons who both boxed -- the
+    2026-10-10 Wikipedia fetch filed Floyd Mayweather Jr.'s record under
+    Floyd Mayweather Sr. A suffix written on one side only splits a record
+    (thinner history), which is the safe way to be wrong."""
+    if sport == "boxing":
+        return " ".join(sorted(normalize_name(name).split()))
+    return name_key(name)
+
+
 @dataclass(frozen=True)
 class HistoricalBout:
     date: date

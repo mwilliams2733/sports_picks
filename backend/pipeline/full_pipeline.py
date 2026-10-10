@@ -703,15 +703,15 @@ def _is_combat(sport: str) -> bool:
 
 def _fighter_by_name_key(session: Session, sport: str, label: str) -> Team | None:
     """A fighter matched the way the UFC history import matches them
-    (`ufcstats_history.name_key`: word order, accents, Jr./Sr. and verified
-    aliases ignored), lowest id first. Final review, 2026-10-10: with exact
+    (`ufcstats_history.fighter_key`: word order, accents and verified aliases
+    ignored; Jr./Sr. ignored except in boxing), lowest id first. Final review, 2026-10-10: with exact
     matching only, a feed label like "Cong Wang" for the history's "Wang
     Cong" created a second, empty row -- no history, so no pick, and a later
     import double-counted the bout."""
-    from backend.collectors.ufcstats_history import name_key
-    key = name_key(label)
+    from backend.collectors.ufcstats_history import fighter_key
+    key = fighter_key(sport, label)
     for team in session.query(Team).filter(Team.sport == sport).order_by(Team.id):
-        if name_key(team.name) == key:
+        if fighter_key(sport, team.name) == key:
             return team
     return None
 

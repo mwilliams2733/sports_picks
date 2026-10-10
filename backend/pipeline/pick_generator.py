@@ -66,7 +66,9 @@ def is_no_information(model_prob: float | None) -> bool:
 #: still backs every underdog -- its Elo is compressed and its blend pulls
 #: toward 0.5 (docs/FINDINGS.md) -- so MMA picks are recorded, not published,
 #: until the model is recalibrated. Remove the sport here to publish again.
-TRACKING_ONLY_SPORTS = ("mma",)
+#: Boxing (owner, 2026-10-10): the same uncalibrated blend, unmeasured;
+#: tracked until measured against the market like MMA.
+TRACKING_ONLY_SPORTS = ("mma", "boxing")
 
 def _bankroll_state(session: Session) -> tuple[float, float]:
     """``(current, peak)`` bankroll in units, from every settled pick.
