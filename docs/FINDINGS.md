@@ -121,3 +121,43 @@ Known limitation: the CSV has names, not fighter ids, so namesakes (e.g. two
 "Bruno Silva"s) share one record. Not checked: the calibration of the combat
 model on history (above), boxing, and the effect on past MMA picks (their
 stored probabilities are unchanged).
+
+## 2026-10-10 — MMA recalibration (fitted on UFC history)
+
+Method (backend/analysis/combat_history.py, combat_calibration.py): leak-free
+replay of all 8,867 final MMA bouts in date order -- each bout's features are
+what the live pick generator would have seen before it (pinned by a test
+against `_build_fighter_stats`); logistic model on difference features
+(elo_diff/400, form_diff, quality_diff/400, log1p fight-count diff), no
+intercept, fitted on every bout as stored AND mirrored, because UFCStats
+lists winners first (first-listed won 64% of imported bouts). Fit < 2021,
+choose K on 2021-2023, report 2024+ once. Only bouts the live model prices
+(both fighters with history, decided).
+
+- Validation 2021-2023 (n=1,221), log-loss by K: 16 .6819, 24 .6823, 32 .6825,
+  48/64/96 .6826 -- K barely matters; chose 16.
+- Coefficients (refit < 2024): elo 2.5298, form 0.7318, quality 2.3962,
+  experience 0.0325.
+- Test 2024+ (n=1,181): log-loss .6744, Brier .2408 vs the old blend at K=24
+  .6814 / .2442. Coin flip: .6931 / .25. Better than the blend, but fight
+  outcomes are only weakly predictable from these features (mean |p - 0.5| =
+  .057).
+- **Against the market** (MMA finals with prices where both fighters had
+  history: n=67, about a dozen cards, so correlated -- this cannot show an
+  edge): model log-loss .6644, Brier .2358; **market .5858 / .1994**. The
+  books know far more. At the live 3% edge bar the model would bet 54 of 67,
+  **96% of them underdogs** (mean model .475 vs market .312).
+- Snapshot after replaying Elo at K=16: MMA Elo sd 31.7 -> 21.6; top ten still
+  the champions (Jones, St-Pierre, Makhachev, Holloway, Oliveira, Khabib,
+  Nunes, Sterling, D. Johnson, Volkanovski). The next three cards: 15 picks,
+  all underdogs, all tracking-only; model .313-.575 (sd .064), mean .462 vs
+  market .338.
+
+**Conclusion.** The recalibrated model is honest about outcomes and better than
+the old blend, but it is not competitive with the market, so any edge bar
+still selects almost only underdogs. Recommendation (owner's call): keep MMA
+tracking-only. To publish MMA ever, the model needs information the market
+lacks (it is unlikely to come from Elo/form/opponent quality alone), or the
+pick rule must be anchored to the market (shrink the model toward the no-vig
+price, as the NFL/MLB shrink weight does) -- which on this evidence would leave
+almost no MMA picks.
