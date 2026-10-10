@@ -709,3 +709,40 @@ def test_a_game_that_has_started_is_left_out():
     sections = select_digest(s, d, ["nfl"], SEASONS, send_bar=OPEN_BAR, now=now)
     assert [p.pick_value for p in sections[0].picks] == ["P3-0", "P4-0"]
     assert sections[0].diagnostics.games == 2
+
+
+def test_a_sport_can_have_its_own_caps_and_null_means_no_cap():
+    """Owner, 2026-10-10: every NFL pick, NCAA football capped at 10, props
+    at 10. sport_caps overrides the default caps per sport; null = no cap."""
+    s = _session()
+    d = date(2026, 11, 1)
+    seasons = {**SEASONS, "ncaaf": {"start": "08-24", "end": "01-20"}}
+    for i in range(5):
+        _mk_priced(s, "nfl", 10 + i, 100 + 2 * i, 101 + 2 * i, d, [(3, 9.0 - i, -110, 0.55)])
+        _mk_priced(s, "ncaaf", 20 + i, 200 + 2 * i, 201 + 2 * i, d, [(3, 9.0 - i, -110, 0.55)])
+        _mk_priced(s, "nba", 30 + i, 300 + 2 * i, 301 + 2 * i, d, [(3, 9.0 - i, -110, 0.55)])
+    bar = _bar(max_game_picks=2, sport_caps={"nfl": {"max_game_picks": None},
+                                             "ncaaf": {"max_game_picks": 3}})
+    sections = {sec.sport: sec for sec in select_digest(s, d, ["nfl", "ncaaf", "nba"], seasons, send_bar=bar)}
+    assert len(sections["nfl"].picks) == 5
+    assert len(sections["ncaaf"].picks) == 3
+    assert len(sections["nba"].picks) == 2
+
+
+def test_a_sport_can_have_its_own_prop_cap():
+    s = _session()
+    d = date(2026, 11, 1)
+    _mk_priced(s, "nfl", 1, 1, 2, d, [(3, 1.0, -110, 0.55)] * 4, pick_type="prop")
+    for p in s.query(PickModel).all():
+        p.prop_market = "player_pass_yds"
+    s.commit()
+    bar = _bar(max_props=1, sport_caps={"nfl": {"max_props": 3}})
+    assert len(select_digest(s, d, ["nfl"], SEASONS, send_bar=bar)[0].props) == 3
+
+
+@pytest.mark.parametrize("caps", ["nfl", {"nfl": 10}, {"nfl": {"max_game_picks": "10"}},
+                                  {"nfl": {"max_game_picks": -1}}, {"nfl": {"max_picks": 10}}])
+def test_a_malformed_sport_caps_entry_raises(caps):
+    with pytest.raises(ValueError, match="digest.send_bar.sport_caps"):
+        select_digest(_session(), date(2026, 11, 1), ["nfl"], SEASONS,
+                      send_bar=_bar(sport_caps=caps))

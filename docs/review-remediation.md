@@ -171,3 +171,19 @@ added to the digest sports.
 - **Started games left out.** The digest now skips any game whose start
   time has passed (a late send carries only what can still be bet).
 - **ncaaf** added to `digest.sports`.
+
+## 2026-10-10 (later) — caps per sport: all NFL picks, college football 10, props 10
+
+**Owner decision.** "I want to see picks on all NFL games. NCAA can be capped
+at 10. Props can be capped at 10 too."
+
+- `digest.send_bar.sport_caps` (new, optional) overrides `max_game_picks` /
+  `max_props` per sport; `null` means no cap. Set to `nfl: {max_game_picks:
+  null}`, `ncaaf: {max_game_picks: 10}`; `max_props` (the default) 10; other
+  sports keep `max_game_picks: 3`. A malformed entry raises, as the rest of
+  the send bar does.
+- "All NFL games" here means every NFL game that HAS a published pick. A
+  pick is generated only on 3+ points of edge (strategy `min_edge`), so on
+  recent Sundays 5, 11 and 7 of 14 games had one (2026-09-20, 09-27, 10-04).
+  Covering every game would need picks below that floor -- a separate
+  decision, not made here.
