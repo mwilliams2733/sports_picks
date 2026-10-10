@@ -71,3 +71,43 @@ year, so without a backfill nearly every bout stays at 0.5 into mid-2027.
 UFC dataset or the UFCStats scrape still exists; boxing (no picks in the
 window); paper-trading exposure to these picks; whether a pick is re-scored
 after its fighters are graded.
+
+## 2026-10-10 — UFC history import, measured on a snapshot
+
+CSV refresh: github.com/Greco1899/scrape_ufc_stats, downloaded 2026-10-10
+(results 8,950 rows: W/L 5,625, L/W 3,167, D/D 66, NC/NC 92; events 791 rows,
+latest UFC 332 on 2026-10-03). Import run with `--apply` on a `sqlite3.backup`
+snapshot of the live db only.
+
+- Parsed 8,833 bouts, 1994-03-11 .. 2026-10-03. Skipped: 92 no-contests, 25
+  bouts whose event name carries two different dates.
+- Inserted 8,749 final MMA games; 84 skipped as already stored (same two
+  fighters within a day -- the odds-feed and March-July rows); 2,509 new
+  fighter rows; 0 ambiguous existing names. Near-duplicate bouts (same pair,
+  <= 1 day apart): 0 before, 0 after.
+- MMA Elo replayed over 8,852 bouts. Top of the table is recognisable: Jon
+  Jones 1715.8, Islam Makhachev, Georges St-Pierre, Charles Oliveira, Khabib
+  Nurmagomedov, Amanda Nunes, Aljamain Sterling, Max Holloway.
+- Coverage of the next 30 days' MMA cards (37 bouts, 74 fighters): fighters
+  with history 6 -> 46; bouts with history on both sides 0 -> 20. Of the 32
+  still unmatched at first, 4 were one fighter under another spelling (now
+  aliased: Alex/Alexander Volkanovski, Lupita/Loopy Godinez, Su Young/SuYoung
+  You, Timothy/Timmy Cuamba); the rest fight outside the UFC (several KSW
+  cards), so the new gate gives them no pick.
+
+**Finding -- not fixed, owner's call.** Regenerating the 10-10, 10-17 and
+10-24 cards on the snapshot gave 15 picks, none at 0.5, but **all 15 are
+underdogs** (mean price +193): mean model probability 0.481 against the
+market's no-vig 0.338. The cause is structural, not sampling: with K=24 the
+MMA ratings barely spread (sd 31.6 points, 5th-95th percentile range 98.6),
+so the model cannot rate any fighter much beyond ~64% while the market prices
+70-80% favourites routinely -- every favourite looks overpriced, every dog
+like value. History removes the no-information 0.5, not this bias. Options:
+keep MMA picks tracking-only until the combat model is calibrated; recalibrate
+(measure leak-free pre-fight Elo against outcomes over the 8,749 bouts, tune
+K and the probability scale); or blend toward the market price.
+
+Known limitation: the CSV has names, not fighter ids, so namesakes (e.g. two
+"Bruno Silva"s) share one record. Not checked: the calibration of the combat
+model on history (above), boxing, and the effect on past MMA picks (their
+stored probabilities are unchanged).

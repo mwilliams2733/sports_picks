@@ -519,6 +519,17 @@ stated explicitly rather than left silent.
   ("fix(combat): route combat games to combat_sports, never ensemble") is
   dated 2026-09-30, and this branch itself descends from the merge commit
   (`1c81e33`) that includes this fix.
+- **From 2026-10-10, `games` holds UFC history for sport `mma`** (UFCStats via
+  github.com/Greco1899/scrape_ufc_stats): every UFC bout since 1994 as a
+  `final` game, winner 1 / loser 0, draws 1/1, no-contests not loaded. These
+  rows have no `espn_id`, no `odds_api_id`, no start time and no odds, and no
+  picks were ever made on them. MMA Elo (`elo_ratings`, `elo_history`) was
+  replayed from seed over them. Fighters are matched by name only (plus four
+  verified spelling aliases), so two fighters sharing a name share a row. From
+  the same date MMA, like boxing, makes no pick unless both fighters have at
+  least one earlier final bout. MMA picks from 2026-10-10 are therefore priced
+  on real records, but see docs/FINDINGS.md (2026-10-10): the combat Elo is
+  compressed and still favours underdogs.
 - **All dates in this dictionary are UTC (see the note at the top of this
   file). Stars (`confidence`) were hidden from users 2026-09-30 UTC, and
   the 3-point shrunk-edge send bar was both introduced AND removed within
