@@ -128,7 +128,8 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
     session.flush()
     return {"inserted": inserted, "duplicates": duplicates, "same_fighter": same_fighter,
             "teams_created": created, "ambiguous_existing": ambiguous,
-            "matched_non_final": sorted(non_final), "finalized": sorted(finalized)}
+            "matched_non_final": sorted(set(non_final)),
+            "finalized": sorted(set(finalized))}
 
 
 def coverage(session, today: date, days: int = 30, sport: str = "mma") -> dict:
