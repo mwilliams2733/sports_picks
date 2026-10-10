@@ -423,3 +423,5 @@
 .sb-lead-name { color: inherit; font-weight: 600; text-decoration: none; }
 .sb-lead-name:hover, .sb-lead-name:focus-visible { text-decoration: underline; }
 .sb-player h1 { display: flex; align-items: center; }
+.sb-date-chips { margin: 0.25rem 0 0.5rem; overflow-x: auto; flex-wrap: nowrap; }
+.sb-date-chips button { white-space: nowrap; }

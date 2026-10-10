@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -35,14 +35,49 @@ describe('Lobby', () => {
     vi.mocked(api.paper.quotes).mockResolvedValue({ game_id: 1, quotes: [] })
   })
 
-  it('shows sport tabs in board order and the first sport by default', async () => {
+  it('leads with NFL like a sportsbook and shows the first tab by default', async () => {
     vi.mocked(api.paper.board).mockResolvedValue({ games: [g(1, 'nba', '2026-10-20'), g(2, 'nfl', '2026-10-21')] })
     renderLobby()
-    expect(await screen.findByRole('tab', { name: 'NBA' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('A1')).toBeInTheDocument()
-    expect(screen.queryByText('A2')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: 'NFL' }))
+    const tabs = await screen.findAllByRole('tab')
+    expect(tabs.map(t => t.textContent)).toEqual(['NFL', 'NBA'])
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('A2')).toBeInTheDocument()
+    expect(screen.queryByText('A1')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'NBA' }))
+    expect(screen.getByText('A1')).toBeInTheDocument()
+  })
+
+  describe('looking ahead', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-09T16:00:00Z'))            // Friday noon ET
+    })
+    afterEach(() => vi.useRealTimers())
+
+    it('filters a sport by date chip and resets the chip when the sport changes', async () => {
+      vi.mocked(api.paper.board).mockResolvedValue({ games: [
+        g(1, 'nfl', '2026-10-11'), g(2, 'nfl', '2026-10-18'), g(3, 'mlb', '2026-10-09')] })
+      renderLobby()
+      const when = await screen.findByRole('group', { name: 'When' })
+      expect(Array.from(when.querySelectorAll('button')).map(b => b.textContent))
+        .toEqual(['All', 'This week', 'Next week'])
+      fireEvent.click(screen.getByRole('button', { name: 'Next week' }))
+      expect(screen.getByText('A2')).toBeInTheDocument()
+      expect(screen.queryByText('A1')).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('tab', { name: 'MLB' }))
+      fireEvent.click(screen.getByRole('tab', { name: 'NFL' }))
+      expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByText('A1')).toBeInTheDocument()
+    })
+
+    it('heads each day with Today / Tomorrow / the date and its game count', async () => {
+      vi.mocked(api.paper.board).mockResolvedValue({ games: [
+        g(1, 'nfl', '2026-10-09'), g(2, 'nfl', '2026-10-10'), g(3, 'nfl', '2026-10-10'), g(4, 'nfl', '2026-10-18')] })
+      renderLobby()
+      expect(await screen.findByRole('heading', { name: 'Today · 1 game' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Tomorrow · 2 games' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Sun Oct 18 · 1 game' })).toBeInTheDocument()
+    })
   })
 
   it('says so when the board is empty', async () => {
