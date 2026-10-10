@@ -88,7 +88,8 @@ def test_morning_scout_grades_completed_combat_games():
     verify_session = get_session(engine)
     home_elo = (verify_session.query(EloRating)
                 .filter(EloRating.team_id == 1, EloRating.sport == "mma").first()).rating
-    assert abs(home_elo - 1512.0) < 0.5, f"morning_scout should have graded the MMA game, got {home_elo}"
+    from backend.analysis.elo import get_k_factor
+    assert abs(home_elo - (1500.0 + get_k_factor("mma") / 2)) < 0.5, f"morning_scout should have graded the MMA game, got {home_elo}"
 
 
 def test_morning_scout_removes_stale_window_jobs_after_recluster(monkeypatch):

@@ -1,5 +1,8 @@
 """CombatSportsStrategy: h2h-only picks driven by fighter Elo + recent form."""
+import math
 from datetime import date as _date
+
+import numpy as np
 
 from backend.analysis.variants.combat_sports import CombatSportsStrategy
 from backend.data_types import GameData, FighterStats, OddsSnapshot, TeamStats
@@ -145,3 +148,43 @@ def test_mma_strategy_picks_when_both_fighters_have_history():      # Review Foc
     strat = CombatSportsStrategy(name="combat", config={"min_edge": 3.0})
     picks = strat.predict(_fight_data(home, away, odds, sport="mma"))
     assert len(picks) == 1 and picks[0].pick_type == "moneyline"
+
+
+def test_mma_probability_is_symmetric_in_the_corners():           # Review Focus 5
+    strat = CombatSportsStrategy(name="combat", config={})
+    a = FighterStats(elo_rating=1650, recent_form_score=0.8, opponent_avg_elo=1550,
+                     fights_count=5, days_since_last_fight=120)
+    b = FighterStats(elo_rating=1500, recent_form_score=0.4, opponent_avg_elo=1480,
+                     fights_count=3, days_since_last_fight=200)
+    assert abs(strat._model_probability(a, b, "mma") + strat._model_probability(b, a, "mma") - 1) < 1e-9
+
+
+def test_mma_uses_the_fitted_coefficients_and_boxing_keeps_the_blend():   # Review Focus 5
+    from backend.analysis.variants import combat_sports as cs
+    strat = CombatSportsStrategy(name="combat", config={})
+    a = FighterStats(elo_rating=1600, recent_form_score=0.6, opponent_avg_elo=None,
+                     fights_count=2, days_since_last_fight=None)
+    b = FighterStats(elo_rating=1500, recent_form_score=0.5, opponent_avg_elo=None,
+                     fights_count=2, days_since_last_fight=None)
+    z = cs.MMA_COEF[0] * 100 / 400 + cs.MMA_COEF[1] * 0.1
+    assert abs(strat._model_probability(a, b, "mma") - 1 / (1 + math.exp(-z))) < 1e-9
+    blend = 0.78 / (1 + 10 ** (-100 / 400)) + 0.22 / (1 + 10 ** (-0.1 / 2.0))
+    assert abs(strat._model_probability(a, b, "boxing") - blend) < 1e-9
+
+
+def test_live_mma_formula_agrees_with_the_calibration():
+    from backend.analysis.combat_calibration import probability
+    from backend.analysis.combat_history import BoutFeatures
+    from backend.analysis.variants import combat_sports as cs
+    f = BoutFeatures(1, _date(2026, 1, 1), 1, 2, 1620.0, 1540.0, 0.8, 0.4, 1560.0, 1500.0, 5, 3, 1.0)
+    a = FighterStats(elo_rating=1620.0, recent_form_score=0.8, opponent_avg_elo=1560.0,
+                     fights_count=5, days_since_last_fight=None)
+    b = FighterStats(elo_rating=1540.0, recent_form_score=0.4, opponent_avg_elo=1500.0,
+                     fights_count=3, days_since_last_fight=None)
+    strat = CombatSportsStrategy(name="combat", config={})
+    assert abs(probability(np.array(cs.MMA_COEF), f) - strat._model_probability(a, b, "mma")) < 1e-9
+
+
+def test_mma_elo_k_is_the_fitted_k():
+    from backend.analysis.elo import get_k_factor
+    assert get_k_factor("mma") == 16 and get_k_factor("boxing") == 24

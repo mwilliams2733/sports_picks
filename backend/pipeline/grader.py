@@ -249,15 +249,9 @@ def _apply_combat_elo_update(session, game) -> None:
         session.add(away_elo_row)
     session.flush()
 
-    h, a = home_elo_row.rating, away_elo_row.rating
-    expected_home = 1 / (1 + 10 ** ((a - h) / 400))
-    if game.home_score == game.away_score:
-        actual_home = 0.5
-    elif (game.home_score or 0) > (game.away_score or 0):
-        actual_home = 1.0
-    else:
-        actual_home = 0.0
-    delta = K * (actual_home - expected_home)
+    from backend.analysis.combat_elo import actual_score, elo_delta
+    delta = elo_delta(home_elo_row.rating, away_elo_row.rating,
+                      actual_score(game.home_score, game.away_score), K)
     home_elo_row.rating += delta
     away_elo_row.rating -= delta
     now = datetime.now(tz=timezone.utc)

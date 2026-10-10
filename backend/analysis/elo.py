@@ -2,7 +2,9 @@ import math
 
 K_FACTORS = {
     "nba": 32, "nfl": 32, "ncaab": 32, "ncaaf": 32, "mlb": 32,
-    "mma": 24, "boxing": 24,
+    # mma 16: chosen on 2021-2023 UFC history (combat_calibration, 2026-10-10;
+    # docs/FINDINGS.md). Boxing has no history to fit, so it keeps 24.
+    "mma": 16, "boxing": 24,
 }
 
 

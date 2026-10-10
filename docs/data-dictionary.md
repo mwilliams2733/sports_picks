@@ -534,6 +534,13 @@ stated explicitly rather than left silent.
   -- recorded and graded, never on the board or in the email -- and the merge
   one-off moved the published, un-emailed MMA picks on unstarted bouts to
   tracking. Emailed MMA picks keep their published state.
+- **From the MMA-recalibration merge (2026-10-10), MMA `model_prob` comes from
+  a fitted logistic model** (`combat_sports.MMA_COEF`, fitted on UFC history;
+  docs/FINDINGS.md) instead of the 70/20/10 Elo/form/quality blend, and MMA Elo
+  uses K=16 instead of 24 (`elo_ratings`/`elo_history` for mma were replayed
+  from seed at the merge). Boxing is unchanged. MMA picks remain
+  `tracking_only`; earlier MMA picks keep the probabilities they were stored
+  with.
 - **15 MMA games from 2026-03 .. 2026-07 were finalized from the UFCStats CSV
   on 2026-10-10** (owner decision): ids 1282, 1284, 1285, 1287, 1288, 1295,
   1299, 1300, 1484, 1639, 1652-1656 had been stuck `scheduled` (12) or
