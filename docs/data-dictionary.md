@@ -548,8 +548,11 @@ stated explicitly rather than left silent.
   dates not loaded. No `espn_id`, no `odds_api_id`, no start time, no odds, no
   picks. Boxers are matched by name, keeping Jr./Sr./II-IV
   (`ufcstats_history.fighter_key`); two boxers sharing a name share a row.
+  One bout seen under two spellings of a name is stored once (same fighter,
+  opponent names sharing a word, within 2 days), but the two spellings stay
+  two team rows, so such a boxer's history is split between them.
   Boxing games stuck `scheduled`/`canceled` with no pick and no paper bet were
-  finalized from the records (69 on the snapshot; the merge log has the
+  finalized from the records (78 on the snapshot; the merge log has the
   live count and ids). Boxing Elo was replayed from seed. **Every boxing pick
   is `tracking_only` from this merge** (`TRACKING_ONLY_SPORTS`): the combat
   model favours underdogs (docs/FINDINGS.md, 2026-10-10).
