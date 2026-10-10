@@ -182,7 +182,9 @@ def parse_record(wikitext: str, subject: str) -> tuple[list[HistoricalBout], dic
             skipped["no_result"] += 1
             continue
         day = parse_date(cells[i_date])
-        if day is None:
+        # A result dated after today is a typo ("2916" for 2016); stored
+        # final, it would replay last and move current ratings.
+        if day is None or day > date.today():
             skipped["bad_date"] += 1
             continue
         bouts.append(HistoricalBout(day, f"wikipedia:{subject}", subject, name, *scores))

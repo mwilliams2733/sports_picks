@@ -194,3 +194,12 @@ def test_a_linked_opponent_is_named_by_the_page_title_not_the_label():
     page = PAGE.replace("[[Fabio Wardley]]", "[[Floyd Mayweather Jr.|Floyd Mayweather]]")
     bouts, _, _ = parse_record(page, subject="Daniel Dubois")
     assert bouts[0].fighter_b == "Floyd Mayweather Jr."
+
+
+def test_a_bout_dated_in_the_future_is_a_bad_date_not_a_result():
+    # The 2026-10-10 fetch had results dated 2105, 2914 and 2916 (typos for
+    # 2005, 2014, 2016): stored as final, they replayed last and moved those
+    # fighters' current ratings. A row with a result cannot be in the future.
+    bouts, skipped, _ = parse_record(PAGE.replace("9 May 2026", "9 May 2926"), subject="Daniel Dubois")
+    assert [b.fighter_b for b in bouts] == ["Oleksandr Usyk", "Joe Bloggs", "Unlinked Opponent"]
+    assert skipped["bad_date"] == 2
