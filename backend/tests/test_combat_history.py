@@ -45,6 +45,7 @@ def test_replay_matches_the_live_feature_builder(db_engine, db_session):   # Rev
     rebuild_combat_elo(db_session, "mma")
     live = _build_fighter_stats(db_session, 1, "mma", date(2020, 1, 30))
     bouts = [_b(g, d, h, a, 1.0 if hs > as_ else 0.0) for g, d, h, a, hs, as_ in spec] + [_b(9, 30, 1, 4, 1.0)]
-    f = replay(bouts, k=24)[-1]
+    from backend.analysis.elo import get_k_factor
+    f = replay(bouts, k=get_k_factor("mma"))[-1]      # the K rebuild_combat_elo uses
     assert (f.elo_a, f.form_a, f.fights_a) == (live.elo_rating, live.recent_form_score, live.fights_count)
     assert abs(f.quality_a - live.opponent_avg_elo) < 1e-9

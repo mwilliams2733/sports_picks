@@ -3,6 +3,11 @@ import pytest
 from backend.pipeline.grader import grade_pick, grade_prop_pick
 from backend.analysis.odds_utils import calculate_payout
 
+
+# An even bout moves each fighter K/2 (combat K from analysis.elo, MMA 16 since 2026-10-10).
+from backend.analysis.elo import get_k_factor as _k  # noqa: E402
+_HALF_K = _k("mma") / 2
+
 def test_grade_moneyline_home_win():
     result, payout = grade_pick("moneyline", "HOME ML", 110, 100, -150)
     assert result == "win"
@@ -136,16 +141,16 @@ def test_combat_grader_updates_fighter_elo_on_decision():
                 .filter(EloRating.team_id == 1, EloRating.sport == "mma").first()).rating
     away_elo = (session.query(EloRating)
                 .filter(EloRating.team_id == 2, EloRating.sport == "mma").first()).rating
-    assert abs(home_elo - 1512.0) < 0.5, f"Home should gain ~12 Elo, got {home_elo}"
-    assert abs(away_elo - 1488.0) < 0.5, f"Away should lose ~12 Elo, got {away_elo}"
+    assert abs(home_elo - (1500.0 + _HALF_K)) < 0.5, f"Home should gain ~12 Elo, got {home_elo}"
+    assert abs(away_elo - (1500.0 - _HALF_K)) < 0.5, f"Away should lose ~12 Elo, got {away_elo}"
 
     # Mirrors backtesting's audit trail (compute_historical_elo writes
     # EloHistory too) — one row per fighter for this game.
     history = session.query(EloHistory).filter(EloHistory.game_id == 1).all()
     assert len(history) == 2
     ratings_by_team = {h.team_id: h.rating for h in history}
-    assert abs(ratings_by_team[1] - 1512.0) < 0.5
-    assert abs(ratings_by_team[2] - 1488.0) < 0.5
+    assert abs(ratings_by_team[1] - (1500.0 + _HALF_K)) < 0.5
+    assert abs(ratings_by_team[2] - (1500.0 - _HALF_K)) < 0.5
 
 
 def test_combat_grader_is_idempotent_across_repeated_calls():
@@ -179,7 +184,7 @@ def test_combat_grader_is_idempotent_across_repeated_calls():
 
     home_elo = (session.query(EloRating)
                 .filter(EloRating.team_id == 1, EloRating.sport == "mma").first()).rating
-    assert abs(home_elo - 1512.0) < 0.5, f"Elo must only apply once, got {home_elo}"
+    assert abs(home_elo - (1500.0 + _HALF_K)) < 0.5, f"Elo must only apply once, got {home_elo}"
     history = session.query(EloHistory).filter(EloHistory.game_id == 1).all()
     assert len(history) == 2, "Repeated calls must not duplicate EloHistory rows"
 

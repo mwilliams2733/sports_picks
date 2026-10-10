@@ -68,13 +68,14 @@ def test_backward_compat_no_margin():
 
 
 def test_combat_sports_k_factor_is_lower_than_team_sports():
-    """Combat sports use K=24 vs. team K=32 due to lower fight frequency."""
+    """Combat sports move less per bout than team sports: boxing K=24, MMA K=16
+    (fitted on UFC history 2026-10-10, combat_calibration)."""
     from backend.analysis.elo import get_k_factor
     assert get_k_factor("nba") == 32
     assert get_k_factor("nfl") == 32
     assert get_k_factor("ncaab") == 32
     assert get_k_factor("ncaaf") == 32
     assert get_k_factor("mlb") == 32
-    assert get_k_factor("mma") == 24
+    assert get_k_factor("mma") == 16
     assert get_k_factor("boxing") == 24
     assert get_k_factor("unknown") == 32  # default

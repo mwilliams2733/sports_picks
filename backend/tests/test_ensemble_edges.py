@@ -112,7 +112,7 @@ def test_all_variants_agree_on_break_even_edge(monkeypatch):
     monkeypatch.setattr(ValueOnlyStrategy, "_model_probability", lambda self, game: fair_prob)
     monkeypatch.setattr(SportSpecificStrategy, "_model_probability", lambda self, game: fair_prob)
     monkeypatch.setattr(RecentFormStrategy, "_model_probability", lambda self, game, lookback: fair_prob)
-    monkeypatch.setattr(CombatSportsStrategy, "_model_probability", lambda self, home, away: fair_prob)
+    monkeypatch.setattr(CombatSportsStrategy, "_model_probability", lambda self, home, away, sport=None: fair_prob)
 
     game = _game_with_pickem_odds()
     for strategy in (
