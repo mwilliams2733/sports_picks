@@ -434,3 +434,5 @@
 .sb-why-card h2 { font-size: 0.85rem; margin: 0 0 0.25rem; }
 .sb-bet-note, .sb-feed-note { margin: 0.35rem 0 0; font-size: 0.78rem; line-height: 1.4; color: var(--text-secondary); white-space: pre-line; }
 .sb-feed-note { flex-basis: 100%; }
+/* In the horizontally scrolling strip a card sizes to its content: cap the panel so the note wraps. */
+.sb-strip-card .sb-why { max-width: min(78vw, 22rem); }
