@@ -114,3 +114,48 @@ def test_rows_become_bouts_and_the_rest_are_counted():           # Review Focus 
     assert skipped == {"no_result": 2, "bad_date": 1, "no_opponent": 0}   # NC + scheduled; "sometime"
     assert opponents == ["Fabio Wardley", "Oleksandr Usyk", "Joe Bloggs (boxer)", "Some Guy",
                          "Future Foe", "Mystery Man"]
+
+
+from backend.collectors.wikipedia_boxing import WikiClient  # noqa: E402
+
+
+class FakeWiki:
+    def __init__(self, pages, search_hits=()):
+        self.pages, self.hits, self.calls = pages, list(search_hits), []
+
+    def __call__(self, params):
+        self.calls.append(dict(params))
+        if params.get("action") == "parse":
+            wt = self.pages.get(params["page"])
+            return {"parse": {"wikitext": wt}} if wt is not None else {"error": {"code": "missingtitle"}}
+        return {"query": {"search": [{"title": t} for t in self.hits]}}
+
+
+def test_resolves_the_boxer_page_and_rejects_a_namesake(tmp_path):     # Review Focus 2
+    # No "(boxer)" page; the bare title is a politician; search finds the boxer.
+    fake = FakeWiki({"Joshua Edwards": "'''Joshua Edwards''' is a politician.",
+                     "Joshua Edwards (American boxer)": PAGE},
+                    search_hits=["Joshua Edwards", "Joshua Edwards (American boxer)"])
+    client = WikiClient(tmp_path, getter=fake, sleep=lambda s: None)
+    title, wt = client.record_page("Joshua Edwards")
+    assert title == "Joshua Edwards (American boxer)" and record_table(wt)
+
+
+def test_falls_back_to_search_and_returns_none_when_nothing_fits(tmp_path):
+    fake = FakeWiki({"Craig Lewis (American boxer)": PAGE}, search_hits=["Craig Lewis (American boxer)"])
+    client = WikiClient(tmp_path / "a", getter=fake, sleep=lambda s: None)
+    assert client.record_page("Craig Lewis")[0] == "Craig Lewis (American boxer)"
+    assert WikiClient(tmp_path / "b", getter=FakeWiki({}), sleep=lambda s: None).record_page("Nobody") is None
+
+
+def test_cached_titles_are_never_fetched_again_and_live_calls_are_spaced(tmp_path):   # Review Focus 5
+    fake = FakeWiki({"A (boxer)": PAGE})
+    slept = []
+    c1 = WikiClient(tmp_path, getter=fake, sleep=slept.append, min_interval=1.0)
+    c1.wikitext("A (boxer)")
+    c1.wikitext("Missing Page")
+    n = len(fake.calls)
+    c2 = WikiClient(tmp_path, getter=fake, sleep=slept.append)
+    assert c2.wikitext("A (boxer)") == PAGE and c2.wikitext("Missing Page") is None
+    assert len(fake.calls) == n and c2.live_requests == 0      # both answered from the cache
+    assert all(s <= 1.0 for s in slept) and len(slept) >= 1      # spaced, never more than the interval

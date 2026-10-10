@@ -170,3 +170,67 @@ def parse_record(wikitext: str, subject: str) -> tuple[list[HistoricalBout], dic
             continue
         bouts.append(HistoricalBout(day, f"wikipedia:{subject}", subject, name, *scores))
     return bouts, skipped, opponents
+
+
+API = "https://en.wikipedia.org/w/api.php"
+USER_AGENT = "MetricEdgePicks/1.0 (https://www.metricedgepicks.com)"
+
+
+def _http_get(params: dict) -> dict:
+    import httpx
+    r = httpx.get(API, params={**params, "format": "json", "formatversion": 2},
+                  headers={"User-Agent": USER_AGENT}, timeout=30.0)
+    r.raise_for_status()
+    return r.json()
+
+
+class WikiClient:
+    """MediaWiki API reads, cached on disk, at most one live request per
+    `min_interval` seconds. A cached answer -- including "no such page" -- is
+    never fetched again, so dry runs and the merge reuse one download."""
+
+    def __init__(self, cache_dir, getter=None, sleep=time.sleep, min_interval: float = 1.0):
+        self.cache = Path(cache_dir)
+        self.cache.mkdir(parents=True, exist_ok=True)
+        self.getter = getter or _http_get
+        self.sleep = sleep
+        self.min_interval = min_interval
+        self.live_requests = 0
+        self._last = 0.0
+
+    def _cached(self, key: str, params: dict) -> dict:
+        path = self.cache / (hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+        wait = self.min_interval - (time.monotonic() - self._last)
+        if self.live_requests and wait > 0:
+            self.sleep(wait)
+        data = self.getter(params)
+        self._last = time.monotonic()
+        self.live_requests += 1
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return data
+
+    def wikitext(self, title: str) -> str | None:
+        data = self._cached(f"page:{title}", {"action": "parse", "page": title,
+                                              "prop": "wikitext", "redirects": 1})
+        return (data.get("parse") or {}).get("wikitext")
+
+    def search(self, query: str) -> list[str]:
+        data = self._cached(f"search:{query}", {"action": "query", "list": "search",
+                                                "srsearch": query, "srlimit": 3})
+        return [hit["title"] for hit in (data.get("query") or {}).get("search", [])]
+
+    def record_page(self, name: str) -> tuple[str, str] | None:
+        """The page of OUR fighter: '<name> (boxer)', then '<name>', then the
+        top search hits -- the first that has a record table. A namesake page
+        (no record table) is never accepted."""
+        tried = set()
+        for title in [f"{name} (boxer)", name] + self.search(f"{name} boxer"):
+            if title in tried:
+                continue
+            tried.add(title)
+            wt = self.wikitext(title)
+            if wt and record_table(wt):
+                return title, wt
+        return None
