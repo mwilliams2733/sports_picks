@@ -31,6 +31,7 @@ from backend.models import (
 
 logger = logging.getLogger(__name__)
 from backend.time_utils import ET, et_today  # noqa: F401  (ET re-exported)
+from backend.paper.board import MAX_DAYS
 LEAD_TIME = timedelta(hours=2)
 
 #: Sports that get a second, late prop run per window, and how long before
@@ -246,10 +247,11 @@ def refresh_prices(config: dict, engine) -> list[str]:
     each game, so for most of a day every quote on file was past
     `pricing.MAX_QUOTE_AGE` and could not be bet (owner, 2026-10-01). This
     runs every `PRICE_REFRESH_HOURS` for each in-season sport with a game
-    still scheduled today; one Odds API call per sport also refreshes that
-    sport's later games. Measured 2026-10-02 from requests_remaining: 3
-    credits a call (1 for boxing/mma, moneyline only), so at most ~5 sports
-    x 8 runs x 3 = 120 a day against a 600 daily target.
+    still to play on the board (`_sports_with_games_ahead`, two weeks); one
+    Odds API call per sport refreshes all of that sport's posted games.
+    Measured 2026-10-02 from requests_remaining: 3 credits a call (1 for
+    boxing/mma, moneyline only), so at most ~5 sports x 8 runs x 3 = 120 a
+    day against a 600 daily target.
 
     Prices only. Picks stay with the scout and the windows, so the pick
     version history and the digest are unchanged by it. Every fetch also
@@ -263,8 +265,8 @@ def refresh_prices(config: dict, engine) -> list[str]:
         return []
     session = get_session(engine)
     try:
-        sports = _sports_still_to_play(session, config, et_today(),
-                                       datetime.now(timezone.utc))
+        sports = _sports_with_games_ahead(session, config, et_today(),
+                                          datetime.now(timezone.utc))
         if not sports:
             return []
         asyncio.run(fetch_and_store_odds(
@@ -279,20 +281,27 @@ def refresh_prices(config: dict, engine) -> list[str]:
         session.close()
 
 
-def _sports_still_to_play(session, config: dict, day: date, now: datetime) -> list[str]:
-    """In-season sports with a game on ``day`` that has not started.
+def _sports_with_games_ahead(session, config: dict, first: date, now: datetime,
+                             days: int = MAX_DAYS) -> list[str]:
+    """In-season sports with a scheduled game that has not started, from
+    ``first`` through the board's horizon (``days`` -- the Lobby's two weeks).
 
-    Stricter than `slate_sports`: a game stays "scheduled" until the next
-    morning's grading pass flips it to final, so a sport whose games all
-    finished at 3pm would otherwise be fetched -- and billed -- on every
-    refresh until midnight. A game with no start time is treated as still to
-    play, the project-wide convention (`pricing.open_for_betting`).
+    Was today only (`_sports_still_to_play`) until 2026-10-09: NFL had no game
+    on Friday or Saturday, so every NFL price went stale Thursday night and
+    Sunday's games could not be bet (owner: "I would like to see betting
+    information for the next week"). One Odds API call per sport prices all
+    of that sport's posted games, so the horizon adds sports, not calls per
+    game. A game still "scheduled" after it started (grading flips it the next
+    morning) does not count; a game with no start time does, the project-wide
+    convention (`pricing.open_for_betting`).
     """
+    from datetime import timedelta
     from backend.time_utils import game_start_utc
     active = [s for s in ALL_SPORTS if is_sport_in_season(s, config["seasons"])]
+    last = first + timedelta(days=days)
     live = set()
     for game in (session.query(Game)
-                 .filter(Game.sport.in_(active), Game.date == day,
+                 .filter(Game.sport.in_(active), Game.date >= first, Game.date < last,
                          Game.status == "scheduled").all()):
         start = game_start_utc(game)
         if start is None or start > now:
