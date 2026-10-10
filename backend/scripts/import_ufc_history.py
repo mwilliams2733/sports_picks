@@ -54,11 +54,13 @@ from backend.time_utils import et_today
 SAME_BOUT_DAYS = ADJACENT_DAYS
 
 
-def surname(name: str) -> str:
-    """The last word of a name, Jr./Sr./II-IV aside: "T. J. Doheny" and "TJ
-    Doheny" -> "doheny"; "Jermaine Franklin Jr" -> "franklin"."""
-    words = [w for w in normalize_name(name).split() if w not in _SUFFIXES]
-    return words[-1] if words else ""
+def name_words(name: str) -> frozenset[str]:
+    """A name's words of two letters or more, Jr./Sr./II-IV and initials
+    aside. Two spellings of one boxer share at least one: "T. J. Doheny" /
+    "TJ Doheny", "Christopher Gurrero" / "Christopher Guerrero", "Rene
+    Osvaldo Palacios Galvan" / "Rene Palacios"."""
+    return frozenset(w for w in normalize_name(name).split()
+                     if len(w) >= 2 and w not in _SUFFIXES)
 
 
 def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
@@ -78,19 +80,19 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
     known: dict[frozenset, list[tuple[date, int]]] = defaultdict(list)
     status_of: dict[int, str] = {}
     # Boxing only: each fighter's bouts as (date, opponent key, opponent
-    # surname, game id), to catch one bout stored under two spellings of a
+    # words, game id), to catch one bout stored under two spellings of a
     # name -- a different name PAIR, which `known` cannot see (final review
     # 2026-10-10: "T. J. Doheny" / "TJ Doheny", ~52 bouts doubled; the feed's
     # "Jermaine Franklin Jr" v Itauma left canceled beside a final twin).
-    by_fighter: dict[str, list[tuple[date, str, str, int]]] = defaultdict(list)
+    by_fighter: dict[str, list[tuple[date, str, frozenset, int]]] = defaultdict(list)
     name_of = {t.id: t.name for t in session.query(Team).filter(Team.sport == sport)}
 
     def remember(gid, day, a_key, a_name, b_key, b_name, status):
         known[frozenset({a_key, b_key})].append((day, gid))
         status_of[gid] = status
         if sport == "boxing":
-            by_fighter[a_key].append((day, b_key, surname(b_name), gid))
-            by_fighter[b_key].append((day, a_key, surname(a_name), gid))
+            by_fighter[a_key].append((day, b_key, name_words(b_name), gid))
+            by_fighter[b_key].append((day, a_key, name_words(a_name), gid))
 
     for g in session.query(Game).filter(Game.sport == sport):
         remember(g.id, g.date, key_of.get(g.home_team_id), name_of.get(g.home_team_id, ""),
@@ -128,9 +130,9 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
         if not near and sport == "boxing":
             near = sorted({gid for me, other, other_name in ((a_key, b_key, b.fighter_b),
                                                              (b_key, a_key, b.fighter_a))
-                           for d, opp_key, opp_surname, gid in by_fighter[me]
+                           for d, opp_key, opp_words, gid in by_fighter[me]
                            if abs((b.date - d).days) <= SAME_BOUT_DAYS and opp_key != other
-                           and opp_surname and opp_surname == surname(other_name)})
+                           and opp_words & name_words(other_name)})
             variant = bool(near)
         if any(status_of[gid] == "final" for gid in near):
             duplicates += 1

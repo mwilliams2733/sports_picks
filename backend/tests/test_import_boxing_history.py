@@ -156,3 +156,18 @@ def test_mma_import_is_unchanged_by_the_variant_rule(db_engine, db_session):
     r = import_bouts(db_session, [_hb(d, "Naoya Inoue", "T. J. Doheny"),
                                   _hb(d, "TJ Doheny", "Naoya Inoue", 0, 1)], sport="mma")
     assert r["inserted"] == 2
+
+
+def test_a_misspelled_surname_still_finds_the_stuck_feed_game(db_engine, db_session):
+    # Run 5 left 5 feed games beside a final twin whose names differ in the
+    # surname itself: Gurrero/Guerrero, Khatev/Khataev, Palacios Galvan/Palacios.
+    Base.metadata.create_all(db_session.get_bind())
+    for tid, name in [(1, "Delante Johnson"), (2, "Christopher Gurrero")]:
+        db_session.add(Team(id=tid, name=name, abbreviation=name, sport="boxing"))
+    db_session.flush()
+    db_session.add(Game(id=1618, sport="boxing", season="2026", date=date(2026, 7, 5), status="canceled",
+                        home_team_id=1, away_team_id=2))
+    db_session.commit()
+    r = import_bouts(db_session, [_hb(date(2026, 7, 4), "Delante Johnson", "Christopher Guerrero")],
+                     sport="boxing", finalize_unfinished=True)
+    assert r["inserted"] == 0 and r["finalized"] == [1618]
