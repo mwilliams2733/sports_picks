@@ -36,6 +36,12 @@ describe('TicketList', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Settled' }))
     expect(screen.getByText('No settled bets here yet.')).toBeInTheDocument()
   })
+  it("shows the bettor's note as plain text (Review Focus 2)", () => {
+    renderList({ tickets: [t({ id: 7, note: '<b>Backup QB</b> starts. Confidence 2/5 · Model: no side.' })], emptyOpen: 'none' })
+    const card = screen.getByRole('article', { name: 'Bet #P-7' })
+    expect(card).toHaveTextContent('<b>Backup QB</b> starts. Confidence 2/5 · Model: no side.')
+    expect(card.querySelector('b')).toBeNull()
+  })
   it('shows the loading text, not an empty message, before tickets arrive', () => {
     renderList({ tickets: undefined, loading: true, loadingText: 'Loading your bets…', emptyOpen: 'none' })
     expect(screen.getByText('Loading your bets…')).toBeInTheDocument()

@@ -432,3 +432,5 @@
 .sb-why-note { margin: 0; font-size: 0.8rem; line-height: 1.4; color: var(--text-secondary); }
 .sb-why-toggle { margin-top: 0.35rem; background: none; border: 0; padding: 0; color: var(--accent); font-weight: 700; cursor: pointer; }
 .sb-why-card h2 { font-size: 0.85rem; margin: 0 0 0.25rem; }
+.sb-bet-note, .sb-feed-note { margin: 0.35rem 0 0; font-size: 0.78rem; line-height: 1.4; color: var(--text-secondary); white-space: pre-line; }
+.sb-feed-note { flex-basis: 100%; }

@@ -37,6 +37,7 @@ export default function TicketCard({ t, userId }: { t: Ticket; userId?: number }
           </li>
         ))}
       </ul>
+      {t.note && <p className="sb-bet-note">{t.note}</p>}
       <footer className="sb-bet-foot">
         <span>Stake {formatMoney(t.stake)}{t.kind === 'parlay' && ` at ${formatOdds(t.odds)}`}</span>
         {t.result === null

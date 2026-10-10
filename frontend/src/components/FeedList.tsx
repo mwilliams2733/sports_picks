@@ -25,6 +25,7 @@ export default function FeedList({ items, meId, limit }: { items: FeedItem[]; me
           <li key={e.id} className="sb-feed-item">
             <span className={`sb-dot sb-dot-${DOT[e.event_type] ?? 'pending'}`} />
             <span className="sb-feed-msg">{e.payload?.message ?? ''}</span>
+            {e.payload?.note && <p className="sb-feed-note">{e.payload.note}</p>}
             <span className="sb-feed-time">{ago(e.created_at)}</span>
             {canTail && (
               <button type="button" className="sb-tail" disabled={tailing === e.id}
