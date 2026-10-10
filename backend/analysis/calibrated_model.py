@@ -232,6 +232,34 @@ def _stat_value(stats: list[TeamStat], stat_type: str) -> float | None:
     return None
 
 
+def final_team_games(session: Session, sport: str | None = None) -> list[Game]:
+    """Final, competitive games of the TEAM sports: the model's training set.
+
+    Combat sports are excluded (final review, 2026-10-10). A bout is not a
+    team game; combat `elo_history` is written after the bout, so its
+    `elo_diff` carries the result; and the UFC history import adds ~8,750
+    bouts -- most of the table -- whose leaked slope and first-listed "home"
+    win rate would be pooled into NFL/MLB/NBA. Combat picks come from
+    `combat_sports`, never this model, so nothing is lost.
+    """
+    from backend.pipeline.team_stats import COMBAT_SPORTS
+    conds = [
+        Game.status == "final",
+        Game.home_score.isnot(None),
+        Game.away_score.isnot(None),
+        # Exhibitions are not results. The 2026 NBA All-Star round robin sits
+        # in `games` as three nba finals with totals of 72, 82 and 93 against
+        # a real average of 230.9, and its squads are not teams anyone bets
+        # on. `unknown` is kept: it is what every row predating season_type
+        # carries, and dropping those would throw away most of the history.
+        Game.season_type.notin_(NON_COMPETITIVE_PHASES),
+        Game.sport.notin_(COMBAT_SPORTS),
+    ]
+    if sport is not None:
+        conds.append(Game.sport == sport)
+    return session.query(Game).filter(and_(*conds)).order_by(Game.date, Game.id).all()
+
+
 class CalibratedModel:
     """Logistic regression model trained on historical game outcomes.
 
@@ -276,25 +304,7 @@ class CalibratedModel:
         rows stored at the time each game was played.  The target is whether
         the home team won (1) or not (0).
         """
-        completed_games = (
-            session.query(Game)
-            .filter(
-                and_(
-                    Game.status == "final",
-                    Game.home_score.isnot(None),
-                    Game.away_score.isnot(None),
-                    # Exhibitions are not results. The 2026 NBA All-Star
-                    # round robin sits in `games` as three nba finals with
-                    # totals of 72, 82 and 93 against a real average of
-                    # 230.9, and its squads are not teams anyone bets on.
-                    # `unknown` is kept: it is what every row predating
-                    # season_type carries, and dropping those would throw
-                    # away most of the history.
-                    Game.season_type.notin_(NON_COMPETITIVE_PHASES),
-                )
-            )
-            .all()
-        )
+        completed_games = final_team_games(session)
 
         if len(completed_games) < MIN_TRAINING_GAMES:
             logger.info(

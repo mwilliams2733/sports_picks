@@ -695,6 +695,27 @@ def _store_props(session: Session, game_id: int, props: list[dict]) -> int:
     return count
 
 
+def _is_combat(sport: str) -> bool:
+    """Imported lazily, as this module already does for team_stats."""
+    from backend.pipeline.team_stats import COMBAT_SPORTS
+    return sport in COMBAT_SPORTS
+
+
+def _fighter_by_name_key(session: Session, sport: str, label: str) -> Team | None:
+    """A fighter matched the way the UFC history import matches them
+    (`ufcstats_history.name_key`: word order, accents, Jr./Sr. and verified
+    aliases ignored), lowest id first. Final review, 2026-10-10: with exact
+    matching only, a feed label like "Cong Wang" for the history's "Wang
+    Cong" created a second, empty row -- no history, so no pick, and a later
+    import double-counted the bout."""
+    from backend.collectors.ufcstats_history import name_key
+    key = name_key(label)
+    for team in session.query(Team).filter(Team.sport == sport).order_by(Team.id):
+        if name_key(team.name) == key:
+            return team
+    return None
+
+
 def _resolve_team(session: Session, sport: str, label: str) -> Team | None:
     """Find the team row an Odds API label refers to.
 
@@ -710,6 +731,8 @@ def _resolve_team(session: Session, sport: str, label: str) -> Team | None:
     )
     if team is not None:
         return team
+    if _is_combat(sport):
+        return _fighter_by_name_key(session, sport, label)
     if sport not in ABBREVIATION_SPORTS:
         return None
     abbr = canonical_abbr(sport, label)
@@ -854,6 +877,8 @@ def _lookup_team(session: Session, sport: str, label: str) -> Team | None:
     ).first()
     if team is not None:
         return team
+    if _is_combat(sport):
+        return _fighter_by_name_key(session, sport, label)
     abbr = canonical_abbr(sport, label)
     if abbr is None:
         return None

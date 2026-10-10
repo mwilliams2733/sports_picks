@@ -4,7 +4,9 @@ not yet started to tracking-only.
 The pick generator now stores a pick at exactly model_prob 0.5 as
 tracking-only (pick_generator.is_no_information); this applies the same rule
 to the picks already published for games still to play, so they leave the
-board and the email at once instead of at their next window refresh. Graded
+board and the email at once instead of at their next window refresh. Since
+2026-10-10 it also moves every published pick in `TRACKING_ONLY_SPORTS`
+(MMA, owner decision) the same way. Graded
 history and every EMAILED pick (advice people acted on, which withdraw_pick
 also refuses) are left exactly as they were.
 
@@ -22,17 +24,23 @@ from backend.config import load_config
 from backend.database import get_engine, get_session
 from backend.models import EmailedPick, Game, PickModel
 from backend.paper.pricing import open_for_betting
-from backend.pipeline.pick_generator import NO_INFORMATION_PROB, is_no_information
+from sqlalchemy import or_
+
+from backend.pipeline.pick_generator import (NO_INFORMATION_PROB, TRACKING_ONLY_SPORTS,
+                                             is_no_information)
 
 
 def candidates(session, now: datetime) -> list[PickModel]:
     rows = (session.query(PickModel, Game).join(Game, Game.id == PickModel.game_id)
             .filter(PickModel.published(), PickModel.by_model(),
                     PickModel.pick_type != "prop",
-                    PickModel.model_prob == NO_INFORMATION_PROB,
+                    or_(PickModel.model_prob == NO_INFORMATION_PROB,
+                        Game.sport.in_(TRACKING_ONLY_SPORTS)),
                     ~PickModel.id.in_(session.query(EmailedPick.pick_id)))
             .order_by(PickModel.id).all())
-    return [p for p, g in rows if is_no_information(p.model_prob) and open_for_betting(g, now)]
+    return [p for p, g in rows
+            if (is_no_information(p.model_prob) or g.sport in TRACKING_ONLY_SPORTS)
+            and open_for_betting(g, now)]
 
 
 def apply(session, picks: list[PickModel]) -> None:

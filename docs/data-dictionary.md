@@ -519,6 +519,36 @@ stated explicitly rather than left silent.
   ("fix(combat): route combat games to combat_sports, never ensemble") is
   dated 2026-09-30, and this branch itself descends from the merge commit
   (`1c81e33`) that includes this fix.
+- **From 2026-10-10, `games` holds UFC history for sport `mma`** (UFCStats via
+  github.com/Greco1899/scrape_ufc_stats): every UFC bout since 1994 as a
+  `final` game, winner 1 / loser 0, draws 1/1, no-contests not loaded. These
+  rows have no `espn_id`, no `odds_api_id`, no start time and no odds, and no
+  picks were ever made on them. MMA Elo (`elo_ratings`, `elo_history`) was
+  replayed from seed over them. Fighters are matched by name only (plus four
+  verified spelling aliases), so two fighters sharing a name share a row. From
+  the same date MMA, like boxing, makes no pick unless both fighters have at
+  least one earlier final bout. MMA picks from 2026-10-10 are therefore priced
+  on real records, but see docs/FINDINGS.md (2026-10-10): the combat Elo is
+  compressed and still favours underdogs, so **from 2026-10-10 every MMA game
+  pick is `tracking_only` (owner decision; `pick_generator.TRACKING_ONLY_SPORTS`)**
+  -- recorded and graded, never on the board or in the email -- and the merge
+  one-off moved the published, un-emailed MMA picks on unstarted bouts to
+  tracking. Emailed MMA picks keep their published state.
+- **15 MMA games from 2026-03 .. 2026-07 were finalized from the UFCStats CSV
+  on 2026-10-10** (owner decision): ids 1282, 1284, 1285, 1287, 1288, 1295,
+  1299, 1300, 1484, 1639, 1652-1656 had been stuck `scheduled` (12) or
+  wrongly `canceled` (3); none had a pick or a paper bet. Their status and
+  scores now come from the CSV, and they are in the Elo replay.
+- **From 2026-10-10 the team-sport model never sees combat bouts.**
+  `calibrated_model.final_team_games` (the training set of the calibrated
+  model and the LightGBM, and the games behind `calibration_report` and
+  `sport_signal_report`) excludes mma and boxing. Before, every final bout
+  (103 MMA on 2026-10-10) was in the NFL/MLB/NBA training set, with an
+  `elo_diff` written after the bout (it contains the result). The fit sets of
+  the NFL and NBA calibration reports were identical with and without the
+  change on 2026-10-10 (843 and 2,016 games: no bout fell before their
+  split dates), so those baselines are unchanged; the live model loses its
+  ~3% of combat rows.
 - **All dates in this dictionary are UTC (see the note at the top of this
   file). Stars (`confidence`) were hidden from users 2026-09-30 UTC, and
   the 3-point shrunk-edge send bar was both introduced AND removed within

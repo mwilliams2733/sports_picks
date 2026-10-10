@@ -539,10 +539,10 @@ class EnsembleStrategy(Strategy):
         """Train LightGBM on all completed games from the database."""
         from backend.models import Game, TeamStat, EloRating
 
-        games = session.query(Game).filter(
-            Game.status == "final",
-            Game.home_score.isnot(None),
-        ).all()
+        # Team sports only, as the calibrated model trains on
+        # (calibrated_model.final_team_games; combat bouts leak their result).
+        from backend.analysis import calibrated_model
+        games = calibrated_model.final_team_games(session)
 
         if len(games) < MIN_ML_GAMES:
             logger.info("Only %d games, need %d for ML", len(games), MIN_ML_GAMES)
