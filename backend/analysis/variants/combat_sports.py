@@ -31,11 +31,13 @@ class CombatSportsStrategy(Strategy):
         if home_fighter is None or away_fighter is None:
             return []
 
-        # Boxing data-thin gate: Wikidata only covers top-tier boxers, so a
-        # missing fight history likely means "fighter unknown to us" rather
-        # than "genuine debut." MMA bypasses this gate — UFCStats coverage
-        # is comprehensive enough that fights_count=0 is a real debut signal.
-        if game.sport == "boxing" and (
+        # Data-thin gate: no pick unless BOTH fighters have fight history.
+        # Boxing: Wikidata covers only top-tier boxers. MMA (owner,
+        # 2026-10-10): history comes from the UFCStats import, so a fighter
+        # with no fights usually means "not in the UFC data", and pricing a
+        # known fighter against the 1500 seed would publish a built-in bias
+        # as edge (docs/FINDINGS.md, MMA picks at 0.5).
+        if game.sport in ("boxing", "mma") and (
             home_fighter.fights_count == 0 or away_fighter.fights_count == 0
         ):
             return []
