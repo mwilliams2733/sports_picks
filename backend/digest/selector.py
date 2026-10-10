@@ -214,7 +214,32 @@ def _validate_send_bar(send_bar: dict | None) -> dict:
             "digest.send_bar.min_shrunk_edge_pp is set but no longer used "
             "(the shrunk-edge gate was removed 2026-09-30); ignoring it.")
     validated["blend_weight"] = send_bar.get("blend_weight") or {}
+    validated["sport_caps"] = _validate_sport_caps(send_bar.get("sport_caps"))
     return validated
+
+
+_CAP_KEYS = ("max_game_picks", "max_props")
+
+
+def _validate_sport_caps(sport_caps) -> dict:
+    """``{sport: {max_game_picks|max_props: int >= 0 or None}}``; None is no
+    cap. Optional (absent -> every sport takes the default caps); anything
+    malformed raises, so a typo cannot silently fall back to the default."""
+    if sport_caps is None:
+        return {}
+    if not isinstance(sport_caps, dict):
+        raise ValueError("digest.send_bar.sport_caps must be a mapping")
+    for sport, caps in sport_caps.items():
+        if not isinstance(caps, dict):
+            raise ValueError(f"digest.send_bar.sport_caps.{sport} must be a mapping")
+        for key, value in caps.items():
+            if key not in _CAP_KEYS:
+                raise ValueError(f"digest.send_bar.sport_caps.{sport}.{key} is not a cap")
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int)
+                                      or value < 0):
+                raise ValueError(f"digest.send_bar.sport_caps.{sport}.{key} must be "
+                                 "a whole number >= 0 or null (no cap)")
+    return sport_caps
 
 
 def _start_time_key(games_by_id, p) -> tuple:
@@ -263,7 +288,8 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
       measured against 0.5 for spreads/totals; see
       backend/analysis/variants/ensemble.py) descending, ties broken by
       start time then id;
-    - capped at max_game_picks.
+    - capped at max_game_picks, or the sport's own cap in ``sport_caps``
+      (owner, 2026-10-10; null there means no cap).
 
     There is no longer an edge gate (owner decision 2026-09-30, see
     docs/review-remediation.md): every priced game pick is shown, with its
@@ -291,6 +317,9 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
         if not is_sport_in_season(sport, seasons, target_date):
             continue
 
+        caps = bar["sport_caps"].get(sport, {})
+        sport_max_picks = caps.get("max_game_picks", max_game_picks)
+        sport_max_props = caps.get("max_props", max_props)
         lambda_measured = sport in blend_weight
         lam = float(blend_weight.get(sport, 0.0))
 
@@ -362,7 +391,7 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
                 best_odds=best.odds if best else None,
             )
 
-        digest_picks = [_make_pick(p) for p in priced[:max_game_picks]]
+        digest_picks = [_make_pick(p) for p in priced[:sport_max_picks]]
 
         # Props: gradeable markets only, same price window, no edge gate.
         props = (
@@ -406,10 +435,10 @@ def select_digest(session, target_date, sports, seasons, send_bar: dict | None =
         # book stopped offering keeps its old price), for the best book.
         prop_rows: dict[int, list] = {}
         for row in current_props(session.query(PlayerProp).filter(
-                PlayerProp.game_id.in_({p.game_id for p in gradeable_props[:max_props]})).all()):
+                PlayerProp.game_id.in_({p.game_id for p in gradeable_props[:sport_max_props]})).all()):
             prop_rows.setdefault(row.game_id, []).append(row)
 
-        digest_props = [_make_prop(p) for p in gradeable_props[:max_props]]
+        digest_props = [_make_prop(p) for p in gradeable_props[:sport_max_props]]
 
         record = trailing_record(session, sport, target_date)
         if _suppressed(record, min_trailing_win_pct, min_trailing_picks, sport):
