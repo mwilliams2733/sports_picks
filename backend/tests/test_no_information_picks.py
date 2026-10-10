@@ -84,12 +84,12 @@ def test_the_demote_script_moves_only_published_unstarted_one_half_picks(db_engi
         return p
 
     target = pick(1, 0.5)
-    pick(1, 0.61, pick_type="spread")             # has information
+    informed = pick(1, 0.61, pick_type="spread")  # has information -- but MMA (owner, 10-10)
     pick(2, 0.5, pick_type="spread")              # game started
     pick(3, 0.5, pick_type="spread")              # graded history stays as emailed
     pick(1, 0.5, pick_type="over_under", tracking_only=True)   # already tracked
     db_session.commit()
-    assert [p.id for p in demote.candidates(db_session, now)] == [target.id]
+    assert [p.id for p in demote.candidates(db_session, now)] == [target.id, informed.id]
 
 
 def test_an_emailed_pick_stays_published_when_a_refresh_finds_no_information(db_engine, db_session,
@@ -137,3 +137,26 @@ def test_the_demote_script_skips_emailed_picks_and_apply_unpublishes(db_engine, 
     demote.apply(db_session, found)
     published = {p.id for p in db_session.query(PickModel).filter(PickModel.published())}
     assert published == {emailed.id}
+
+
+def test_every_mma_pick_is_tracking_only_for_now(db_engine, db_session, monkeypatch):
+    # Owner, 2026-10-10: after the UFC history import the combat model still
+    # backs every underdog (docs/FINDINGS.md), so MMA picks are kept for the
+    # record but not published until it is recalibrated.
+    Base.metadata.create_all(db_engine)
+    db_session.add_all([Team(id=1, name="F One", abbreviation="F One", sport="mma"),
+                        Team(id=2, name="F Two", abbreviation="F Two", sport="mma")])
+    db_session.flush()
+    db_session.add(Game(id=1, sport="mma", season="2026", date=DAY, home_team_id=1,
+                        away_team_id=2, status="scheduled"))
+    db_session.flush()
+    db_session.add_all([
+        Odds(game_id=1, bookmaker="dk", moneyline_home=-150, moneyline_away=130,
+             spread_home=0.0, spread_away=0.0, over_under=0.0,
+             timestamp=datetime(2026, 3, 1, 18, 0)),
+        StrategyModel(id=1, name="combat_sports", config_json="{}", is_active=True),
+    ])
+    db_session.commit()
+    monkeypatch.setattr(pg, "CombatSportsStrategy", _fake_strategy(0.6))
+    pg.generate_and_store_picks(db_session, strategy_id=1, target_date=DAY)
+    assert db_session.query(PickModel).one().tracking_only is True

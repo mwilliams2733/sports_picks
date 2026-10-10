@@ -45,7 +45,7 @@ def test_import_matches_names_skips_known_bouts_and_creates_new_fighters(db_engi
     summary = import_bouts(db_session, BOUTS)
     assert summary == {"inserted": 2, "duplicates": 1, "same_fighter": 1,       # Review Focus 1
                        "teams_created": 1, "ambiguous_existing": 1,           # Review Focus 2
-                       "matched_non_final": []}
+                       "matched_non_final": [], "finalized": []}
     figs = db_session.query(Game).filter(Game.date == date(2026, 10, 3)).one()
     assert (figs.home_team_id, figs.away_team_id, figs.home_score, figs.away_score, figs.status) == (
         4, 3, 0, 1, "final")
@@ -119,3 +119,28 @@ def test_a_bout_stored_unfinished_is_reported_not_silently_skipped(db_engine, db
     summary = import_bouts(db_session, [BOUTS[0]])
     assert (summary["inserted"], summary["duplicates"], summary["matched_non_final"]) == (0, 0, [100])
     assert db_session.get(Game, 100).status == "scheduled"     # never modified
+
+
+def test_finalize_unfinished_completes_a_stuck_bout_with_no_bets(db_engine, db_session):
+    # Owner, 2026-10-10: the 15 Mar-Jul bouts stuck scheduled/canceled are
+    # finalized from the CSV -- only where no pick or paper bet is attached.
+    from backend.models import PickModel, StrategyModel
+    Base.metadata.create_all(db_engine)
+    _team(db_session, 1, "Cong Wang")
+    _team(db_session, 2, "Natalia Silva")
+    _team(db_session, 3, "Deiveson Figueiredo")
+    _team(db_session, 4, "Payton Talbott")
+    db_session.add(StrategyModel(id=1, name="x", config_json="{}"))
+    db_session.flush()
+    _pair_game(db_session, 100, 1, 2, date(2026, 10, 3), status="scheduled")   # Wang home
+    _pair_game(db_session, 101, 3, 4, date(2026, 10, 3), status="canceled")
+    db_session.flush()
+    db_session.add(PickModel(game_id=101, strategy_id=1, pick_type="moneyline",
+                             pick_value="HOME ML", confidence=3, edge_pct=5.0, odds_at_pick=100))
+    db_session.commit()
+    summary = import_bouts(db_session, BOUTS[:2], finalize_unfinished=True)
+    stuck = db_session.get(Game, 100)
+    # Silva (CSV fighter_a) won; she is AWAY on the stored row.
+    assert (stuck.status, stuck.home_score, stuck.away_score) == ("final", 0, 1)
+    assert db_session.get(Game, 101).status == "canceled"        # has a pick: left alone
+    assert (summary["finalized"], summary["matched_non_final"], summary["inserted"]) == ([100], [101], 0)

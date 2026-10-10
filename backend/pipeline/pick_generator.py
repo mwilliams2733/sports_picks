@@ -60,6 +60,14 @@ NO_INFORMATION_PROB = 0.5
 def is_no_information(model_prob: float | None) -> bool:
     return model_prob is not None and abs(model_prob - NO_INFORMATION_PROB) < 1e-9
 
+
+#: Sports whose game picks are all kept as tracking picks for now. Owner,
+#: 2026-10-10: with UFC history loaded the combat model has real records but
+#: still backs every underdog -- its Elo is compressed and its blend pulls
+#: toward 0.5 (docs/FINDINGS.md) -- so MMA picks are recorded, not published,
+#: until the model is recalibrated. Remove the sport here to publish again.
+TRACKING_ONLY_SPORTS = ("mma",)
+
 def _bankroll_state(session: Session) -> tuple[float, float]:
     """``(current, peak)`` bankroll in units, from every settled pick.
 
@@ -299,7 +307,8 @@ def generate_and_store_picks(session: Session, strategy_id: int,
             # shrink the stake of the picks that are bets; _refresh_pick copies
             # the flag, so a refreshed pick follows the same rule.
             for p in picks:
-                if is_no_information(getattr(p, "model_probability", None)):
+                if (is_no_information(getattr(p, "model_probability", None))
+                        or game.sport in TRACKING_ONLY_SPORTS):
                     p.tracking_only = True
             keepers = [p for p in picks if p.confidence >= 1
                        and not getattr(p, "tracking_only", False)]

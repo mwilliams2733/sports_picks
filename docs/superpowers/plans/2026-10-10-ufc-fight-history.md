@@ -648,6 +648,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 2. Stop the scheduler (both processes). The app server can stay up (the import writes only games/teams/Elo).
 3. `sqlite3.backup` the live db -> `sports_picks.backup-<stamp>-pre-ufc-history.db`.
 4. `git merge --no-ff feat/ufc-fight-history`.
-5. Download fresh CSVs into a new directory (Task 4 Step 1). Dry run on the live db (no `--apply`) and compare its numbers with the snapshot run; then run with `--apply`.
+5. Download fresh CSVs into a new directory (Task 4 Step 1). Dry run on the live db (no `--apply`, WITH `--finalize-unfinished` -- owner decision) and compare its numbers with the snapshot run; then run with `--apply --finalize-unfinished`. Stop uvicorn for the import too (the replay holds the SQLite write lock ~30 s).
+5b. Dry run, then apply, `python -m backend.scripts.demote_no_information_picks` (now also moves published un-emailed MMA picks on unstarted bouts to tracking -- owner decision).
 6. Restart the scheduler detached (`Start-Process powershell -ArgumentList '-NoProfile','-File','scripts\start_scheduler.ps1' -WindowStyle Hidden`) — it loads the new gate. Restart uvicorn only if a backend import path it serves changed (none here).
 7. Verify: MMA EloRating count, top-10 names, coverage line, scheduler log clean. The next MMA window's picks should carry real probabilities.

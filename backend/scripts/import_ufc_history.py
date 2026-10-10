@@ -20,8 +20,10 @@ Rules:
   skipped: one card can be stored under two date conventions, and a
   double-counted bout inflates Elo and form (the 2026-09-20 duplicate-bouts
   incident). A match on a game that is not final (stuck scheduled,
-  canceled) is not loaded either -- the plan never modifies existing games
-  -- but is listed in `matched_non_final` for the owner to resolve.
+  canceled) is listed in `matched_non_final`. With `--finalize-unfinished`
+  (owner, 2026-10-10: the 15 Mar-Jul bouts stuck scheduled/canceled), the
+  ONE matching game is set final with the CSV result instead -- only when no
+  model pick and no paper bet is attached, so no money or record moves.
 - Existing games, picks and results are never modified. Re-running inserts
   only bouts not yet loaded.
 
@@ -43,7 +45,7 @@ from backend.collectors.ufcstats_history import (HistoricalBout, name_key, read_
                                                  read_event_dates)
 from backend.config import load_config
 from backend.database import get_engine, get_session
-from backend.models import Game, Team
+from backend.models import Game, PaperPick, PickModel, Team
 from backend.scripts.dedupe_combat_games import ADJACENT_DAYS, rebuild_combat_elo
 from backend.time_utils import et_today
 
@@ -51,7 +53,8 @@ from backend.time_utils import et_today
 SAME_BOUT_DAYS = ADJACENT_DAYS
 
 
-def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma") -> dict:
+def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma",
+                 finalize_unfinished: bool = False) -> dict:
     by_key: dict[str, int] = {}
     key_of: dict[int, str] = {}
     ambiguous = 0
@@ -85,6 +88,11 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma") -> di
 
     inserted = duplicates = same_fighter = 0
     non_final: list[int] = []
+    finalized: list[int] = []
+
+    def has_bets(game_id: int) -> bool:
+        return (session.query(PickModel.id).filter(PickModel.game_id == game_id).first() is not None
+                or session.query(PaperPick.id).filter(PaperPick.game_id == game_id).first() is not None)
     for b in sorted(bouts, key=lambda b: b.date):
         a_key, b_key = name_key(b.fighter_a), name_key(b.fighter_b)
         if a_key == b_key:
@@ -97,6 +105,16 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma") -> di
             duplicates += 1
             continue
         if near:
+            if finalize_unfinished and len(near) == 1 and not has_bets(near[0][2]):
+                game = session.get(Game, near[0][2])
+                a_home = key_of.get(game.home_team_id) == a_key
+                game.home_score, game.away_score = ((b.a_score, b.b_score) if a_home
+                                                    else (b.b_score, b.a_score))
+                game.status = "final"
+                known[pair] = [(d, "final" if gid == game.id else s, gid)
+                               for d, s, gid in known[pair]]
+                finalized.append(game.id)
+                continue
             non_final.extend(gid for _, _, gid in near)
             continue
         home, away = team_id(b.fighter_a), team_id(b.fighter_b)
@@ -110,7 +128,7 @@ def import_bouts(session, bouts: list[HistoricalBout], sport: str = "mma") -> di
     session.flush()
     return {"inserted": inserted, "duplicates": duplicates, "same_fighter": same_fighter,
             "teams_created": created, "ambiguous_existing": ambiguous,
-            "matched_non_final": sorted(non_final)}
+            "matched_non_final": sorted(non_final), "finalized": sorted(finalized)}
 
 
 def coverage(session, today: date, days: int = 30, sport: str = "mma") -> dict:
@@ -140,6 +158,9 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--events", required=True)
     parser.add_argument("--db", help="database path (default: config.yaml database_path)")
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--finalize-unfinished", action="store_true",
+                        help="set a matched stuck (scheduled/canceled) game final from the CSV, "
+                             "only if it has no pick or paper bet")
     args = parser.parse_args(argv)
     db = args.db or load_config("config.yaml")["database_path"]
     session = get_session(get_engine(db))
@@ -149,7 +170,7 @@ def main(argv: list[str]) -> int:
               f"skipped {skipped}")
         today = et_today()
         print("coverage before:", coverage(session, today))
-        print("import:", import_bouts(session, bouts))
+        print("import:", import_bouts(session, bouts, finalize_unfinished=args.finalize_unfinished))
         print("elo:", rebuild_combat_elo(session, "mma"))
         print("coverage after:", coverage(session, today))
         if args.apply:

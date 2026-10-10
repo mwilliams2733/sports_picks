@@ -529,7 +529,16 @@ stated explicitly rather than left silent.
   the same date MMA, like boxing, makes no pick unless both fighters have at
   least one earlier final bout. MMA picks from 2026-10-10 are therefore priced
   on real records, but see docs/FINDINGS.md (2026-10-10): the combat Elo is
-  compressed and still favours underdogs.
+  compressed and still favours underdogs, so **from 2026-10-10 every MMA game
+  pick is `tracking_only` (owner decision; `pick_generator.TRACKING_ONLY_SPORTS`)**
+  -- recorded and graded, never on the board or in the email -- and the merge
+  one-off moved the published, un-emailed MMA picks on unstarted bouts to
+  tracking. Emailed MMA picks keep their published state.
+- **15 MMA games from 2026-03 .. 2026-07 were finalized from the UFCStats CSV
+  on 2026-10-10** (owner decision): ids 1282, 1284, 1285, 1287, 1288, 1295,
+  1299, 1300, 1484, 1639, 1652-1656 had been stuck `scheduled` (12) or
+  wrongly `canceled` (3); none had a pick or a paper bet. Their status and
+  scores now come from the CSV, and they are in the Elo replay.
 - **From 2026-10-10 the team-sport model never sees combat bouts.**
   `calibrated_model.final_team_games` (the training set of the calibrated
   model and the LightGBM, and the games behind `calibration_report` and

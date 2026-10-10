@@ -90,7 +90,11 @@ snapshot of the live db only.
   Strickland 05-10, Pereira v Gane 06-15, McGregor v Holloway 07-12), none
   with a pick or a paper bet. The importer leaves them as they are (it never
   modifies existing games) and lists their ids; their results are therefore
-  NOT in the Elo replay. Finalizing them from the CSV is an owner decision.
+  NOT in the Elo replay. Owner, 2026-10-10: finalize them from the CSV
+  (`--finalize-unfinished`, only games with no pick or paper bet) -- all 15
+  qualified; the replay then covers 8,867 bouts.
+- Owner, 2026-10-10, on the underdog finding below: keep every MMA pick
+  tracking-only until the combat model is recalibrated.
 - MMA Elo replayed over 8,852 bouts. Top of the table is recognisable: Jon
   Jones 1715.8, Islam Makhachev, Georges St-Pierre, Charles Oliveira, Khabib
   Nurmagomedov, Amanda Nunes, Aljamain Sterling, Max Holloway.
