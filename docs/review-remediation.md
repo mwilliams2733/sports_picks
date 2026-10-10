@@ -187,3 +187,21 @@ at 10. Props can be capped at 10 too."
   recent Sundays 5, 11 and 7 of 14 games had one (2026-09-20, 09-27, 10-04).
   Covering every game would need picks below that floor -- a separate
   decision, not made here.
+
+## 2026-10-10 (later) — a published pick on every NFL game
+
+**Owner decision.** "Publish picks on every NFL game."
+
+- `ensemble.EVERY_GAME_SPORTS = ("nfl",)`: when neither moneyline side clears
+  `min_edge` (3) and `max_edge` (20), the side with the larger edge over
+  break-even is published anyway, at confidence 1 ("Low") whatever its edge,
+  with its real edge -- which can be negative. A ceiling-refused edge (>= 20,
+  a likely model error) is therefore published as Low, not High.
+- Measured on a snapshot for 2026-10-11: 13 of 13 NFL games get a published
+  moneyline (7 cleared the bar as before; 6 are every-game picks, edges -0.7
+  .. +21.1). Before, recent Sundays had 5, 11 and 7 of 14.
+- Sizing is unchanged: the generator re-sizes every pick by Kelly, so a
+  negative-edge pick sizes 0 units, but a ceiling-refused one keeps a Kelly
+  size (2.64 units on the 10-11 snapshot). Sizes are suggestions; no bet is
+  placed automatically.
+- Spreads and totals stay tracking-only.

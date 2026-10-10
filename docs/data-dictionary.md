@@ -541,6 +541,14 @@ stated explicitly rather than left silent.
   from seed at the merge). Boxing is unchanged. MMA picks remain
   `tracking_only`; earlier MMA picks keep the probabilities they were stored
   with.
+- **From 2026-10-11, every NFL game has a published moneyline pick** (owner,
+  2026-10-10; `ensemble.EVERY_GAME_SPORTS`). Before, an NFL pick existed only
+  where the model saw 3 to 20 points of edge over break-even. From this date,
+  a game that clears no bar still gets the side the model prefers, at
+  `confidence` 1 with its real `edge_pct` (can be negative; includes edges >= 20
+  the ceiling refuses). **Compare NFL records across this date only on picks
+  with `edge_pct` in [3, 20)** -- the every-game picks are a new, weaker
+  population.
 - **MMA/boxing prices before 2026-10-10 are NOT reliably pre-fight.** Games
   created from the odds feed had no `start_time`, so nothing stopped a
   fight-day fetch from overwriting the price: 175 of 593 MMA `odds` rows for
