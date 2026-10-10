@@ -136,6 +136,13 @@ def test_pick_generator_routes_mma_games_to_combat_strategy():
     home = Team(id=1, name="Conor McGregor", abbreviation="MCGREGOR", sport="mma")
     away = Team(id=2, name="Khabib Nurmagomedov", abbreviation="NURMAGOMEDOV", sport="mma")
     session.add_all([home, away]); session.flush()
+    # Both fighters need a past bout (owner, 2026-10-10: MMA, like boxing,
+    # makes no pick on a fighter with no history).
+    session.add(Team(id=3, name="Past Opponent", abbreviation="PAST", sport="mma")); session.flush()
+    session.add_all([Game(id=10 + i, sport="mma", season="2026", date=_date(2026, 1, 10),
+                          home_team_id=fid, away_team_id=3, status="final",
+                          home_score=1, away_score=0) for i, fid in enumerate((1, 2))])
+    session.flush()
     upcoming = Game(id=1, sport="mma", season="2026", date=_date(2026, 4, 29),
                      home_team_id=1, away_team_id=2, status="scheduled")
     session.add(upcoming); session.flush()
@@ -228,6 +235,13 @@ def test_pick_generator_routes_mma_to_combat_even_when_strategy_is_sport_specifi
     home = Team(id=1, name="Fighter A", abbreviation="A", sport="mma")
     away = Team(id=2, name="Fighter B", abbreviation="B", sport="mma")
     session.add_all([home, away]); session.flush()
+    # Both fighters need a past bout (owner, 2026-10-10: MMA, like boxing,
+    # makes no pick on a fighter with no history).
+    session.add(Team(id=3, name="Past Opponent", abbreviation="PAST", sport="mma")); session.flush()
+    session.add_all([Game(id=10 + i, sport="mma", season="2026", date=_date(2026, 1, 10),
+                          home_team_id=fid, away_team_id=3, status="final",
+                          home_score=1, away_score=0) for i, fid in enumerate((1, 2))])
+    session.flush()
     session.add_all([
         EloRating(team_id=1, sport="mma", rating=1500),
         EloRating(team_id=2, sport="mma", rating=1800),  # B much stronger
