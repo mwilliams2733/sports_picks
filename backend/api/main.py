@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from backend.database import get_engine, get_session
 
@@ -25,6 +25,20 @@ def _allowed_origins() -> list[str]:
     if not raw:
         return _DEFAULT_DEV_ORIGINS
     return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+#: The public site's one address (owner, 2026-10-10). The browser keeps a
+#: friend's chosen player, saved PIN and bet slip per origin, so the bare
+#: domain is sent here permanently, path and query kept.
+CANONICAL_HOST = "www.metricedgepicks.com"
+BARE_HOST = "metricedgepicks.com"
+
+
+def _request_host(request) -> str:
+    """The hostname the browser asked for: X-Forwarded-Host first (a proxy
+    may set it), else Host; lower-cased, port dropped."""
+    raw = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    return raw.split(",")[0].strip().split(":")[0].lower()
 
 
 def create_app(db_path: str = "sports_picks.db") -> FastAPI:
@@ -68,6 +82,17 @@ def create_app(db_path: str = "sports_picks.db") -> FastAPI:
         allow_headers=["*"],
         allow_credentials=False,
     )
+
+    @app.middleware("http")
+    async def canonical_host(request, call_next):
+        if _request_host(request) == BARE_HOST:
+            url = f"https://{CANONICAL_HOST}{request.url.path}"
+            if request.url.query:
+                url += f"?{request.url.query}"
+            # 301 for page loads; 308 keeps a POST a POST (a 301 may turn it into a GET).
+            status = 301 if request.method in ("GET", "HEAD") else 308
+            return RedirectResponse(url, status_code=status)
+        return await call_next(request)
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error(request, exc):
