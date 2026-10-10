@@ -317,7 +317,15 @@ export interface PlacedPick {
   pick_value: string; odds: number; line: number | null; quoted_at: string;
 }
 
-export interface ModelPick { pick_type: GamePickType; pick_value: string; odds: number | null; edge_pct: number }
+/** Why the model made a pick (board `model_pick.reasoning`): its numbers and a note written from them. */
+export interface PickReasoning {
+  model_prob: number; market_prob: number | null; edge_pct: number;
+  fair_odds: number | null; units: number | null; note: string;
+}
+export interface ModelPick {
+  pick_type: GamePickType; pick_value: string; odds: number | null; edge_pct: number;
+  reasoning?: PickReasoning | null;
+}
 
 export interface BoardGame {
   id: number; sport: string; date: string; start_time: string | null;

@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import OddsTile from './OddsTile'
+import PickReasoningPanel from './PickReasoning'
 import { modelPickQuote, modelPickSelection, tileTop } from '../lib/board'
 import { sameLeg } from '../lib/slip'
 import { useSlip } from '../stores/slipStore'
@@ -23,6 +25,7 @@ export default function ModelPicksStrip({ games, offline, onPick }: {
     const q = modelPickQuote(g)
     return q && g.model_pick ? [{ g, q, mp: g.model_pick }] : []
   })
+  const [open, setOpen] = useState<number | null>(null)
   if (cards.length === 0) return null
   return (
     <section className="sb-strip" aria-label="Metric Edge model picks">
@@ -34,6 +37,11 @@ export default function ModelPicksStrip({ games, offline, onPick }: {
             <small>MODEL PICK · Model edge {mp.edge_pct.toFixed(1)}%{mp.odds !== null && ` at ${formatOdds(mp.odds)}`}</small>
             <strong>{label}</strong>
             <StripTile g={g} q={q} label={label} offline={offline} onPick={onPick} />
+            {mp.reasoning && (
+              <button type="button" className="sb-why-toggle" aria-expanded={open === g.id}
+                onClick={() => setOpen(open === g.id ? null : g.id)}>Why?</button>
+            )}
+            {mp.reasoning && open === g.id && <PickReasoningPanel r={mp.reasoning} />}
           </div>
         )
       })}

@@ -425,3 +425,10 @@
 .sb-player h1 { display: flex; align-items: center; }
 .sb-date-chips { margin: 0.25rem 0 0.5rem; overflow-x: auto; flex-wrap: nowrap; }
 .sb-date-chips button { white-space: nowrap; }
+.sb-why { margin-top: 0.5rem; padding: 0.6rem 0.7rem; border-radius: var(--radius-md); background: var(--bg-surface); border: 1px solid var(--border-default); }
+.sb-why-nums { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; margin: 0 0 0.4rem; }
+.sb-why-nums dt { color: var(--text-muted); font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.sb-why-nums dd { margin: 0; font-weight: 800; font-variant-numeric: tabular-nums; }
+.sb-why-note { margin: 0; font-size: 0.8rem; line-height: 1.4; color: var(--text-secondary); }
+.sb-why-toggle { margin-top: 0.35rem; background: none; border: 0; padding: 0; color: var(--accent); font-weight: 700; cursor: pointer; }
+.sb-why-card h2 { font-size: 0.85rem; margin: 0 0 0.25rem; }
