@@ -541,6 +541,18 @@ stated explicitly rather than left silent.
   from seed at the merge). Boxing is unchanged. MMA picks remain
   `tracking_only`; earlier MMA picks keep the probabilities they were stored
   with.
+- **From the boxing-history merge (2026-10-10), `games` holds boxing history
+  for sport `boxing`** (English Wikipedia "Professional boxing record" tables,
+  CC BY-SA; facts only, no page text): about 23,300 bouts 1973 .. 2026 as
+  `final` games, winner 1 / loser 0, draws 1/1, no-contests and unreadable
+  dates not loaded. No `espn_id`, no `odds_api_id`, no start time, no odds, no
+  picks. Boxers are matched by name, keeping Jr./Sr./II-IV
+  (`ufcstats_history.fighter_key`); two boxers sharing a name share a row.
+  Boxing games stuck `scheduled`/`canceled` with no pick and no paper bet were
+  finalized from the records (69 on the snapshot; the merge log has the
+  live count and ids). Boxing Elo was replayed from seed. **Every boxing pick
+  is `tracking_only` from this merge** (`TRACKING_ONLY_SPORTS`): the combat
+  model favours underdogs (docs/FINDINGS.md, 2026-10-10).
 - **MMA/boxing prices before 2026-10-10 are NOT reliably pre-fight.** Games
   created from the odds feed had no `start_time`, so nothing stopped a
   fight-day fetch from overwriting the price: 175 of 593 MMA `odds` rows for

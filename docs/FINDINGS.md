@@ -171,3 +171,66 @@ lacks (it is unlikely to come from Elo/form/opponent quality alone), or the
 pick rule must be anchored to the market (shrink the model toward the no-vig
 price, as the NFL/MLB shrink weight does) -- which on this evidence would leave
 almost no MMA picks.
+
+## 2026-10-10 — Boxing history from Wikipedia
+
+Source: English Wikipedia "Professional boxing record" tables, read through
+the MediaWiki API (`backend/collectors/wikipedia_boxing.py`), cached on disk
+(2,410+ responses, 2026-10-10). Wikipedia text is CC BY-SA 4.0; we store only
+the facts of each bout (date, the two fighters, the result), never page text,
+and name the source here and in `docs/data-dictionary.md`. Import run with
+`--apply --finalize-unfinished` on a `sqlite3.backup` snapshot of the live db
+only (run 4, the code as merged).
+
+- Fighters to look up (every boxer on a stored card since 2026-01-01): 336.
+  Own page found 178; missing 158. Opponent pages read: 696. Rows skipped,
+  never guessed: 214 no result (no-contests, bouts listed before they
+  happen), 141 bad date, 27 no opponent.
+- Inserted 23,297 final boxing games, 1973-06-25 .. 2026-10-09 (2,243 already
+  stored as the same pair within 2 days; 13,865 new fighter rows; 0
+  ambiguous). Near-duplicate bouts (same pair, <= 2 days): 0.
+- 69 boxing games stuck `scheduled`/`canceled` from March-October 2026, with
+  no pick and no paper bet, finalized from the records (owner rule, as for
+  UFC). 10 more matched a non-final game that HAS a pick or paper bet and are
+  left as they are (ids 1313-1317, 1535, 1538, 1540, 1611-1615).
+- Boxing Elo replayed from seed over 23,366 bouts. Top: Canelo Álvarez 1931,
+  Petch Sor Chitpattana, Naoya Inoue, Floyd Mayweather Jr., Gilberto Ramirez,
+  Oleydong Sithsamerchai, Wladimir Klitschko, Jaime Munguia, Terence
+  Crawford, Tyson Fury. (The two Thai fighters have long records against weak
+  opposition; Elo cannot tell that from quality.)
+- Coverage of the stored upcoming cards (24 bouts, 48 fighters): fighters
+  with history 0 -> 33; bouts with history on both sides 0 -> 13.
+
+**What the first three runs got wrong (fixed before the merge, each with a
+test that fails without the fix):** ISO dates and `{{small|...}}`-wrapped
+dates were unread (3,545 rows skipped); the search fallback accepted any page
+with a record table, so 106 of 281 "found" fighters had someone else's record
+(Jordan Orozco had Terence Crawford's, Jason Limon had Valentina
+Shevchenko's) -- a page must now name our fighter in its title or bold lead
+name; Floyd Mayweather Jr. and Sr. were one fighter -- boxing names keep
+Jr./Sr./II-IV (`ufcstats_history.fighter_key`); five results with typo years
+(2105..2916) were stored final and replayed last -- a result dated after
+today is a bad date; 82 record sections lost their table because the page
+closes it with `{{s-end}}`, not `|}` -- 15 recovered, the other 67 have no
+table in the section.
+
+**Why fighters are missing (five checked by hand, from the cache):** Jordan
+Orozco, Kayla Allen -- no article of their own; Nathan Heaney -- an article
+with no record table; Jermaine Franklin Jr -- the page is "Jermaine Franklin"
+and boxing keys keep the suffix; Pat Brown -- the page is "Patrick Brown
+(boxer)". The last two are the safe way to be wrong (no history rather than
+someone else's).
+
+**Finding -- the underdog bias carries over to boxing.** Regenerating the
+10-10 and 10-17 cards on the snapshot gave 5 picks, all tracking-only, **all
+5 underdogs** (+259 .. +1762): mean model probability 0.42 against the
+market's no-vig 0.18. n=5 from two cards, so it is a direction, not a size --
+but it is the MMA result again (compressed ratings make every favourite look
+overpriced). Three of the five claim more than 20 points of edge: the combat
+model has a minimum edge and no ceiling (`ensemble`'s 20-point ceiling does
+not apply). Boxing picks are tracking-only from this merge
+(`TRACKING_ONLY_SPORTS`), so nothing is published or emailed.
+
+Known limitations: names, not ids -- two boxers sharing a name share a row; a
+record table edited after 2026-10-10 is not re-read (the cache is never
+refetched).
