@@ -57,7 +57,8 @@ def tickets(session, user_id: int) -> list[dict]:
             "kind": "straight", "id": pick.id, "stake": pick.stake, "odds": pick.odds,
             "to_win": round(pick.stake * payout_for("win", pick.odds), 2),
             "result": pick.result, "payout": pick.payout, "created_at": placed.isoformat(),
-            "sgp": False, "legs": [leg], "cash_out": offer_view(session, "straight", pick, now)}))
+            "sgp": False, "legs": [leg], "cash_out": offer_view(session, "straight", pick, now),
+            "note": pick.note}))
     for parlay in session.query(Parlay).filter(Parlay.user_id == user_id).all():
         legs = sorted(parlay_legs.get(parlay.id, []), key=lambda x: (x[0], x[1].id))
         placed = as_utc(parlay.created_at)
@@ -66,6 +67,7 @@ def tickets(session, user_id: int) -> list[dict]:
             "to_win": round(parlay_win_payout(parlay.stake, [p.odds for _, p, _ in legs]), 2),
             "result": parlay.result, "payout": parlay.payout, "created_at": placed.isoformat(),
             "sgp": len({p.game_id for _, p, _ in legs}) < len(legs),
-            "legs": [leg for _, _, leg in legs], "cash_out": offer_view(session, "parlay", parlay, now)}))
+            "legs": [leg for _, _, leg in legs], "cash_out": offer_view(session, "parlay", parlay, now),
+            "note": None}))
     out.sort(key=lambda x: (x[0], x[1]), reverse=True)
     return [t for _, _, t in out]

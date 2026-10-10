@@ -836,6 +836,11 @@ owner's analysis can read them from the database directly.
     its stake in money staked. It is neither a win nor a loss, and it is
     not in break-even.
   - Before this date no row has the value.
+- `paper_picks.note` (2026-10-09): the bettor's own written reasoning for a
+  straight bet (up to 1000 characters), shown on the ticket and in the
+  feed. NULL for every bet before 2026-10-09 and for any bet placed
+  without one. Used by Claude's NFL picks; the two Claude slates before it
+  were backfilled from logs-archive. Not model output.
 
 ## See also
 
