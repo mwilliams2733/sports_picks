@@ -3,14 +3,12 @@
 Pure with respect to time and network: the caller supplies the target date
 and a session. No sending, no formatting.
 """
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from backend.config import is_sport_in_season
-from backend.data_types import PickFactor
-from backend.analysis.rationale import render_rationale
+from backend.analysis.rationale import factors_from_json, render_rationale
 from backend.analysis.odds_utils import InvalidOddsError, american_to_implied_prob
 from backend.analysis.prop_markets import MARKET_STAT_MAP
 from backend.analysis.best_price import best_game_price, best_prop_price
@@ -131,19 +129,9 @@ def _matchup(session, game: Game) -> str:
 
 
 def _rationale_for(session, pick: PickModel, game: Game) -> str:
-    if not pick.rationale_json:
+    factors = factors_from_json(pick.rationale_json)
+    if not factors:
         return ""
-    try:
-        raw = json.loads(pick.rationale_json)
-    except (ValueError, TypeError):
-        return ""
-    if not isinstance(raw, list):
-        return ""
-    factors = [
-        PickFactor(code=f.get("code", ""), side=f.get("side", "home"),
-                   strength=f.get("strength", "moderate"))
-        for f in raw if isinstance(f, dict)
-    ]
     home = session.get(Team, game.home_team_id)
     away = session.get(Team, game.away_team_id)
     return render_rationale(factors,

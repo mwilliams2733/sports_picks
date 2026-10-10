@@ -42,3 +42,52 @@ def test_render_rationale_skips_unknown_codes():
         PickFactor(code="rating_gap", side="home", strength="slight"),
     ]
     assert render_rationale(factors, "Chiefs", "Bills") == "Rating gap slightly favors Chiefs."
+
+
+import pytest
+
+from backend.analysis.odds_utils import prob_to_american
+from backend.analysis.rationale import DEFAULT_CAVEAT, factors_from_json, pick_note
+
+
+def test_prob_to_american_is_the_margin_free_price():
+    assert prob_to_american(0.58) == -138
+    assert prob_to_american(0.4) == 150
+    assert prob_to_american(0.5) == -100
+    with pytest.raises(ValueError):
+        prob_to_american(1.0)
+
+
+def test_factors_from_json_reads_codes_and_ignores_junk():
+    fs = factors_from_json('[{"code": "rating_gap", "side": "home", "strength": "slight"}, 7]')
+    assert [(f.code, f.side, f.strength) for f in fs] == [("rating_gap", "home", "slight")]
+    assert factors_from_json(None) == [] and factors_from_json("not json") == []
+    assert factors_from_json('{"a": 1}') == []
+
+
+def _note(**kw):
+    base = dict(sport="nfl", pick_type="moneyline", pick_value="HOME ML", home="Kansas City",
+                away="Buffalo", model_prob=0.58, market_prob=0.52, edge_pct=10.7, odds=-110,
+                factors=factors_from_json('[{"code": "rating_gap", "side": "home", "strength": "slight"}]'))
+    return pick_note(**{**base, **kw})
+
+
+def test_a_full_nfl_moneyline_note():
+    assert _note() == (
+        "The model gives Kansas City a 58% chance to win; the books' price, with their margin "
+        "removed, says 52%. At -110 that is a 10.7% edge (fair price -138). Rating gap slightly "
+        "favors Kansas City. The model has not shown an edge over NFL closing lines yet, so treat "
+        "this as one opinion, not a sure thing.")
+
+
+def test_spread_and_total_wording():
+    assert _note(pick_type="spread", pick_value="AWAY +3.5", factors=[]).startswith(
+        "The model gives Buffalo +3.5 a 58% chance to cover;")
+    assert _note(pick_type="over_under", pick_value="Over 47.5", factors=[]).startswith(
+        "The model gives the Over 47.5 a 58% chance to hit;")
+
+
+def test_missing_numbers_are_left_out_never_invented():   # Review Focus 4
+    note = _note(market_prob=None, odds=None, factors=[], sport="ncaaf")
+    assert note == ("The model gives Kansas City a 58% chance to win. " + DEFAULT_CAVEAT)
+    assert "None" not in note and "nan" not in note.lower()

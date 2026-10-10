@@ -130,8 +130,10 @@ def test_model_pick_is_the_highest_edge_published_model_game_pick():
     s.commit()
     s.close()
     by_id = {g["id"]: g for g in client.get("/paper/board").json()["games"]}
-    assert by_id[gid]["model_pick"] == {"pick_type": "over_under", "pick_value": "Over 47.5",
-                                        "odds": -110, "edge_pct": 4.0}
+    view = by_id[gid]["model_pick"]
+    assert {k: v for k, v in view.items() if k != "reasoning"} == {
+        "pick_type": "over_under", "pick_value": "Over 47.5", "odds": -110, "edge_pct": 4.0}
+    assert view["reasoning"] is None          # no model_prob stored: nothing to explain
     assert by_id[other]["model_pick"] is None
 
 
@@ -157,3 +159,27 @@ def test_board_is_an_open_read():
     _game(client)
     r = client.get("/paper/board")
     assert r.status_code == 200 and len(r.json()["games"]) == 1   # JSON, not the SPA's HTML
+
+
+def test_model_pick_carries_its_reasoning():
+    client = _client()
+    gid = _game(client)
+    s = get_session(client.app.state.engine)
+    s.add(Strategy(id=1, name="ensemble", config_json="{}"))
+    s.flush()
+    s.add(PickModel(game_id=gid, strategy_id=1, pick_type="moneyline", pick_value="HOME ML",
+                    confidence=3, edge_pct=10.7, odds_at_pick=-110, model_prob=0.58,
+                    market_prob_novig=0.52, suggested_unit_size=0.87,
+                    rationale_json='[{"code": "rating_gap", "side": "home", "strength": "slight"}]'))
+    s.commit()
+    s.close()
+    game = next(g for g in client.get("/paper/board").json()["games"] if g["id"] == gid)
+    r = game["model_pick"]["reasoning"]
+    home = game["home_team"]
+    assert {k: r[k] for k in ("model_prob", "market_prob", "edge_pct", "fair_odds", "units")} == {
+        "model_prob": 0.58, "market_prob": 0.52, "edge_pct": 10.7, "fair_odds": -138, "units": 0.87}
+    assert r["note"] == (
+        f"The model gives {home} a 58% chance to win; the books' price, with their margin removed, "
+        f"says 52%. At -110 that is a 10.7% edge (fair price -138). Rating gap slightly favors "
+        f"{home}. The model has not shown an edge over NFL closing lines yet, so treat this as one "
+        f"opinion, not a sure thing.")

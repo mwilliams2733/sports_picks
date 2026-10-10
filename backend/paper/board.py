@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import aliased
 
+from backend.analysis.odds_utils import prob_to_american
+from backend.analysis.rationale import factors_from_json, pick_note
 from backend.models import Game, PickModel, Team
 from backend.paper import pricing
 from backend.time_utils import ET, game_start_utc
@@ -24,7 +26,7 @@ def clamp_days(days: int) -> int:
     return max(1, min(MAX_DAYS, days))
 
 
-def _model_picks(session, game_ids: list[int]) -> dict[int, dict]:
+def _model_picks(session, game_ids: list[int]) -> dict[int, PickModel]:
     """The highest-edge published model pick on a game market, per game."""
     if not game_ids:
         return {}
@@ -33,11 +35,36 @@ def _model_picks(session, game_ids: list[int]) -> dict[int, dict]:
                     PickModel.by_model(), PickModel.pick_type.in_(GAME_PICK_TYPES))
             .order_by(PickModel.edge_pct.desc(), PickModel.id)
             .all())
-    best: dict[int, dict] = {}
+    best: dict[int, PickModel] = {}
     for p in rows:
-        best.setdefault(p.game_id, {"pick_type": p.pick_type, "pick_value": p.pick_value,
-                                    "odds": p.odds_at_pick, "edge_pct": p.edge_pct})
+        best.setdefault(p.game_id, p)
     return best
+
+
+def _model_pick_view(p: PickModel | None, sport: str, home: str, away: str) -> dict | None:
+    if p is None:
+        return None
+    return {"pick_type": p.pick_type, "pick_value": p.pick_value,
+            "odds": p.odds_at_pick, "edge_pct": p.edge_pct,
+            "reasoning": _reasoning(p, sport, home, away)}
+
+
+def _reasoning(p: PickModel, sport: str, home: str, away: str) -> dict | None:
+    """Why the model made this pick: its own numbers and the note
+    `rationale.pick_note` writes from them. None without a probability."""
+    if p.model_prob is None:
+        return None
+    return {
+        "model_prob": round(p.model_prob, 4),
+        "market_prob": None if p.market_prob_novig is None else round(p.market_prob_novig, 4),
+        "edge_pct": p.edge_pct,
+        "fair_odds": prob_to_american(p.model_prob) if 0 < p.model_prob < 1 else None,
+        "units": p.suggested_unit_size,
+        "note": pick_note(sport=sport, pick_type=p.pick_type, pick_value=p.pick_value,
+                          home=home, away=away, model_prob=p.model_prob,
+                          market_prob=p.market_prob_novig, edge_pct=p.edge_pct,
+                          odds=p.odds_at_pick, factors=factors_from_json(p.rationale_json)),
+    }
 
 
 def build_board(session, *, sport: str | None = None, days: int = 7,
@@ -70,6 +97,7 @@ def build_board(session, *, sport: str | None = None, days: int = 7,
             # a 1.35 s 7-day board (94 games, 2026-10-07). The lobby shows
             # "Props ›" without a count; the game page prices them on demand.
             "prop_count": None,
-            "model_pick": picks.get(game.id),
+            "model_pick": _model_pick_view(picks.get(game.id), game.sport,
+                                           home.abbreviation, away.abbreviation),
         })
     return board
