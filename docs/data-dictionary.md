@@ -541,6 +541,17 @@ stated explicitly rather than left silent.
   from seed at the merge). Boxing is unchanged. MMA picks remain
   `tracking_only`; earlier MMA picks keep the probabilities they were stored
   with.
+- **MMA/boxing prices before 2026-10-10 are NOT reliably pre-fight.** Games
+  created from the odds feed had no `start_time`, so nothing stopped a
+  fight-day fetch from overwriting the price: 175 of 593 MMA `odds` rows for
+  finished bouts were written on or after the fight date and 21 have
+  |moneyline| >= 1000 (in-play or settled). Their `odds_at_close` /
+  closing-line values inherit this. For pre-fight prices use `line_snapshots`
+  captured before 00:00 UTC on the bout date. From 2026-10-10 a scheduled
+  combat game takes the feed's `commence_time` as `start_time` (refreshed
+  every fetch), so prices freeze, the closing line is pre-start and paper
+  betting closes at the start. The time is usually the card's start, so a
+  main-card bout freezes a little early.
 - **15 MMA games from 2026-03 .. 2026-07 were finalized from the UFCStats CSV
   on 2026-10-10** (owner decision): ids 1282, 1284, 1285, 1287, 1288, 1295,
   1299, 1300, 1484, 1639, 1652-1656 had been stuck `scheduled` (12) or
